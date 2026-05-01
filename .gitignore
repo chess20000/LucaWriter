@@ -1,0 +1,7 @@
+usrdata/
+local_llm/
+release/
+*.log
+.rebuild
+.rebuild_result
+__pycache__/

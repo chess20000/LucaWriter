@@ -1,0 +1,2195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>LucaWriter</title>
+<style>
+:root{
+ --bg:#111;--surface:#1a1a1a;--surface2:#222;--surface3:#2a2a2a;--surface4:#333;
+ --t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;
+  --accent:#c9a96e;--accent2:#ddb87a;--accent-dim:rgba(201,169,110,.12);
+  --danger:#c45c5c;--warn:#c9a96e;
+ --border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);
+ --r1:4px;--r2:6px;--r3:8px;--r4:12px;
+ --font-mono:"SF Mono","Fira Code",Menlo,monospace;
+ --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;
+ --font-serif:"Noto Serif SC","Source Han Serif SC","Songti SC",Georgia,serif;
+ --scrollbar:rgba(255,255,255,.08);--scrollbar-hover:rgba(201,169,110,.15)
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+button,input,textarea,select{font-family:inherit}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-font-smoothing:antialiased}
+::selection{background:var(--accent);color:var(--bg)}
+::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:var(--r1)}::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-hover)}
+
+.app{display:flex;flex-direction:column;height:100vh;height:100dvh}
+
+.topbar{height:44px;display:flex;align-items:center;padding:0 14px;background:var(--surface);border-bottom:1px solid var(--border2);flex-shrink:0;gap:6px;z-index:10}
+.topbar-logo{width:24px;height:24px;background:var(--accent);border-radius:var(--r1);display:flex;align-items:center;justify-content:center;color:var(--bg);font-size:12px;font-weight:800;flex-shrink:0;margin-right:6px}
+.topbar-breadcrumb{display:flex;align-items:center;gap:4px;font-size:13px;overflow:hidden;flex:1;min-width:0}
+.topbar-breadcrumb .bc-book{color:var(--t2);cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;flex-shrink:0}
+.topbar-breadcrumb .bc-book:hover{color:var(--accent);background:var(--accent-dim)}
+.topbar-breadcrumb .bc-sep{color:var(--t3);flex-shrink:0;font-size:10px}
+.topbar-breadcrumb .bc-chapter{color:var(--accent);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex-shrink:1;min-width:0}
+.topbar-btn{background:none;border:none;color:var(--t2);font-size:12px;padding:5px 10px;border-radius:var(--r1);cursor:pointer;transition:all .1s;white-space:nowrap}
+.topbar-btn:hover{color:var(--t1);background:var(--surface3)}
+.topbar-btn:active{background:var(--surface4)}
+.topbar-btn.accent{color:var(--accent)}
+.topbar-btn.accent:hover{background:var(--accent-dim)}
+.topbar-sep{width:1px;height:16px;background:var(--border2);margin:0 2px;flex-shrink:0}
+
+.main{display:flex;flex:1;flex-direction:column;overflow:hidden}
+.main-row{display:flex;flex:1;overflow:hidden}
+
+.left-sidebar{width:230px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.sidebar-header{padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-shrink:0}
+.back-btn{background:var(--accent-dim);border:1px solid rgba(201,169,110,.2);color:var(--accent);font-size:11px;padding:4px 10px;border-radius:var(--r1);cursor:pointer;transition:all .1s;flex-shrink:0;font-weight:600;white-space:nowrap}
+.back-btn:hover{background:var(--accent);color:var(--bg)}
+.sidebar-label{font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.5px;flex:1}
+.trash-toggle{background:none;border:none;color:var(--t3);font-size:10px;padding:2px 6px;border-radius:var(--r1);cursor:pointer;transition:all .1s;flex-shrink:0}
+.trash-toggle:hover{color:var(--danger)}
+.trash-toggle.open{color:var(--danger)}
+
+.sidebar-search{padding:8px 10px;flex-shrink:0}
+.sidebar-search input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r1);padding:6px 10px;font-size:12px;color:var(--t1);outline:none;transition:border-color .1s}
+.sidebar-search input::placeholder{color:var(--t3)}
+.sidebar-search input:focus{border-color:var(--accent)}
+
+.chapter-list{flex:1;overflow-y:auto;padding:6px}
+.ch-item{padding:8px 12px;border-radius:var(--r2);font-size:13px;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:8px;margin:2px 0;transition:all .1s;position:relative;border:1px solid transparent}
+.ch-item:hover{color:var(--t1);background:var(--surface2)}
+.ch-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border-color:rgba(201,169,110,.2);box-shadow:inset 3px 0 0 var(--accent)}
+.ch-item .ch-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.ch-item .ch-del{display:none;background:none;border:none;color:var(--t3);cursor:pointer;font-size:10px;padding:2px 4px;border-radius:var(--r1)}
+.ch-item:hover .ch-del{display:inline}.ch-item .ch-del:hover{color:var(--danger)}
+.ch-item .ch-wc{font-size:10px;color:var(--t3);flex-shrink:0;font-family:var(--font-mono)}
+.ch-item .ch-dot{width:6px;height:6px;border-radius:var(--r1);background:var(--accent);flex-shrink:0;display:none}
+.ch-item.active .ch-dot{display:block}
+.ch-item.active .ch-wc{display:none}
+
+.ch-trash-wrap{max-height:0;overflow:hidden;transition:max-height .2s ease}
+.ch-trash-wrap.open{max-height:300px}
+.trash-header{padding:6px 10px;font-size:9px;font-weight:700;color:var(--danger);letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid var(--border);margin-bottom:2px}
+.trash-item{padding:5px 10px;border-radius:var(--r1);font-size:11px;color:var(--t2);display:flex;align-items:center;justify-content:space-between;margin:1px 0}
+.trash-item .ti-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-style:italic}
+.trash-item .ti-restore{background:none;border:none;color:var(--accent);cursor:pointer;font-size:10px;font-weight:600;padding:1px 6px;border-radius:var(--r1)}
+.trash-item .ti-restore:hover{background:var(--accent-dim)}
+.trash-empty{padding:10px;font-size:11px;color:var(--t3);text-align:center;font-style:italic}
+
+.sidebar-footer{padding:8px 10px;border-top:1px solid var(--border);flex-shrink:0}
+.sidebar-footer button{width:100%;padding:8px;background:var(--surface2);color:var(--t2);border:1px solid var(--border);border-radius:var(--r1);font-size:12px;font-weight:600;cursor:pointer;transition:all .1s}
+.sidebar-footer button:hover{color:var(--accent);border-color:var(--accent)}
+
+.bookshelf-view{display:none;flex:1;flex-direction:column;overflow:hidden;padding:24px 32px}
+.bookshelf-view.active{display:flex}
+.bookshelf-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-shrink:0}
+.bookshelf-header h2{font-size:18px;font-weight:700;color:var(--t1);letter-spacing:-.3px}
+.bookshelf-new-btn{background:var(--accent);color:var(--bg);border:none;padding:8px 16px;border-radius:var(--r2);font-size:13px;font-weight:600;cursor:pointer;transition:opacity .1s}
+.bookshelf-new-btn:hover{opacity:.9}
+.bookshelf-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;overflow-y:auto;padding:4px}
+.book-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);padding:16px;cursor:pointer;transition:all .15s;position:relative;display:flex;flex-direction:column;gap:10px;min-height:200px}
+.book-card:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.book-cover{width:100%;aspect-ratio:3/4;border-radius:var(--r2);background:linear-gradient(135deg,var(--surface3) 0%,var(--surface4) 100%);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.book-cover::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 60%,rgba(0,0,0,.4) 100%)}
+.book-cover-letter{font-size:48px;font-weight:800;color:var(--accent);opacity:.3;line-height:1}
+.book-card-title{font-size:14px;font-weight:600;color:var(--t1);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.book-card-meta{font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px}
+.book-card-del{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.5);border:none;color:var(--t3);width:24px;height:24px;border-radius:var(--r1);font-size:10px;cursor:pointer;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.book-card:hover .book-card-del{display:flex}
+.book-card-del:hover{color:var(--danger);background:rgba(196,92,92,.2)}
+.book-card-menu{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.5);border:none;color:var(--t3);width:24px;height:24px;border-radius:var(--r1);font-size:12px;cursor:pointer;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px);letter-spacing:1px;line-height:1}
+.book-card:hover .book-card-menu{display:flex}
+.book-card-menu:hover{color:var(--t1);background:rgba(201,169,110,.15)}
+.book-menu-dropdown{position:absolute;top:34px;right:8px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r2);padding:4px 0;min-width:120px;z-index:100;display:none;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.book-menu-dropdown.show{display:block}
+.book-menu-dropdown button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--t2);font-size:12px;padding:8px 14px;cursor:pointer;transition:all .1s}
+.book-menu-dropdown button:hover{color:var(--t1);background:var(--surface3)}
+.book-menu-dropdown button.danger-item:hover{color:var(--danger)}
+.book-import-card{background:transparent;border:2px dashed var(--border2);border-radius:var(--r3);padding:16px;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:200px;color:var(--t3);font-size:13px}
+.book-import-card:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.2)}
+.book-import-card .import-icon{font-size:32px;font-weight:300;line-height:1}
+.book-empty{text-align:center;padding:60px 20px;color:var(--t3)}
+.book-empty h3{font-size:16px;margin-bottom:8px;color:var(--t2)}
+.book-empty p{font-size:13px;margin-bottom:20px}
+.book-list-panel{padding:6px}
+.book-list-item{padding:10px 12px;border-radius:var(--r2);font-size:13px;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:8px;margin:2px 0;transition:all .1s;border:1px solid transparent}
+.book-list-item:hover{color:var(--t1);background:var(--surface2)}
+.book-list-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border-color:rgba(201,169,110,.2)}
+.book-list-item .bl-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.book-list-item .bl-del{display:none;background:none;border:none;color:var(--t3);cursor:pointer;font-size:10px;padding:2px 4px;border-radius:var(--r1)}
+.book-list-item:hover .bl-del{display:inline}.book-list-item .bl-del:hover{color:var(--danger)}
+.book-list-item .bl-count{font-size:10px;color:var(--t3);flex-shrink:0;font-family:var(--font-mono)}
+.book-list-new{padding:10px 12px;border-radius:var(--r2);font-size:13px;color:var(--t3);cursor:pointer;display:flex;align-items:center;gap:8px;margin:2px 0;transition:all .1s;border:1px dashed var(--border2)}
+.book-list-new:hover{color:var(--accent);border-color:var(--accent)}
+
+.editor-area{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.editor-top{padding:8px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0;background:var(--surface)}
+.editor-chapter-badge{font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:2px 8px;border-radius:var(--r1);letter-spacing:.5px;flex-shrink:0;white-space:nowrap;border:1px solid rgba(201,169,110,.15)}
+.editor-top input{flex:1;background:transparent;border:none;font-size:17px;font-weight:600;color:var(--t1);outline:none;padding:0;letter-spacing:-.2px}
+.editor-top input::placeholder{color:var(--t3)}
+.editor-wc{font-size:11px;color:var(--t3);flex-shrink:0;font-family:var(--font-mono)}
+.save-indicator{font-size:11px;color:var(--t3);flex-shrink:0;font-family:var(--font-mono);opacity:0;transition:opacity .2s}
+.save-indicator.show{opacity:1}.save-indicator.err{color:var(--danger)}
+.editor-body{flex:1;overflow:hidden;position:relative;background:var(--bg)}
+.editor-body textarea{width:100%;height:100%;resize:none;background:transparent;border:none;font-family:var(--font-serif);line-height:2.1;font-size:17px;color:var(--t1);outline:none;padding:24px 40px;letter-spacing:.3px;caret-color:var(--accent);position:relative;z-index:1}
+.editor-body textarea::placeholder{color:var(--t3)}
+.editor-body textarea::selection{background:var(--accent);color:var(--bg)}
+
+.right-sidebar{width:280px;flex-shrink:0;background:var(--surface);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.right-sidebar-header{padding:10px 14px;font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.5px;border-bottom:1px solid var(--border);flex-shrink:0}
+.right-content{flex:1;overflow-y:auto}
+
+.ai-suggest-box{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)}
+.ai-tag{display:inline-flex;font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-dim);padding:2px 8px;border-radius:var(--r1);letter-spacing:.5px;margin-bottom:8px;text-transform:uppercase}
+.ai-suggest-text{font-size:12px;line-height:1.6;color:var(--t2);font-style:italic;white-space:pre-wrap;border-left:2px solid var(--accent);padding-left:10px}
+.ai-suggest-list{display:flex;flex-direction:column;gap:4px}
+.ai-suggest-item{font-size:12px;line-height:1.5;color:var(--t2);font-style:italic;padding:6px 10px;background:var(--surface);border-left:2px solid var(--accent)}
+.ai-btn{font-size:9px;color:var(--accent);background:none;border:1px solid rgba(201,169,110,.2);padding:1px 6px;border-radius:var(--r1);cursor:pointer;font-weight:600;transition:all .1s}
+.ai-btn:hover{background:var(--accent);color:var(--bg)}
+.ai-dismiss{font-size:9px;color:var(--t3);background:none;border:1px solid var(--border);padding:1px 6px;border-radius:var(--r1);cursor:pointer;margin-left:3px}
+.ai-dismiss:hover{color:var(--danger);border-color:var(--danger)}
+
+.editor-highlight-layer{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.editor-highlight-content{padding:24px 40px;font-family:var(--font-serif);line-height:2.1;font-size:17px;letter-spacing:.3px;white-space:pre-wrap;word-wrap:break-word;color:transparent}
+.editor-highlight-content mark{background:rgba(201,169,110,.25);color:transparent;border-radius:var(--r1)}
+.editor-highlight-content mark.green{background:rgba(95,184,120,.25)}
+.editor-highlight-content mark.pink{background:rgba(212,107,139,.25)}
+.editor-highlight-content mark.blue{background:rgba(90,159,212,.25)}
+.ai-readthrough-card{margin-top:6px;padding:8px 10px;background:var(--accent-dim);border:1px solid rgba(201,169,110,.2);border-radius:var(--r1);font-size:11px;line-height:1.5}
+.rt-warning{color:var(--danger);margin:4px 0;font-weight:600}
+.rt-btn{background:var(--accent);color:var(--bg);border:none;padding:4px 10px;border-radius:var(--r1);font-size:11px;font-weight:600;cursor:pointer;margin-top:4px}
+.rt-btn:hover{background:var(--accent2)}
+
+.bottom-panel{background:var(--surface);border-top:1px solid var(--border2);flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;transition:height .2s cubic-bezier(.4,0,.2,1);min-height:0;height:0;box-shadow:0 -4px 24px rgba(0,0,0,.2)}
+.bottom-panel.collapsed{overflow:hidden}
+.bottom-handle{display:flex;align-items:center;padding:0 10px;height:30px;flex-shrink:0;gap:4px;user-select:none;cursor:pointer;transition:background .15s}
+.handle-grip{width:24px;height:3px;background:var(--surface4);border-radius:var(--r1);flex-shrink:0;cursor:ns-resize;transition:background .15s,transform .15s}
+.handle-grip:hover{background:var(--t2);transform:scaleX(1.2)}
+.handle-hint{font-size:11px;color:var(--t3);flex-shrink:0;white-space:nowrap;opacity:.6;transition:opacity .2s;margin-left:4px;pointer-events:none}
+.handle-grip:hover ~ .handle-hint{opacity:1}
+.bottom-panel.collapsed .handle-hint::after{content:'点击展开'}
+.bottom-panel:not(.collapsed) .handle-hint::after{content:'点击收起'}
+.bottom-tabs{display:flex;gap:0;flex:1;overflow-x:auto}
+.bottom-tab{background:none;border:none;color:var(--t3);font-size:12px;font-weight:600;padding:4px 12px;border-radius:var(--r1);cursor:pointer;transition:all .1s;white-space:nowrap}
+.bottom-tab:hover{color:var(--t2)}
+.bottom-tab.active{color:var(--t1)}
+.bottom-toggle{background:none;border:none;color:var(--t3);font-size:10px;cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;flex-shrink:0}
+.bottom-toggle:hover{color:var(--t1)}
+.bottom-body{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.bottom-pane{display:none;flex:1;overflow:hidden;flex-direction:column}
+.bottom-pane.active{display:flex}
+
+/* === Task Queue === */
+.task-queue-wrap{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;height:38px;z-index:5;padding:0 6px}
+.task-queue{display:flex;align-items:center;gap:4px;max-width:520px;overflow:hidden;height:38px;padding:0 4px;flex-direction:row-reverse}
+.tq-node{position:relative;width:20px;height:20px;flex-shrink:0;animation:tqIn .25s ease}
+.tq-node.no-anim{animation:none}
+@keyframes tqIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
+.tq-node.tq-out{animation:tqOut .3s ease forwards}
+@keyframes tqOut{to{opacity:0;transform:translateX(10px);width:0;margin:0}}
+.tq-badge{position:relative;width:20px;height:20px;border-radius:var(--r1);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;background:var(--surface2);color:var(--t3);z-index:1;transition:all .2s;flex-shrink:0;letter-spacing:0}
+.tq-badge.running{background:var(--accent);color:var(--bg)}
+.tq-arrow{color:var(--t3);font-size:9px;padding:0 2px;flex-shrink:0}
+.tq-sep{width:4px;flex-shrink:0}
+.tq-empty{font-size:10px;color:var(--t3);white-space:nowrap;padding:0 6px}
+.task-expand{background:none;border:none;color:var(--t3);font-size:9px;cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;flex-shrink:0}
+.task-expand:hover{color:var(--t1);background:var(--surface3)}
+.task-expand.open{transform:rotate(180deg)}
+.task-stop-all{background:none;border:none;color:var(--danger);font-size:10px;cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;flex-shrink:0;font-weight:600}
+.task-stop-all:hover{background:rgba(196,92,92,.15)}
+.task-detail-panel{position:absolute;top:44px;left:50%;transform:translateX(-50%);width:320px;max-height:360px;background:var(--surface);border:1px solid var(--border2);border-radius:var(--r3);box-shadow:0 12px 40px rgba(0,0,0,.5);display:none;flex-direction:column;overflow:hidden;z-index:200}
+.task-detail-panel.open{display:flex}
+.task-detail-head{padding:10px 12px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center}
+.task-detail-list{flex:1;overflow-y:auto;padding:6px}
+.td-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--r1);margin-bottom:2px;transition:background .1s}
+.td-item:hover{background:var(--surface2)}
+.td-icon{width:18px;height:18px;border-radius:var(--r1);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;flex-shrink:0}
+.td-info{flex:1;min-width:0}
+.td-name{font-size:11px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.td-meta{font-size:9px;color:var(--t3);margin-top:1px}
+.td-status{width:6px;height:6px;border-radius:var(--r1);flex-shrink:0}
+.td-status.running{background:var(--accent);animation:tdPulse 1.5s infinite}
+@keyframes tdPulse{0%,100%{opacity:1}50%{opacity:.3}}
+.td-status.done{background:#5fb878}
+.td-status.error{background:var(--danger)}
+.td-bar{height:2px;background:var(--surface3);border-radius:1px;margin-top:4px;overflow:hidden}
+.td-fill{height:100%;background:var(--accent);border-radius:1px;transition:width .3s}
+
+.ai-pane{flex-direction:column;height:100%}
+.ai-messages{flex:1;overflow-y:auto;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
+.ai-msg{padding:7px 10px;border-radius:var(--r2);max-width:85%;font-size:12px;line-height:1.6}
+.ai-msg-user{background:var(--accent-dim);color:var(--accent);margin-left:auto;border:1px solid rgba(201,169,110,.15)}
+.ai-msg-ai{background:var(--surface2);color:var(--t2);border:1px solid var(--border)}
+.ai-msg-ai::before{content:'AI ';font-size:9px;font-weight:700;color:var(--t3);letter-spacing:.5px;text-transform:uppercase}
+.ai-msg-ai.warn{background:rgba(196,92,92,.08);border-color:rgba(196,92,92,.15);color:var(--danger)}
+.ai-msg-ai.warn::before{content:'!! '}
+.ai-msg-body{white-space:pre-wrap}
+.ai-reasoning{margin-bottom:4px}
+.ai-reasoning-toggle{cursor:pointer;font-size:10px;color:var(--accent);font-weight:600;display:inline-flex;align-items:center;gap:3px}
+.ai-reasoning-toggle:hover{color:var(--accent2)}
+.ai-reasoning-body{display:none;font-size:11px;color:var(--t3);white-space:pre-wrap;padding:6px 8px;background:var(--surface3);border-radius:var(--r1);margin-top:4px;line-height:1.6;border-left:2px solid var(--accent);overflow:hidden}
+.ai-reasoning-body.open{display:block;max-height:none;overflow:visible}
+.ai-reasoning-body.streaming{display:block;max-height:48px;overflow:hidden}
+.generate-pane{flex-direction:column;height:100%;align-items:center;justify-content:center}
+.generate-body{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px 20px}
+.generate-btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.generate-btn{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(201,169,110,.2);padding:10px 24px;border-radius:var(--r2);font-size:13px;font-weight:600;cursor:pointer;transition:all .1s}
+.generate-btn:hover{background:var(--accent);color:var(--bg)}
+.ai-input-row{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--border);flex-shrink:0}
+.ai-input{flex:1;min-width:0;background:var(--surface2);color:var(--t1);border:1px solid var(--border);padding:7px 10px;font-size:12px;border-radius:var(--r1);outline:none;transition:border-color .1s}
+.ai-input:focus{border-color:var(--accent)}
+.ai-input::placeholder{color:var(--t3)}
+.ai-send{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(201,169,110,.2);padding:7px 14px;border-radius:var(--r1);font-size:12px;font-weight:600;cursor:pointer}
+.ai-send:hover{background:var(--accent);color:var(--bg)}
+
+.timeline-pane{flex-direction:column;height:100%}
+.timeline-toolbar{display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);flex-shrink:0}
+.timeline-toolbar button{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(201,169,110,.2);padding:3px 8px;border-radius:var(--r1);font-size:10px;font-weight:600;cursor:pointer}
+.timeline-toolbar button:hover{background:var(--accent);color:var(--bg)}
+.timeline-toolbar button:disabled{opacity:.4;cursor:not-allowed}
+.timeline-scroll{flex:1;overflow-x:auto;overflow-y:auto;padding:10px}
+.timeline-track{display:flex;align-items:flex-start;gap:0;min-width:max-content;padding:4px 0}
+.tl-node{display:flex;flex-direction:column;align-items:center;min-width:100px;cursor:pointer;position:relative;padding:0 3px}
+.tl-dot{width:10px;height:10px;border-radius:var(--r1);background:var(--accent);z-index:1;flex-shrink:0;transition:transform .1s;transform:rotate(45deg)}
+.tl-node:hover .tl-dot{transform:rotate(45deg) scale(1.3)}
+.tl-line{position:absolute;top:4px;left:50%;width:100%;height:1px;background:var(--surface4);z-index:0}
+.tl-node:last-child .tl-line{display:none}
+.tl-label{font-size:10px;font-weight:600;margin-top:8px;text-align:center;max-width:90px;color:var(--t1);line-height:1.2}
+.tl-hint{font-size:9px;color:var(--t3);margin-top:2px;text-align:center;max-width:90px}
+.tl-children{margin-top:4px;display:flex;flex-direction:column;gap:2px;align-items:center}
+.tl-child{font-size:9px;color:var(--t2);background:var(--surface2);padding:1px 6px;border-radius:var(--r1);cursor:pointer;border:1px solid var(--border)}
+.tl-child:hover{color:var(--accent);border-color:var(--accent)}
+.tl-empty{text-align:center;padding:24px;color:var(--t3);font-size:11px}
+.prediction-pane{flex-direction:column;height:100%;position:relative}
+.prediction-idle{flex:1;overflow-y:auto}
+.prediction-loading{position:absolute;inset:0;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:5}
+.prediction-spinner{width:36px;height:36px;border:3px solid var(--surface3);border-top-color:var(--accent);border-radius:var(--r1);animation:sp-rotate .8s linear infinite}
+.prediction-status{font-size:14px;font-weight:600;color:var(--t1)}
+.prediction-hint{font-size:11px;color:var(--t3);max-width:300px;text-align:center;line-height:1.5}
+.prediction-btn{background:var(--accent);color:var(--bg);border:none;padding:10px 24px;border-radius:var(--r2);font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s}
+.prediction-btn:hover{opacity:.9}
+.prediction-btn:disabled{opacity:.4;cursor:not-allowed}
+.prediction-result{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column}
+.prediction-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border);flex-shrink:0}
+.prediction-btn-small{background:var(--surface2);color:var(--t2);border:1px solid var(--border);padding:3px 10px;border-radius:var(--r1);font-size:10px;font-weight:600;cursor:pointer}
+.prediction-btn-small:hover{color:var(--accent);border-color:var(--accent)}
+.prediction-text{font-size:13px;line-height:1.8;color:var(--t2);white-space:pre-wrap}
+
+.panel-layout{display:flex;flex:1;overflow:hidden;min-height:0}
+.panel-left{width:30%;min-width:260px;max-width:380px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);background:var(--surface)}
+.panel-left-head{padding:0 12px;height:28px;display:flex;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0;font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;background:var(--surface)}
+.panel-left-body{flex:1;overflow-y:auto;padding:10px 14px;font-size:11px;line-height:1.7;font-family:var(--font-mono);color:var(--t2);white-space:pre-wrap;word-break:break-word;background:var(--bg)}
+.panel-right{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;background:var(--surface)}
+.panel-right-head{padding:0 12px;height:28px;display:flex;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0;font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;background:var(--surface)}
+.panel-right-body{flex:1;overflow-y:auto;background:var(--bg)}
+.rt-source{width:100%;height:100%;background:var(--bg);border:none;padding:10px 12px;font-size:11px;line-height:1.8;font-family:var(--font-mono);color:var(--t1);resize:none;outline:none}
+.readthrough-pane{flex-direction:column;height:100%;overflow:hidden}
+.timeline-pane,.prediction-pane,.outline-pane{flex-direction:column;height:100%;overflow:hidden}
+
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);z-index:100;justify-content:center;align-items:center}
+.modal-bg.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);padding:24px 20px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.modal h2{font-size:16px;font-weight:700;margin-bottom:16px;letter-spacing:-.3px}
+.mg{margin-bottom:12px}
+.mg label{display:block;font-size:10px;font-weight:700;color:var(--t2);margin-bottom:4px;letter-spacing:.5px;text-transform:uppercase}
+.mg input,.mg select,.mg textarea{width:100%;background:var(--surface2);color:var(--t1);border:1px solid var(--border);padding:8px 10px;font-size:13px;border-radius:var(--r1);outline:none;transition:border-color .1s}
+.mg input:focus,.mg select:focus,.mg textarea:focus{border-color:var(--accent)}
+.mg input::placeholder,.mg textarea::placeholder{color:var(--t3)}
+.ma{display:flex;flex-direction:column;gap:6px;margin-top:16px}
+.tab-row{display:flex;border-bottom:1px solid var(--border);margin-bottom:14px}
+.tab-b{padding:6px 10px;background:none;border:none;border-bottom:2px solid transparent;color:var(--t3);font-size:11px;font-weight:600;cursor:pointer;letter-spacing:.2px}
+.tab-b.active{color:var(--accent);border-bottom-color:var(--accent)}
+.imp-drop{border:1px dashed var(--border2);border-radius:var(--r2);padding:20px;text-align:center;color:var(--t3);cursor:pointer;margin-bottom:10px;transition:border-color .1s}
+.imp-drop:hover{border-color:var(--accent);color:var(--accent)}
+.imp-drop input{display:none}
+.cover-preview{width:100%;aspect-ratio:3/4;border-radius:var(--r2);background:var(--surface2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-top:6px;cursor:pointer;position:relative;border:1px dashed var(--border2);transition:border-color .1s}
+.cover-preview:hover{border-color:var(--accent)}
+.cover-preview img{width:100%;height:100%;object-fit:cover}
+.cover-preview .cover-placeholder{color:var(--t3);font-size:12px;text-align:center;padding:10px}
+.cover-preview input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.epub-field-hint{font-size:11px;color:var(--t3);margin-top:4px;line-height:1.4}
+.imp-progress-wrap{padding:8px 0}
+.imp-progress-bar{width:100%;height:4px;background:var(--surface3);border-radius:var(--r1);overflow:hidden;margin-bottom:8px}
+.imp-progress-fill{height:100%;width:0%;background:var(--accent);border-radius:var(--r1);transition:width .1s linear}
+.imp-progress-text{font-size:11px;color:var(--t3);text-align:center}
+
+.sp{display:inline-block;width:10px;height:10px;border:2px solid var(--surface4);border-top-color:var(--accent);border-radius:var(--r1);animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+.loading-overlay{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.5);align-items:center;justify-content:center}
+.loading-overlay.show{display:flex}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(60px);background:var(--surface2);color:var(--t1);padding:8px 18px;border-radius:var(--r2);font-size:12px;border:1px solid var(--border2);z-index:300;transition:transform .2s ease;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.success{color:var(--accent);border-color:rgba(201,169,110,.3)}
+.toast.error{color:var(--danger);border-color:rgba(196,92,92,.3)}
+.toast.warn{color:var(--warn);border-color:rgba(201,169,110,.3)}
+
+.confirm-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);z-index:200;display:none;justify-content:center;align-items:center;pointer-events:none}
+.confirm-bg.open{display:flex;pointer-events:auto}
+.confirm-box{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);padding:24px 20px;width:90%;max-width:340px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.confirm-box h3{font-size:15px;font-weight:700;margin-bottom:6px}
+.confirm-box p{font-size:12px;color:var(--t2);margin-bottom:18px;line-height:1.5}
+.confirm-btns{display:flex;gap:8px}
+.confirm-btns button{flex:1;padding:8px;border-radius:var(--r1);font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .1s;touch-action:manipulation}
+.confirm-cancel{background:var(--surface2);color:var(--t1);border:1px solid var(--border)}
+.confirm-cancel:hover{background:var(--surface3)}
+.confirm-ok{background:var(--accent);color:var(--bg)}
+.confirm-ok:hover{background:var(--accent2)}
+.confirm-ok.danger{background:var(--danger);color:#fff}
+
+.prompt-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);z-index:200;display:none;justify-content:center;align-items:center;pointer-events:none}
+.prompt-bg.open{display:flex;pointer-events:auto}
+.prompt-box{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);padding:24px 20px;width:90%;max-width:340px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.prompt-box h3{font-size:15px;font-weight:700;margin-bottom:12px}
+.prompt-box input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r1);padding:8px 10px;font-size:13px;color:var(--t1);outline:none;margin-bottom:14px;transition:border-color .1s}
+.prompt-box input:focus{border-color:var(--accent)}
+.prompt-btns{display:flex;gap:8px}
+.prompt-btns button{flex:1;padding:8px;border-radius:var(--r1);font-size:12px;font-weight:600;cursor:pointer;border:none;transition:all .1s;touch-action:manipulation}
+.prompt-cancel{background:var(--surface2);color:var(--t1);border:1px solid var(--border)}
+.prompt-cancel:hover{background:var(--surface3)}
+.prompt-ok{background:var(--accent);color:var(--bg)}
+.prompt-ok:hover{background:var(--accent2)}
+
+@media(max-width:900px){.left-sidebar{width:180px}.right-sidebar{width:230px}}
+@media(max-width:768px){.main-row{display:none}.bottom-panel{display:none}}
+
+.pw-mask{-webkit-text-security:disc;text-security:disc;font-family:var(--font-mono)}
+
+.provider-slider{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding:2px}
+.provider-block{flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r2);padding:8px 6px;text-align:center;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:4px}
+.provider-block:hover{border-color:var(--accent2);background:var(--surface3)}
+.provider-block.active{background:var(--accent-dim);border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.provider-block .pb-dot{width:8px;height:8px;border-radius:var(--r1);background:var(--surface4);transition:all .15s}
+.provider-block.active .pb-dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.provider-block .pb-name{font-size:11px;font-weight:600;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.provider-block.active .pb-name{color:var(--accent)}
+.local-llm-box{text-align:center;margin-bottom:16px;padding:14px;border:1px dashed var(--border);border-radius:var(--r2);background:var(--surface2)}
+.local-llm-title{font-size:14px;font-weight:700;margin-bottom:8px}
+.local-llm-row{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--t2)}
+.local-llm-dot{display:inline-block;width:10px;height:10px;border-radius:var(--r1);background:#888;transition:background .3s}
+.local-llm-dot.on{background:#4caf50;box-shadow:0 0 6px #4caf50}
+.local-llm-dot.off{background:#f44336;box-shadow:0 0 6px #f44336}
+.local-llm-model{font-size:11px;color:var(--t3);margin-bottom:10px}
+.local-llm-progress{width:100%;height:8px;background:var(--surface3);border-radius:var(--r1);overflow:hidden;margin:10px 0;display:none}
+.local-llm-progress-bar{height:100%;background:var(--accent);width:0%;transition:width .3s}
+.local-llm-progress-text{font-size:11px;color:var(--t3);text-align:center;margin-top:4px}
+</style>
+</head>
+<body>
+<div class="app">
+ <div class="topbar">
+ <div class="topbar-logo">L</div>
+ <div class="topbar-breadcrumb" id="breadcrumb">
+ <span class="bc-book" id="bcBook" onclick="backToBooks()" style="display:none">Books</span>
+ <span class="bc-sep" id="bcSep" style="display:none">/</span>
+ <span class="bc-chapter" id="bcChapter">LucaWriter</span>
+ </div>
+ <div class="task-queue-wrap" id="taskQueueWrap">
+ <div class="task-queue" id="taskQueue"></div>
+      <button class="task-stop-all" id="taskStopAllBtn" onclick="stopAllTasks()" title="停止所有后台任务">&#10005;</button>
+      <button class="task-expand" id="taskExpandBtn" onclick="toggleTaskDetail()" title="查看任务详情">&#9660;</button>
+ <div class="task-detail-panel" id="taskDetailPanel">
+ <div class="task-detail-head">
+          <span>后台任务</span>
+          <button class="task-stop-all" onclick="stopAllTasks()" title="停止所有后台任务">全部停止</button>
+ </div>
+ <div class="task-detail-list" id="taskDetailList"></div>
+ </div>
+ </div>
+ <div class="topbar-sep"></div>
+    <button class="topbar-btn" onclick="openReadthrough()">通读</button>
+    <button class="topbar-btn" onclick="openSettings()">设置</button>
+ </div>
+
+ <div class="main" id="mainArea">
+ <div class="bookshelf-view active" id="bookshelfView">
+ <div class="bookshelf-header">
+        <h2>我的书架</h2>
+ </div>
+ <div class="bookshelf-grid" id="bookshelfGrid"></div>
+ </div>
+
+ <div class="main-row" id="editorView" style="display:none">
+ <div class="left-sidebar">
+ <div class="sidebar-header">
+ <button class="back-btn" onclick="backToBooks()" title="返回书架">&#8592; 书架</button>
+          <span class="sidebar-label" id="sidebarLabel">章节</span>
+          <button class="trash-toggle" onclick="toggleTrash()" id="trashToggleBtn">回收站</button>
+ </div>
+ <div class="sidebar-search" id="sidebar-search">
+          <input id="chSearch" placeholder="搜索章节..." oninput="filterChapters()">
+ </div>
+ <div class="book-list-panel" id="bookListPanel" style="display:none;flex-direction:column;flex:1;overflow-y:auto;padding:4px"></div>
+ <div class="chapter-list" id="chapterList"></div>
+ <div class="ch-trash-wrap" id="trashList"></div>
+ <div class="sidebar-footer">
+          <button onclick="addChapter()">+ 新建章节</button>
+ </div>
+ </div>
+
+ <div class="editor-area">
+ <div class="editor-top">
+          <span class="editor-chapter-badge" id="editorChapterBadge" style="display:none">正在编辑</span>
+          <input id="chTitleInput" placeholder="章节标题" oninput="onTitleChange()">
+ <span class="editor-wc" id="wordCount">0</span>
+          <span class="save-indicator" id="saveIndicator">已保存</span>
+ <button class="ai-send" style="padding:4px 10px;font-size:11px" onclick="completeChapter()" title="">&#10003; </button>
+ </div>
+ <div class="editor-body">
+ <div class="editor-highlight-layer" id="highlightLayer"><div class="editor-highlight-content" id="highlightContent"></div></div>
+ <textarea id="editorArea" placeholder="开始写作..." oninput="onContentChange()"></textarea>
+ </div>
+ </div>
+
+ <div class="right-sidebar">
+ <div class="right-sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0">
+ <div class="right-sidebar-header" style="display:flex;justify-content:space-between;align-items:center">
+ <span>Luca</span>
+            <button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="clearAIChat()" title="清空对话">清空</button>
+ </div>
+ <div class="right-content" id="aiMessages" style="display:flex;flex-direction:column;gap:6px;padding:8px"></div>
+ <div style="padding:8px;border-top:1px solid var(--border);display:flex;gap:6px">
+            <input class="ai-input" id="aiInput" placeholder="问 Luca 关于设定、情节..." style="flex:1" onkeydown="if(event.key==='Enter')sendAI()">
+            <button class="ai-send" onclick="sendAI()">发送</button>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <div class="bottom-panel collapsed" id="bottomPanel">
+ <div class="bottom-handle" id="bottomHandle">
+ <div class="handle-grip"></div>
+ <span class="handle-hint"></span>
+ <div class="bottom-tabs">
+          <button class="bottom-tab active" data-btab="timeline" onclick="switchBottomTab('timeline')">时间线</button>
+          <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')">预言</button>
+          <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')">大纲</button>
+          <button class="bottom-tab" data-btab="readthrough" onclick="switchBottomTab('readthrough')">通读</button>
+ </div>
+ <button class="bottom-toggle" onclick="toggleBottomPanel()" title="Toggle">&#9650;</button>
+ </div>
+ <div class="bottom-body">
+
+        <!-- 时间线 -->
+ <div class="bottom-pane active timeline-pane" id="timelinePane">
+ <div class="panel-layout">
+ <div class="panel-left">
+              <div class="panel-left-head">生成日志</div>
+ <div class="panel-left-body" id="tlLog">点击"生成时间线"开始...</div>
+ </div>
+ <div class="panel-right">
+              <div class="panel-right-head">故事时间线</div>
+ <div class="panel-right-body" id="timelineResult">
+                <div class="tl-empty">从上方生成故事时间线</div>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <!-- -->
+ <div class="bottom-pane prediction-pane" id="predictionPane">
+ <div class="panel-layout">
+ <div class="panel-left">
+ <div class="panel-left-head"></div>
+ <div class="panel-left-body" id="predLog">点击"生成预言"开始...</div>
+ </div>
+ <div class="panel-right">
+ <div class="panel-right-head"></div>
+ <div class="panel-right-body" id="predictionResultBody">
+ <div style="text-align:center;padding:40px 20px">
+ <div style="font-size:28px;margin-bottom:12px">&#128302;</div>
+                  <h3 style="font-size:15px;color:var(--t1);margin-bottom:8px">读者预言</h3>
+ <p style="font-size:12px;color:var(--t2);max-width:420px;margin:0 auto 20px;line-height:1.6">点击上方"预言"按钮生成。生成后此处会显示结果。</p>
+ </div>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <!-- -->
+ <div class="bottom-pane outline-pane" id="outlinePane">
+ <div class="panel-layout">
+ <div class="panel-left">
+ <div class="panel-left-head"></div>
+ <div class="panel-left-body" id="outlineLog">点击"生成大纲"开始...</div>
+ </div>
+ <div class="panel-right">
+ <div class="panel-right-head"></div>
+ <div class="panel-right-body">
+ <textarea class="rt-source" id="outlineSource" readonly placeholder="大纲内容..." style="flex:1;width:100%;resize:none;border:none;background:transparent;height:100%"></textarea>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <!-- -->
+ <div class="bottom-pane readthrough-pane" id="readthroughPane">
+ <div class="panel-layout">
+ <div class="panel-left">
+              <div class="panel-left-head">AI 实时输出</div>
+ <div class="panel-left-body" style="padding:0">
+                <pre id="rtStream" style="margin:0;padding:10px 14px;font-size:11px;line-height:1.7;font-family:var(--font-mono);color:var(--t2);white-space:pre-wrap;word-break:break-word">等待开始...</pre>
+ <div id="rtLogs" style="display:none;font-size:11px;line-height:1.6;font-family:var(--font-mono);color:var(--t2);white-space:pre-wrap;word-break:break-word;padding:10px 14px"></div>
+ </div>
+ </div>
+ <div class="panel-right">
+              <div class="panel-right-head">阅读笔记 (source.md)</div>
+ <div class="panel-right-body">
+ <textarea class="rt-source" id="rtSource" readonly placeholder="通读完成后此处显示笔记..." style="flex:1;width:100%;resize:none;border:none;background:transparent;height:100%"></textarea>
+ </div>
+ </div>
+ </div>
+ <div class="rt-generate-bar" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
+            <span style="font-size:11px;color:var(--t2);white-space:nowrap">基于笔记生成：</span>
+            <button class="ai-send" style="padding:6px 14px;font-size:12px" onclick="generateTimeline()">时间线</button>
+            <button class="ai-send" style="padding:6px 14px;font-size:12px" onclick="startPrediction()">预言</button>
+            <button class="ai-send" style="padding:6px 14px;font-size:12px" onclick="generateOutlineFromSource()">大纲</button>
+ </div>
+ <div class="rt-controls" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
+ <div class="rt-progress-wrap" style="flex:1;display:flex;flex-direction:column;gap:4px">
+ <div class="rt-bar" style="height:4px;background:var(--surface3);border-radius:var(--r1);overflow:hidden"><div class="rt-fill" id="rtProgress" style="height:100%;background:var(--accent);width:0%;transition:width .3s"></div></div>
+ <div class="rt-info" style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3)"><span id="rtPhase">准备中...</span><span id="rtChapters">0/0 章</span></div>
+ </div>
+            <button class="ai-send" onclick="startRT()" id="rtStartBtn">开始通读</button>
+ </div>
+ </div>
+
+ </div>
+ </div>
+ </div>
+</div>
+
+<div class="loading-overlay" id="loadingOverlay"><div class="sp" style="width:28px;height:28px;border-width:3px"></div></div>
+<div class="toast" id="toast"></div>
+
+<div class="confirm-bg" id="confirmBg">
+<div class="confirm-box"><h3 id="confirmTitle">确认</h3><p id="confirmMsg"></p><div class="confirm-btns"><button class="confirm-cancel" onclick="closeConfirm()">取消</button><button class="confirm-ok" id="confirmOkBtn" onclick="doConfirmOk()">确定</button></div></div></div>
+
+<div class="prompt-bg" id="promptBg">
+<div class="prompt-box"><h3 id="promptTitle">输入</h3><input id="promptInput" placeholder=""><div class="prompt-btns"><button class="prompt-cancel" onclick="closePrompt()">取消</button><button class="prompt-ok" onclick="doPromptOk()">确定</button></div></div></div>
+
+<div class="modal-bg" id="settingsModal">
+<div class="modal">
+<h2>设置</h2>
+<div class="tab-row"><button class="tab-b active" onclick="switchSTab(this,'stAPI')">提供商</button><button class="tab-b" onclick="switchSTab(this,'stAI')">AI参数</button><button class="tab-b" onclick="switchSTab(this,'stAuto')">自动触发设置</button><button class="tab-b" onclick="switchSTab(this,'stAppearance')">外观</button></div>
+<div id="stAPI">
+ <div class="local-llm-box" id="localLLMBox">
+ <div class="local-llm-title"> Llama.cpp</div>
+ <div class="local-llm-row"><span class="local-llm-dot" id="localStatusDot"></span><span id="localStatusText"></span></div>
+ <div class="local-llm-model">NVIDIA Nemotron 3 Nano 4B (Q4_K_M)</div>
+ <div class="local-llm-progress" id="localProgressWrap">
+ <div class="local-llm-progress-bar" id="localProgressBar"></div>
+ </div>
+ <div class="local-llm-progress-text" id="localProgressText"></div>
+ <button class="topbar-btn" id="localToggleBtn" onclick="toggleLocalLLM()" style="margin:0 auto;display:block">切换本地模型</button>
+ </div>
+ <div class="provider-slider" id="providerSlider">
+ <div class="provider-block active" data-idx="0" onclick="switchProviderPreset(0)"><span class="pb-dot"></span><span class="pb-name">LMStudio</span></div>
+ <div class="provider-block" data-idx="1" onclick="switchProviderPreset(1)"><span class="pb-dot"></span><span class="pb-name">DeepSeek</span></div>
+ <div class="provider-block" data-idx="2" onclick="switchProviderPreset(2)"><span class="pb-dot"></span><span class="pb-name">MiniMax</span></div>
+    <div class="provider-block" data-idx="3" onclick="switchProviderPreset(3)"><span class="pb-dot"></span><span class="pb-name">预设4</span></div>
+    <div class="provider-block" data-idx="4" onclick="switchProviderPreset(4)"><span class="pb-dot"></span><span class="pb-name">预设5</span></div>
+ </div>
+ <div id="remoteApiForm">
+  <div class="mg"><label>API URL</label><input id="sUrl" placeholder="如 http://localhost:1234/v1"></div>
+ <div class="mg"><label>API Key</label><input id="sKey" type="text" class="pw-mask" placeholder="sk-..." autocomplete="off"></div>
+ <div style="display:flex;gap:6px"><div class="mg" style="flex:1"><label>Model</label><select id="sModel"><option value="">选择模型</option></select></div><button class="topbar-btn accent" style="align-self:flex-end;margin-bottom:12px" onclick="fetchModels()" id="fetchBtn">获取模型</button></div>
+ <div class="mg" style="margin-top:10px">
+ <label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:12px;font-weight:600">
+      <input type="checkbox" id="sUseCustomJson" style="width:auto" onchange="toggleCustomJson()"> 使用自定义JSON配置（高级）
+ </label>
+ </div>
+ <div class="mg" id="sCustomJsonWrap" style="display:none">
+    <label>自定义JSON</label>
+ <textarea id="sCustomJson" rows="4" placeholder='{"base_url":"","api_key":"","model":""}'></textarea>
+ <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">输入 JSON 以覆盖当前预设的基本配置。示例：{"base_url":"https://api.example.com/v1","api_key":"sk-xxx","model":"gpt-4"}</p>
+</div>
+<div id="stAI" style="display:none">
+ <div class="mg"><label>温度</label><input id="sTemp" type="number" min="0" max="1" step="0.1" value="0.7"></div>
+</div>
+<div id="stAuto" style="display:none">
+ <div class="mg"><label>自动建议</label><select id="sAutoC"><option value="true">开启</option><option value="false">关闭</option></select></div>
+ <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">写作时自动调用 Luca 给出建议。关闭后不会自动触发任何模型调用。</p>
+</div>
+<div id="stAppearance" style="display:none">
+ <div class="mg"><label>界面缩放</label><input id="sZoom" type="number" min="0.5" max="2.0" step="0.1" value="1.0"></div>
+ <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">可使用 Ctrl + +/- 或 Ctrl + 0 快速调整缩放。</p>
+</div>
+<div class="ma">
+  <button class="prompt-ok" onclick="saveSettings()">保存</button>
+ <button class="prompt-cancel" onclick="closeModal('settingsModal')">关闭</button>
+</div>
+</div></div>
+
+<div class="modal-bg" id="importModal">
+<div class="modal">
+<h2>导入书本</h2>
+<p style="font-size:12px;color:var(--t2);margin-bottom:10px">支持 TXT / MD / DOCX / PDF / EPUB</p>
+ <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub"></div>
+ <div class="imp-progress-wrap" id="impProgressWrap" style="display:none">
+ <div class="imp-progress-bar"><div class="imp-progress-fill" id="impProgressFill"></div></div>
+    <div class="imp-progress-text" id="impProgressText">准备中...</div>
+ </div>
+ <div id="impSt" style="font-size:12px;color:var(--t3);text-align:center;margin-top:6px"></div>
+<div class="ma"><button class="prompt-cancel" onclick="closeModal('importModal')">关闭</button></div>
+</div></div>
+
+<div class="modal-bg" id="createBookModal">
+<div class="modal" style="text-align:center">
+<h2 style="margin-bottom:20px">新建书本</h2>
+<div style="display:flex;flex-direction:column;gap:12px;align-items:center">
+ <button class="bookshelf-new-btn" style="width:100%;padding:14px 20px;font-size:15px;border-radius:var(--r3)" onclick="doCreateBookFromModal()">+ 新建空白书本</button>
+ <button class="prompt-cancel" style="width:auto;padding:6px 16px;font-size:12px;background:transparent;border:none;color:var(--t3);cursor:pointer;text-decoration:underline" onclick="closeModal('createBookModal');openImportNew()">导入现有文稿</button>
+</div>
+</div></div>
+
+<div class="modal-bg" id="epubExportModal">
+<div class="modal">
+<h2>导出 EPUB</h2>
+<div class="mg">
+<label>书名</label>
+  <input id="epubTitle" placeholder="书名" value="">
+</div>
+<div class="mg">
+<label>作者</label>
+  <input id="epubAuthor" placeholder="作者" value="">
+</div>
+<div class="mg">
+<label>简介</label>
+  <textarea id="epubDesc" rows="3" placeholder="简介"></textarea>
+</div>
+<div class="mg">
+ <label>封面</label>
+ <div class="cover-preview" id="epubCoverPreview" onclick="document.getElementById('epubCoverInput').click()">
+ <span class="cover-placeholder" id="epubCoverPlaceholder">点击上传封面</span>
+ <img id="epubCoverImg" style="display:none" src="" alt="cover">
+ <input type="file" id="epubCoverInput" accept="image/*" onchange="onEpubCoverChange(event)">
+ </div>
+ <p class="epub-field-hint">推荐 600×800 JPG / PNG</p>
+</div>
+<div class="ma">
+ <button class="prompt-ok" onclick="doExportEpub()">导出 EPUB</button>
+ <button class="prompt-cancel" onclick="closeModal('epubExportModal')">取消</button>
+</div>
+</div></div>
+
+<script>
+var bookId=null,chapterId=null,settings={};
+var inTrash=false;
+var charCount=0;
+var _autoCommentTimer=null;
+var _autoCommentPending=false;
+var _sourceUpdatePending=false;
+var allChapters=[],chapterOrder=[];
+var aiMessages=[];
+var currentChapter=null;
+var currentBottomTab='timeline';
+var bottomPanelOpen=false;
+var bottomPanelHeight=window.innerHeight-44;
+var savedBottomPanelHeight=window.innerHeight-44;
+var saveInProgress=false;
+var pendingSave=null;
+var currentBookTitle='';
+var apiLoadingCount=0;
+var cachedBooks=null;
+var rtLastDoneChapters=0;
+var rtLastStatus='idle';
+var bookAnnotations={};
+
+/* === 活跃连接实时追踪 === */
+var _rtTaskId=null;
+var _activeConnections=[];
+var _connPollTimer=null;
+var _prevConnIds=new Set();
+var _connTypeMap={
+  chat:{label:'聊',color:'#5a9fd4',name:'AI对话'},
+  readthrough:{label:'读',color:'#c9a96e',name:'通读全书'},
+  timeline:{label:'时',color:'#8b7fd9',name:'生成时间线'},
+  outline:{label:'纲',color:'#5fb878',name:'生成大纲'},
+  prediction:{label:'预',color:'#d46b6b',name:'生成预言'},
+  auto_comment:{label:'自',color:'#9e9e9e',name:'自动建议'},
+  memory:{label:'忆',color:'#9e9e9e',name:'记忆更新'},
+  'chapter-complete':{label:'章',color:'#c9a96e',name:'本章通读'},
+  unknown:{label:'?',color:'var(--t3)',name:'未知'}
+};
+
+function _startConnPoll(){
+ if(_connPollTimer)return;
+ _connPollTimer=setInterval(function(){
+ api('GET','/api/active-connections',undefined,function(d){
+ _activeConnections=d.connections||[];
+ _renderConnections();
+ });
+ },1000);
+}
+function _stopConnPoll(){
+ if(_connPollTimer){clearInterval(_connPollTimer);_connPollTimer=null;}
+}
+function _renderConnections(){
+ var q=$('taskQueue'),d=$('taskDetailList'),c=$('taskDetailCount');
+ if(!q)return;
+ var conns=_activeConnections;
+ var html='';
+ var currIds=new Set();
+  if(!conns.length){html='<span class="tq-empty">无活跃连接</span>';}
+ else{
+ conns.forEach(function(conn,i){
+ var cfg=_connTypeMap[conn.type]||_connTypeMap.unknown;
+ if(i>0){html+='<span class="tq-sep"></span>';}
+ var key=conn.id||conn.type+'-'+conn.created;
+ currIds.add(key);
+ var animClass=_prevConnIds.has(key)?' no-anim':'';
+ html+='<div class="tq-node'+animClass+'" title="'+esc(cfg.name)+'" data-conn-id="'+esc(key)+'">';
+ html+='<div class="tq-badge running">'+cfg.label+'</div>';
+ html+='</div>';
+ });
+ }
+ _prevConnIds=currIds;
+ q.innerHTML=html;
+ var stopBtn=$('taskStopAllBtn');
+ if(stopBtn)stopBtn.style.display=conns.length?'':'none';
+  if(c)c.textContent=conns.length+' 个连接';
+ if(d){
+ var dhtml='';
+ conns.slice().reverse().forEach(function(conn){
+ var cfg=_connTypeMap[conn.type]||_connTypeMap.unknown;
+ var sec=Math.round((Date.now()-conn.created*1000)/1000);
+ var tim=sec<60?sec+'s':Math.floor(sec/60)+'m'+(sec%60)+'s';
+ dhtml+='<div class="td-item">';
+ dhtml+='<div class="td-icon" style="background:'+cfg.color+'20;color:'+cfg.color+'">'+cfg.label+'</div>';
+ dhtml+='<div class="td-info">';
+ dhtml+='<div class="td-name">'+esc(cfg.name)+'</div>';
+      dhtml+='<div class="td-meta">活跃中 · '+tim+'</div>';
+ dhtml+='</div>';
+ dhtml+='<div class="td-status running"></div>';
+ dhtml+='</div>';
+ });
+    if(!conns.length)dhtml='<div style="padding:20px;text-align:center;font-size:11px;color:var(--t3)">暂无活跃连接</div>';
+ d.innerHTML=dhtml;
+ }
+}
+function toggleTaskDetail(){
+ var p=$('taskDetailPanel'),b=$('taskExpandBtn');
+ var open=p.classList.toggle('open');
+ b.classList.toggle('open',open);
+}
+function stopAllTasks(){
+  // 直接取消后台所有对AI提供商的活跃连接
+ api('POST','/api/stop-all-ai',{},function(d){});
+  // 停止通读
+ if(_rtTaskId){stopRT();}
+  // 把本地 pending 的聊天消息标记为已停止
+ var last=aiMessages[aiMessages.length-1];
+ if(last&&last.type==='ai'&&last._pending){
+ last._pending=false;
+    last.text='[已停止]';
+ last.reasoning='';
+ renderAIMessages();
+ saveAIMessages();
+ }
+ _stopChatPoll();
+ _activeConnections=[];
+ _renderConnections();
+  toast('已停止所有后台任务','success');
+}
+
+function $(id){return document.getElementById(id)}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+
+var _confirmCb=null;
+function toast(msg,type,dur){var t=$('toast');t.textContent=msg;t.className='toast '+(type||'');t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('show')},dur||2000)}
+function showConfirm(title,msg,cb,danger){$('confirmTitle').textContent=title;$('confirmMsg').textContent=msg;$('confirmOkBtn').className='confirm-ok'+(danger?' danger':'');_confirmCb=cb;$('confirmBg').classList.add('open')}
+function closeConfirm(){$('confirmBg').classList.remove('open');_confirmCb=null}
+function doConfirmOk(){var cb=_confirmCb;closeConfirm();if(cb)cb()}
+function showPrompt(title,placeholder,defaultVal,cb){$('promptTitle').textContent=title;$('promptInput').placeholder=placeholder;$('promptInput').value=defaultVal||'';_confirmCb=cb;$('promptBg').classList.add('open');setTimeout(function(){$('promptInput').focus()},50)}
+function closePrompt(){$('promptBg').classList.remove('open');_confirmCb=null}
+function doPromptOk(){var cb=_confirmCb;var v=$('promptInput').value;closePrompt();if(cb)cb(v)}
+
+function setEditorLoading(on){
+ var el=$('saveIndicator');
+  if(on){el.textContent='同步中...';el.className='save-indicator show'}
+ else{
+ el.textContent='已保存';el.className='save-indicator show';clearTimeout(el._t);el._t=setTimeout(function(){el.className='save-indicator'},800)
+ }
+}
+function api(method,path,data,cb){
+ var x=new XMLHttpRequest();
+ x.timeout=600000;
+ x.onload=function(){
+ var d,s;
+ try{d=JSON.parse(this.responseText);s=this.status}catch(e){d={error:'parse'};s=this.status}
+ if(cb)cb(d,s);
+ };
+ x.onerror=function(){if(cb)cb({error:'network'},0)};
+ x.ontimeout=function(){if(cb)cb({error:'timeout'},0)};
+ x.open(method,path);
+ if(data!==undefined){x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(data))}else x.send();
+ return {xhr:x};
+}
+
+function checkAuth(){api('GET','/api/auth/status',undefined,function(d){if(!d.has_users){location.href='/login';return}if(!d.logged_in){location.href='/login';return}try{init()}catch(e){console.error('Init error:',e);toast('初始化错误','error')}})}
+
+function saveAppState(){
+ try{
+ var state={bookId:bookId,chapterId:chapterId};
+ localStorage.setItem('lucawriter_state',JSON.stringify(state));
+ }catch(e){}
+}
+
+function loadAppState(){
+ try{
+ var raw=localStorage.getItem('lucawriter_state');
+ if(!raw)return null;
+ return JSON.parse(raw);
+ }catch(e){return null}
+}
+
+function clearAppState(){
+ try{localStorage.removeItem('lucawriter_state')}catch(e){}
+}
+
+function init(){loadSettings();_startConnPoll();setupImport();setupBottomPanelDrag();setupModals();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
+
+function setupModals(){
+ document.querySelectorAll('.modal-bg,.confirm-bg,.prompt-bg').forEach(function(bg){
+ var mouseDownOnBg=false;
+ bg.addEventListener('mousedown',function(e){
+ mouseDownOnBg=(e.target===bg);
+ });
+ bg.addEventListener('mouseup',function(e){
+ if(mouseDownOnBg && e.target===bg){
+ if(bg.classList.contains('modal-bg')) closeModal(bg.id);
+ else if(bg.classList.contains('confirm-bg')) closeConfirm();
+ else if(bg.classList.contains('prompt-bg')) closePrompt();
+ }
+ mouseDownOnBg=false;
+ });
+ var inner=bg.querySelector('.modal,.confirm-box,.prompt-box');
+ if(inner){
+ inner.addEventListener('mousedown',function(e){
+ mouseDownOnBg=false;
+ });
+ }
+ });
+}
+
+function showBookShelf(){
+ bookId=null;chapterId=null;currentChapter=null;currentBookTitle='';
+ $('editorView').style.display='none';$('bottomPanel').style.display='none';
+ $('bookshelfView').classList.add('active');
+ setEditorLoading(false);
+ updateBreadcrumb();
+ renderBookShelf();
+}
+
+function renderBookShelf(){
+ var grid=$('bookshelfGrid');grid.innerHTML='';
+ if(cachedBooks){
+ _renderBookShelfCards(cachedBooks);
+ }else{
+ api('GET','/api/books',undefined,function(d){
+ cachedBooks=d.books||[];
+ _renderBookShelfCards(cachedBooks);
+ });
+ }
+}
+
+function _renderBookShelfCards(books){
+ var grid=$('bookshelfGrid');grid.innerHTML='';
+ if(!books.length){
+ grid.innerHTML='<div class="book-empty" style="grid-column:1/-1"><h3>还没有书本</h3><p>创建一本空白书或导入现有文稿</p><div style="display:flex;gap:10px;justify-content:center;margin-top:12px"><button class="bookshelf-new-btn" onclick="openCreateBookModal()">+ 新建书本</button></div></div>';
+ return;
+ }
+ books.forEach(function(b){
+ var card=document.createElement('div');card.className='book-card';
+ var firstLetter=(b.title||'B').charAt(0).toUpperCase();
+ card.innerHTML='<div class="book-cover"><span class="book-cover-letter">'+esc(firstLetter)+'</span></div><div class="book-card-title">'+esc(b.title||'未命名')+'</div><div class="book-card-meta"><span>'+(b.chapter_count||0)+' 章</span><span>&#8226;</span><span>'+_formatDate(b.updated)+'</span></div><button class="book-card-menu" onclick="event.stopPropagation();toggleBookMenu(\''+esc(b.id)+'\',this)">&#8943;</button><div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'"><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button class="danger-item" onclick="event.stopPropagation();delBook(\''+esc(b.id)+'\')">删除书本</button></div>';
+ card.onclick=function(){currentBookTitle=b.title;openBook(b.id)};
+ grid.appendChild(card);
+ });
+ var impCard=document.createElement('div');impCard.className='book-import-card';
+  impCard.innerHTML='<span class="import-icon">+</span><span>导入新书</span>';
+ impCard.onclick=function(){openCreateBookModal()};
+ grid.appendChild(impCard);
+}
+
+function _formatDate(ts){
+ if(!ts)return'';
+ var d=new Date(ts*1000);
+ return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0');
+}
+
+function showBookList(){
+ if(bookId){backToBooks();return}
+ showBookShelf();
+}
+
+function loadBooks(){showBookShelf()}
+
+function showBookCreate(){showPrompt('新建书本','书名','新建书本',function(t){if(!t)return;api('POST','/api/books/create',{title:t},function(d){if(d.book){cachedBooks=null;currentBookTitle=d.book.title;openBook(d.book.id)}})})}
+
+function openBook(id){
+ bookId=id;chapterId=null;currentChapter=null;inTrash=false;aiMessages=[];
+ bookAnnotations={};
+ $('bookshelfView').classList.remove('active');
+ $('editorView').style.display='flex';$('bottomPanel').style.display='flex';
+ closeBottomPanel();
+ $('trashList').classList.remove('open');$('trashToggleBtn').textContent='回收站';$('trashToggleBtn').classList.remove('open');
+ $('chTitleInput').value='';$('editorArea').value='';$('wordCount').textContent='0';
+ $('saveIndicator').className='save-indicator';
+ $('editorChapterBadge').style.display='none';
+ charCount=0;
+ // Reset readthrough panel for new book
+  $('rtStream').textContent='等待开始...';
+ $('rtSource').value='';
+  $('rtProgress').style.width='0%';$('rtPhase').textContent='准备中...';
+  $('rtChapters').textContent='0/0 章';
+ $('rtStartBtn').style.display='';
+  $('rtStartBtn').textContent='开始通读';
+ rtLastDoneChapters=0;
+ updateBreadcrumb();
+ saveAppState();
+ setEditorLoading(true);
+ loadChapters();
+ loadAIMessages();
+ loadTimeline();
+ loadSourceToRT();
+ loadAnnotations();
+}
+
+function backToBooks(){
+ if(bookId&&chapterId&&currentChapter){doSaveNow()}
+ clearAppState();
+ setEditorLoading(false);
+ showBookShelf();
+}
+
+function showBookListInSidebar(){
+ $('bookListPanel').style.display='flex';$('chapterList').style.display='none';$('sidebar-search').style.display='none';
+ $('sidebarLabel').textContent='Books';
+ api('GET','/api/books',undefined,function(d){
+ var panel=$('bookListPanel');panel.innerHTML='';
+ (d.books||[]).forEach(function(b){
+ var div=document.createElement('div');div.className='book-list-item'+(bookId===b.id?' active':'');
+ div.innerHTML='<span class="bl-title">'+esc(b.title)+'</span><span class="bl-count">'+b.chapter_count+' ch</span><button class="bl-del" onclick="event.stopPropagation();delBook(\''+esc(b.id)+'\')">&#10005;</button>';
+ div.onclick=function(){currentBookTitle=b.title;openBook(b.id)};panel.appendChild(div);
+ });
+ var n=document.createElement('div');n.className='book-list-new';n.innerHTML='+ 新建书本';n.onclick=createBook;panel.appendChild(n);
+ });
+}
+
+function hideBookListInSidebar(){$('bookListPanel').style.display='none';$('chapterList').style.display='';$('sidebar-search').style.display='';$('sidebarLabel').textContent='章节'}
+
+function createBook(){showPrompt('新建书本','书名','新建书本',function(t){if(!t)return;api('POST','/api/books/create',{title:t},function(d){if(d.book){cachedBooks=null;currentBookTitle=d.book.title;openBook(d.book.id)}})})}
+
+function renameBook(id,currentTitle){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});showPrompt('','',currentTitle,function(t){if(!t||t===currentTitle)return;api('POST','/api/books/rename',{book_id:id,title:t},function(){cachedBooks=null;if(bookId===id){currentBookTitle=t;updateBreadcrumb()}renderBookShelf()})})}
+
+function delBook(id){showConfirm('删除书本','确定删除这本书及所有章节？',function(){api('POST','/api/books/delete',{book_id:id},function(){cachedBooks=null;if(bookId===id){backToBooks()}else{renderBookShelf()}})},true)}
+
+function loadChapters(){
+ api('GET','/api/book/'+bookId+'/chapters',undefined,function(d){
+ allChapters=d.chapters||[];chapterOrder=d.chapter_order||allChapters.map(function(c){return c.id});
+ renderChapterList();
+ var savedState=loadAppState();
+ var targetCh=chapterId||'';
+ if(!targetCh&&savedState&&savedState.chapterId&&allChapters.some(function(c){return c.id===savedState.chapterId})){
+ targetCh=savedState.chapterId;
+ }
+ if(!targetCh){
+ var savedBackend=d.current_chapter_id||'';
+ if(savedBackend&&allChapters.some(function(c){return c.id===savedBackend}))targetCh=savedBackend;
+ }
+ if(!targetCh&&allChapters.length)targetCh=allChapters[0].id;
+ if(targetCh&&targetCh!==chapterId)selectChapter(targetCh);
+ updateBreadcrumb();
+ });
+}
+
+function renderChapterList(){
+ var list=$('chapterList');list.innerHTML='';
+ var filtered=allChapters;var sv=$('chSearch').value.trim().toLowerCase();
+ if(sv)filtered=allChapters.filter(function(c){return(c.title||'').toLowerCase().includes(sv)});
+ var ordered=[];var seenIds={};var map={};
+ filtered.forEach(function(c){map[c.id]=c});
+ chapterOrder.forEach(function(id){
+ if(map[id]&&!seenIds[id]){ordered.push(map[id]);seenIds[id]=true}
+ });
+ filtered.forEach(function(c){
+ if(!seenIds[c.id]){ordered.push(c);seenIds[c.id]=true}
+ });
+ ordered.forEach(function(ch){
+ var div=document.createElement('div');var isActive=chapterId===ch.id;
+ div.className='ch-item'+(isActive?' active':'');div.dataset.id=ch.id;
+ div.innerHTML='<span class="ch-dot"></span><span class="ch-title">'+esc(ch.title||'未命名')+'</span><span class="ch-wc">'+(ch.content?ch.content.length:'0')+'</span><button class="ch-del" onclick="event.stopPropagation();delChapter(\''+esc(ch.id)+'\')">&#10005;</button>';
+ div.onclick=function(){selectChapter(ch.id)};list.appendChild(div);
+ });
+}
+
+function filterChapters(){renderChapterList()}
+
+function updateBreadcrumb(){
+ var bc=$('breadcrumb');
+ var bookEl=$('bcBook');var sepEl=$('bcSep');var chEl=$('bcChapter');
+ if(bookId){
+ bookEl.style.display='inline';sepEl.style.display='inline';
+ bookEl.textContent=currentBookTitle||'Book';
+ if(chapterId&&currentChapter){
+      var chTitle=$('chTitleInput').value||currentChapter.title||'未命名';
+ chEl.textContent=chTitle;
+ }else{
+ chEl.textContent=currentBookTitle||'Book';
+ }
+ }else{
+ bookEl.style.display='none';sepEl.style.display='none';
+ chEl.textContent='LucaWriter';
+ }
+}
+
+function selectChapter(id){
+ if(chapterId===id&&currentChapter)return;
+ if(bookId&&chapterId&&currentChapter){doSaveNow()}
+ chapterId=id;currentChapter=null;
+ saveAppState();
+  $('chTitleInput').value='加载中...';$('editorArea').value='';$('wordCount').textContent='0';
+ setEditorLoading(true);
+ api('POST','/api/book/'+bookId+'/set-current-chapter',{id:id},function(){});
+ api('GET','/api/book/'+bookId+'/chapter/'+id,undefined,function(d,s){
+ setEditorLoading(false);
+    if(s===200){currentChapter=d;loadChapterData(d)}else{chapterId=null;$('chTitleInput').value='';toast('加载章节失败','error')}
+ });
+}
+
+function loadChapterData(ch){
+ currentChapter=ch;$('chTitleInput').value=ch.title||'';$('editorArea').value=ch.content||'';
+ charCount=ch.content?ch.content.length:0;
+ $('wordCount').textContent=charCount;
+ $('editorChapterBadge').style.display='inline';
+ $('editorChapterBadge').textContent='EDITING';
+ setEditorLoading(false);
+ updateBreadcrumb();
+ renderChapterList();
+ syncHighlights();
+}
+
+function addChapter(){var id='ch_'+Date.now();var num=allChapters.length+1;var title='第'+num+'';api('POST','/api/book/'+bookId+'/chapter',{id:id,title:title,content:''},function(d,s){if(s===200){loadChapters();selectChapter(id)}else{toast('创建章节失败','error')}})}
+
+function delChapter(id){showConfirm('删除','移到回收站？',function(){api('POST','/api/book/'+bookId+'/delete',{id:id},function(){if(chapterId===id){chapterId=null;currentChapter=null;$('chTitleInput').value='';$('editorArea').value='';$('wordCount').textContent='0';$('saveIndicator').className='save-indicator';$('editorChapterBadge').style.display='none';updateBreadcrumb();saveAppState()}loadChapters()})},true)}
+
+function doSaveNow(cb){
+ if(!bookId||!chapterId||!currentChapter){if(cb)cb();return}
+ var saveId=chapterId;
+ var title=$('chTitleInput').value;var content=$('editorArea').value;
+ var ch={id:saveId,title:title,content:content};
+ saveInProgress=true;
+ api('POST','/api/book/'+bookId+'/chapter',ch,function(d,s){
+ saveInProgress=false;
+ if(s===200){
+ if(saveId===chapterId){
+ currentChapter={id:saveId,title:title,content:content};
+ if(d.chapter)currentChapter=d.chapter;
+ }
+ var found=false;
+ for(var i=0;i<allChapters.length;i++){
+ if(allChapters[i].id===saveId){allChapters[i].title=title;allChapters[i].content=content;found=true;break}
+ }
+ if(!found)allChapters.push({id:saveId,title:title,content:content});
+ renderChapterList();
+ if(saveId===chapterId)updateBreadcrumb();
+      // 章节摘要已禁用，避免每次保存/切换章节都调用模型
+ // var contentLen=content?content.length:0;
+ // var lastLen=lastSummaryLen[saveId]||0;
+ // if(contentLen>=500&&(contentLen-lastLen)>=1000){
+ // lastSummaryLen[saveId]=contentLen;
+ // api('POST','/api/book/'+bookId+'/chapter-summary',{id:saveId},function(){/* silent */});
+ // }
+ }
+ if(saveId===chapterId)showSaveIndicator(s===200);
+ if(cb)cb();
+ });
+}
+
+function flushSave(cb){
+ if(!bookId||!chapterId){if(cb)cb();return}
+ doSaveNow(cb);
+}
+
+function showSaveIndicator(ok){
+ if(memoryUpdating)return;
+  var el=$('saveIndicator');el.textContent=ok?'已保存':'错误';
+ el.className='save-indicator show'+(ok?'':' err');
+ clearTimeout(el._t);el._t=setTimeout(function(){el.className='save-indicator'},2000);
+}
+
+var saveDebounce=null;
+function scheduleSave(){
+ clearTimeout(saveDebounce);
+ saveDebounce=setTimeout(function(){doSaveNow()},500);
+}
+
+function onTitleChange(){
+ if(!chapterId)return;
+ updateBreadcrumb();
+ scheduleSave();
+}
+
+function onContentChange(){
+ if(!chapterId)return;
+ var newLen=$('editorArea').value.length;var diff=newLen-charCount;charCount=newLen;
+ $('wordCount').textContent=charCount;
+ scheduleSave();
+ syncHighlights();
+ // 
+ if(settings.ai_auto_comment!==false&&!_autoCommentPending&&charCount>50){
+ if(_autoCommentTimer){clearTimeout(_autoCommentTimer);_autoCommentTimer=null;}
+ var idleSec=parseInt(settings.ai_idle_seconds);if(isNaN(idleSec)||idleSec<1)idleSec=5;
+ _autoCommentTimer=setTimeout(function(){
+ _autoCommentTimer=null;
+ if(!_autoCommentPending)triggerAutoComment();
+ },idleSec*1000);
+ }
+ // source.md 
+ if(diff>0&&_sourceUpdatePending){
+ _sourceUpdatePending=false;
+ triggerSourceUpdate();
+ }
+}
+
+var lastSummaryLen={};
+
+function triggerAutoComment(){
+ if(!chapterId||_autoCommentPending)return;
+ _autoCommentPending=true;
+ var text=$('editorArea').value;
+ api('POST','/api/book/'+bookId+'/comment',{text:text,auto:true},function(d,s){
+ _autoCommentPending=false;
+ if(s===200&&d.hasOwnProperty('comment')){
+ addAIMessage(d.comment||'AI','ai');
+ // source.md 
+ _sourceUpdatePending=true;
+ }
+ });
+}
+
+function triggerSourceUpdate(){
+ if(!chapterId)return;
+ var text=$('editorArea').value;
+ var title=$('chTitleInput').value||'';
+ api('POST','/api/book/'+bookId+'/update-source',{text:text,chapter_title:title},function(d,s){
+ if(s===200&&d.status==='started'){toast('...','success');}
+ });
+}
+
+function getTodayStr(){var d=new Date();return d.getFullYear()+'-'+(d.getMonth()+1).toString().padStart(2,'0')+'-'+d.getDate().toString().padStart(2,'0')}
+
+var _chatPollTimer=null;
+
+function loadAIMessages(){if(!bookId){aiMessages=[];renderAIMessages();return}api('GET','/api/book/'+bookId+'/messages?date='+encodeURIComponent(getTodayStr()),undefined,function(d,s){if(s===200&&d.messages&&d.messages.length)aiMessages=d.messages;else aiMessages=[];renderAIMessages();_checkPendingChat()})}
+
+function _checkPendingChat(){
+  // 如果最后一条是 pending 的 ai 消息，自动轮询
+ var last=aiMessages[aiMessages.length-1];
+ if(last&&last.type==='ai'&&last._pending&&last.task_id){
+ _startChatPoll(last.task_id);
+ return;
+ }
+  // 或者检查是否有运行中的 chat 任务
+ api('GET','/api/book/'+bookId+'/task/status?type=chat',undefined,function(st){if(st&&st.status==='running'&&st.id){_startChatPoll(st.id);}});
+}
+
+function _startChatPoll(taskId){
+ if(_chatPollTimer)return;
+ _chatPollTimer=setInterval(function(){
+ api('GET','/api/book/'+bookId+'/task/status?task_id='+taskId,undefined,function(st){
+ if(!st||!st.status){_stopChatPoll();return;}
+ if(st.status==='done'||st.status==='error'){
+ _stopChatPoll();
+ loadAIMessages();
+ }else if(st.status==='running'){
+ // pending 
+ var found=false;
+ for(var i=aiMessages.length-1;i>=0;i--){
+ var m=aiMessages[i];
+ if(m.type==='ai'&&m._pending&&(m.task_id===taskId||!m.task_id)){
+ m.text=st.result||'';
+ m.reasoning=st.reasoning||'';
+ m._pollTick=(m._pollTick||0)+1;
+ found=true;
+ break;
+ }
+ }
+ if(!found){
+ // pending 
+ aiMessages.push({text:st.result||'',type:'ai',reasoning:st.reasoning||'',_pending:true,task_id:taskId});
+ }
+ renderAIMessages();
+ }
+ });
+ },800);
+  // 保险：3分钟后停止
+ setTimeout(_stopChatPoll,180000);
+}
+
+function _stopChatPoll(){if(_chatPollTimer){clearInterval(_chatPollTimer);_chatPollTimer=null;}}
+
+function saveAIMessages(){if(!bookId)return;api('POST','/api/book/'+bookId+'/messages',{date:getTodayStr(),messages:aiMessages},function(){})}
+
+function renderAIMessages(){
+ var c=$('aiMessages');c.innerHTML='';
+  if(!aiMessages.length){c.innerHTML='<div class="ai-msg ai-msg-ai" style="text-align:center;font-size:10px;background:transparent;border:none;padding:10px;color:var(--t3)">Luca 会随着你写作，为你提供建议</div>';return}
+ aiMessages.forEach(function(m){
+ var d=document.createElement('div');d.className='ai-msg ai-msg-'+m.type;
+ if(m.type==='ai' && (m.reasoning||m._streaming||m._pending)){
+ var isLive=m._streaming||m._pending;
+ var reasonOpen=isLive?' streaming':'';
+      var reasonLabel=isLive?'&#128173; 思考中...':'&#128173; 思考过程 &#9654;';
+ var reasonHtml='';
+ if(m.reasoning){
+ reasonHtml='<div class="ai-reasoning"><span class="ai-reasoning-toggle" onclick="toggleReasoning(this)">'+reasonLabel+'</span><div class="ai-reasoning-body'+reasonOpen+'">'+esc(String(m.reasoning))+'</div></div>';
+ }
+ if(m._pending && !m.text && !m.reasoning){
+ var dots=(m._pollTick||0)%3;var dotStr='思考中'+(dots===0?'.':(dots===1?'..':'...'));
+ d.innerHTML='<div class="ai-msg-body" style="color:var(--t3);font-style:italic">'+dotStr+'</div>';
+ }else{
+ d.innerHTML=reasonHtml+'<div class="ai-msg-body">'+esc(String(m.text||''))+'</div>';
+ }
+ }else{
+ d.textContent=m.text;
+ }
+ c.appendChild(d);
+ if(m.type==='ai' && m.needs_readthrough){
+ var card=document.createElement('div');
+ card.className='ai-readthrough-card';
+ card.innerHTML='<div>AI 建议通读全书</div><div class="rt-warning">预计消耗 token</div><button class="rt-btn" onclick="startRTFromChat()">开始通读</button>';
+ c.appendChild(card);
+ }
+ if(m.type==='ai' && (m._streaming||m._pending)){
+ var rb=d.querySelector('.ai-reasoning-body');
+ if(rb) rb.scrollTop=rb.scrollHeight;
+ }
+ });
+
+ c.scrollTop=c.scrollHeight;
+}
+
+function toggleReasoning(el){
+ var body=el.nextElementSibling;
+ body.classList.remove('streaming');
+ var open=body.classList.toggle('open');
+  el.innerHTML=open?'&#128173; 思考过程 &#9660;':'&#128173; 思考过程 &#9654;';
+}
+
+function addAIMessage(text,type,reasoning){aiMessages.push({text:text,type:type,reasoning:reasoning||''});renderAIMessages();saveAIMessages()}
+
+function sendAI(){
+ var text=$('aiInput').value.trim();
+ if(!text||!bookId)return;
+ $('aiInput').value='';
+ _doSendAI(text);
+}
+
+function completeChapter(){
+ if(!bookId||!chapterId){toast('','warn');return}
+ var btn=document.querySelector('.editor-top .ai-send');
+ if(btn)btn.disabled=true;
+  toast('正在生成时间线...','success');
+ api('POST','/api/book/'+bookId+'/chapter-complete',{id:chapterId},function(d,s){
+ if(btn)btn.disabled=false;
+ if(s!==200||!d.task_id){
+ toast(d.error||'','error');
+ return;
+ }
+ // 
+ var tid=d.task_id;
+ var pollTimer=setInterval(function(){
+ api('GET','/api/book/'+bookId+'/task/status?task_id='+tid,undefined,function(st){
+ if(!st||!st.status){clearInterval(pollTimer);return}
+ if(st.status==='done'){
+ clearInterval(pollTimer);
+ toast('','success');
+ // AI 
+ var summary=st.result||'';
+ if(summary){
+ var card=document.createElement('div');
+ card.className='ai-readthrough-card';
+ card.innerHTML='<div style="font-weight:700;margin-bottom:4px">&#10003; </div><div style="white-space:pre-wrap;max-height:200px;overflow-y:auto">'+esc(summary.slice(0,800))+(summary.length>800?'...':'')+'</div>';
+ $('aiMessages').appendChild(card);
+ $('aiMessages').scrollTop=$('aiMessages').scrollHeight;
+ }
+ }else if(st.status==='error'){
+ clearInterval(pollTimer);
+ toast(': '+(st.error||''),'error');
+ }
+ });
+ },800);
+ setTimeout(function(){clearInterval(pollTimer);},300000);
+ });
+}
+
+function _doSendAI(text){
+ // 
+ aiMessages.push({text:text,type:'user'});
+ aiMessages.push({text:'',type:'ai',reasoning:'',_pending:true});
+ renderAIMessages();
+
+ var history=[];
+ for(var i=0;i<aiMessages.length-2;i++){
+ var m=aiMessages[i];
+ if(m.type==='user') history.push({role:'user',content:m.text});
+ else if(m.type==='ai' && !m._pending && !m._streaming && m.text) history.push({role:'assistant',content:m.text});
+ }
+
+ var msgIdx=aiMessages.length-1;
+
+ // 
+ api('POST','/api/book/'+bookId+'/comment',{text:text,history:history},function(d,s){
+ if(s!==200||!d.task_id){
+ var m=aiMessages[msgIdx];if(m){m._pending=false;m.text='[错误: '+(d.error||'')+']';m.reasoning='';}
+ renderAIMessages();saveAIMessages();
+ return;
+ }
+ var tid=d.task_id;
+    // 把 task_id 记录到 pending 消息里，方便刷新后恢复
+ var m=aiMessages[msgIdx];if(m)m.task_id=tid;
+ var pollTimer=setInterval(function(){
+ api('GET','/api/book/'+bookId+'/task/status?task_id='+tid,undefined,function(st){
+ if(!st||!st.status){clearInterval(pollTimer);return;}
+ var m=aiMessages[msgIdx];
+ if(st.status==='done'){
+ clearInterval(pollTimer);
+ if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_readthrough=st.needs_readthrough;m.annotations_changed=st.annotations_changed;}
+ renderAIMessages();saveAIMessages();
+ if(st.annotations_changed){loadAnnotations();}
+ if(st.complete_chapter){
+ toast('AI ','success');
+ }
+ }else if(st.status==='error'){
+ clearInterval(pollTimer);
+          if(m){m._pending=false;m.text='[错误: '+(st.error||'生成失败')+']';m.reasoning='';}
+ renderAIMessages();saveAIMessages();
+ }else if(st.status==='running'){
+ if(m){
+ m.text=st.result||'';
+ m.reasoning=st.reasoning||'';
+ m._pollTick=(m._pollTick||0)+1;
+ }
+ renderAIMessages();
+ }
+ });
+ },600);
+ // 3
+ setTimeout(function(){clearInterval(pollTimer);},180000);
+ });
+}
+
+
+function loadTimeline(){if(!bookId)return;api('GET','/api/book/'+bookId+'/outline',undefined,function(d){renderTimeline((d&&d.timeline_nodes)||[])})}
+
+function renderTimeline(nodes){
+  var c=$('timelineResult');if(!nodes||!nodes.length){c.innerHTML='<div class="tl-empty">从 AI 生成故事时间线</div>';return}
+ var html='<div class="timeline-track">';
+ nodes.forEach(function(n){
+    html+='<div class="tl-node" onclick="expandTimelineNode(\''+esc(n.id)+'\')" title="'+esc(n.detail_hint||'')+'"><div class="tl-dot"></div><div class="tl-line"></div><div class="tl-label">'+esc(n.title||'事件')+'</div>';
+ if(n.detail_hint)html+='<div class="tl-hint">'+esc(n.detail_hint)+'</div>';
+ if(n.children&&n.children.length){html+='<div class="tl-children">';n.children.forEach(function(ch){html+='<div class="tl-child" onclick="event.stopPropagation()">'+esc(ch.title||'')+'</div>'});html+='</div>'}
+ html+='</div>';
+ });
+ html+='</div>';c.innerHTML=html;
+}
+
+function _streamGenerate(type,logEl,onDone){
+  logEl.textContent='正在启动后台任务...';
+ // 
+ api('POST','/api/book/'+bookId+'/generate-stream',{type:type},function(d,s){
+ if(s!==200||!d.task_id){
+      logEl.textContent='启动失败: '+(d.error||'未知错误');
+ if(onDone)onDone('');
+ return;
+ }
+ var tid=d.task_id;
+ logEl.textContent='...';
+ var pollCount=0;
+ var pollTimer=setInterval(function(){
+ pollCount++;
+ api('GET','/api/book/'+bookId+'/task/status?task_id='+tid,undefined,function(st){
+ if(!st||!st.status)return;
+ if(st.status==='done'){
+ clearInterval(pollTimer);
+          logEl.textContent='生成完成';
+ if(onDone)onDone(st.result||'');
+ }else if(st.status==='error'){
+ clearInterval(pollTimer);
+          logEl.textContent='生成失败: '+(st.error||'未知错误');
+ if(onDone)onDone('');
+ }else if(st.status==='running'){
+ var prog=st.progress||0;
+ var buf=st.stream_buffer||'';
+          logEl.textContent='生成中... '+prog+'%\n'+(buf.length>200?buf.slice(-200):buf);
+ }
+ });
+ },800);
+    // 保险：10分钟后停止轮询
+ setTimeout(function(){clearInterval(pollTimer);},600000);
+ });
+}
+
+function generateTimeline(){
+ if(!bookId)return;
+ toast('...','success');
+ _streamGenerate('timeline',$('tlLog'),function(fullText){
+ loadTimeline();
+    if(fullText){toast('时间线已生成','success');$('tlLog').textContent='时间线生成完成';}
+    else{toast('时间线生成失败','error');}
+ });
+}
+
+function expandTimelineNode(nodeId){if(!bookId)return;api('POST','/api/book/'+bookId+'/timeline-detail',{node_id:nodeId},function(d,s){if(s===200){loadTimeline()}else{toast(d.error||'展开失败','error')}})}
+
+function toggleTrash(){
+ inTrash=!inTrash;var trashEl=$('trashList');var btn=$('trashToggleBtn');
+ if(inTrash){btn.textContent='';btn.classList.add('open');api('GET','/api/book/'+bookId+'/trash',undefined,function(d){var chs=d.chapters||[];if(!chs.length){trashEl.innerHTML='<div class="trash-empty">回收站为空</div>'}else{var html='<div class="trash-header">已删除章节</div>';chs.forEach(function(ch){html+='<div class="trash-item"><span class="ti-title">'+esc(ch.title||'未命名')+'</span><button class="ti-restore" onclick="event.stopPropagation();restoreChapter(\''+esc(ch.id)+'\')">恢复</button></div>'});trashEl.innerHTML=html}trashEl.classList.add('open')})}
+ else{btn.textContent='Trash';btn.classList.remove('open');trashEl.classList.remove('open')}
+}
+
+function restoreChapter(id){api('POST','/api/book/'+bookId+'/restore',{id:id},function(){toggleTrash();toggleTrash()})}
+
+var providerPresets=[];
+var currentPresetIdx=0;
+
+function loadSettings(){api('GET','/api/settings',undefined,function(d,s){if(s===200){settings=d;providerPresets=d.provider_presets||[];currentPresetIdx=d.active_provider_idx||0}applySettings()})}
+
+function applySettings(){
+ var z=parseFloat(settings.ui_scale);if(isNaN(z)||z<0.5)z=1;if(z>2)z=2;document.documentElement.style.zoom=z;
+}
+
+function openSettings(){
+ var raw=settings.provider_presets||[];
+  // 深拷贝，避免关闭弹窗后污染内存中的 settings
+ providerPresets=raw.map(function(p){return{name:p.name||'',base_url:p.base_url||'',api_key:p.api_key||'',model:p.model||'',use_custom_json:!!p.use_custom_json,custom_json:p.custom_json||''}});
+ if(!providerPresets.length){
+ providerPresets=[
+ {name:'LMStudio',base_url:'http://localhost:1234/v1',api_key:'',model:'',use_custom_json:false,custom_json:''},
+ {name:'DeepSeek',base_url:'https://api.deepseek.com',api_key:'',model:'deepseek-v4-flash',use_custom_json:false,custom_json:''},
+ {name:'MiniMax',base_url:'https://api.minimaxi.com/v1',api_key:'',model:'MiniMax-M2.5',use_custom_json:false,custom_json:''},
+      {name:'预设4',base_url:'',api_key:'',model:'',use_custom_json:false,custom_json:''},
+ {name:'5',base_url:'',api_key:'',model:'',use_custom_json:false,custom_json:''},
+ {name:' Llama.cpp',base_url:'http://127.0.0.1:8080/v1',api_key:'',model:'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M',use_custom_json:false,custom_json:''}
+ ];
+ }
+ currentPresetIdx=settings.active_provider_idx||0;
+ if(currentPresetIdx<0||currentPresetIdx>=providerPresets.length)currentPresetIdx=0;
+ renderProviderSlider();
+ loadPresetToForm(currentPresetIdx);
+ updateLocalLLMUI();
+ refreshLocalLLMProgress();
+ $('sTemp').value=settings.ai_temperature||0.7;
+ console.log('openSettings: settings.model_context_length =', settings.model_context_length);
+ $('sCtxLen').value=settings.model_context_length||0;
+ $('sAutoC').value=String(settings.ai_auto_comment!==false);
+ $('sIdle').value=settings.ai_idle_seconds||5;
+ $('sZoom').value=parseFloat(settings.ui_scale)||1.0;
+ openModal('settingsModal')
+}
+
+function renderProviderSlider(){
+ var slider=$('providerSlider');
+ if(!slider)return;
+ var remoteCount=Math.min(5,providerPresets.length);
+ var blocks=slider.querySelectorAll('.provider-block');
+ while(blocks.length < remoteCount){
+ var idx=blocks.length;
+ var b=document.createElement('div');
+ b.className='provider-block';
+ b.setAttribute('data-idx',idx);
+ b.onclick=(function(i){return function(){switchProviderPreset(i);};})(idx);
+ b.innerHTML='<span class="pb-dot"></span><span class="pb-name">新预设</span>';
+ slider.appendChild(b);
+ blocks=slider.querySelectorAll('.provider-block');
+ }
+ while(blocks.length > remoteCount){
+ slider.removeChild(blocks[blocks.length-1]);
+ blocks=slider.querySelectorAll('.provider-block');
+ }
+ blocks.forEach(function(b,i){
+ b.classList.toggle('active',i===currentPresetIdx);
+ var p=providerPresets[i];
+ if(p){
+ var nameEl=b.querySelector('.pb-name');
+      if(nameEl)nameEl.textContent=p.name||('预设'+(i+1));
+ }
+ });
+}
+
+function isLocalPreset(){
+ var p=providerPresets[currentPresetIdx];
+ return p && p.name && p.name.indexOf(' Llama.cpp')>=0;
+}
+
+function updateLocalLLMUI(){
+ var remote=$('remoteApiForm');
+ if(!remote)return;
+ if(isLocalPreset()){
+ remote.style.display='none';
+ }else{
+ remote.style.display='block';
+ }
+}
+
+function _showLocalProgress(show, pct, text){
+ var wrap=$('localProgressWrap');
+ var bar=$('localProgressBar');
+ var txt=$('localProgressText');
+ if(!wrap||!bar||!txt)return;
+ wrap.style.display=show?'block':'none';
+ bar.style.width=(pct||0)+'%';
+ txt.textContent=text||'';
+}
+
+function switchProviderPreset(idx){
+ if(idx===currentPresetIdx)return;
+ saveFormToPreset(currentPresetIdx);
+ currentPresetIdx=idx;
+ renderProviderSlider();
+ loadPresetToForm(currentPresetIdx);
+ updateLocalLLMUI();
+ // “”
+ refreshLocalLLMProgress();
+}
+
+var _localLLMPollTimer=null;
+function _pollLocalLLMProgress(){
+ if(_localLLMPollTimer)clearInterval(_localLLMPollTimer);
+ _localLLMPollTimer=setInterval(function(){
+ refreshLocalLLMProgress();
+ },800);
+}
+
+function refreshLocalLLMProgress(){
+ var dot=$('localStatusDot');
+ var txt=$('localStatusText');
+ var tbtn=$('localToggleBtn');
+ if(!dot||!txt||!tbtn)return;
+ if(!isLocalPreset()){
+ dot.className='local-llm-dot';
+ txt.textContent='';
+ tbtn.textContent='';
+ tbtn.disabled=false;
+ _showLocalProgress(false,0,'');
+ return;
+ }
+ api('GET','/api/local-llm/progress',undefined,function(d,s){
+ if(s!==200)return;
+ var running=d.running||false;
+ var status=d.status||'idle';
+ var prog=d.progress||0;
+ var err=d.error||'';
+ if(running||status==='ready'){
+ dot.className='local-llm-dot on';
+ txt.textContent='';
+ tbtn.textContent='';
+ tbtn.disabled=false;
+ _showLocalProgress(false,100,'');
+ if(status==='ready'&&_localLLMPollTimer){clearInterval(_localLLMPollTimer);_localLLMPollTimer=null;}
+ if(status==='ready'){
+ if(!window._localReadyToasted){toast('本地模型就绪','success');window._localReadyToasted=true;}
+ }
+ }else if(status==='starting'||status==='loading'){
+ dot.className='local-llm-dot off';
+ txt.textContent='...';
+ tbtn.textContent='...';
+ tbtn.disabled=true;
+ _showLocalProgress(true,prog,' '+prog+'%'+(err?' · '+err:''));
+ }else if(status==='error'){
+ dot.className='local-llm-dot off';
+ txt.textContent='';
+ tbtn.textContent='';
+ tbtn.disabled=false;
+ _showLocalProgress(false,0,'');
+ if(_localLLMPollTimer){clearInterval(_localLLMPollTimer);_localLLMPollTimer=null;}
+ toast(': '+(err||''),'error');
+ }else{
+ dot.className='local-llm-dot off';
+ txt.textContent='';
+ tbtn.textContent='';
+ tbtn.disabled=false;
+ _showLocalProgress(false,0,'');
+ if(_localLLMPollTimer){clearInterval(_localLLMPollTimer);_localLLMPollTimer=null;}
+ window._localReadyToasted=false;
+ }
+ });
+}
+
+function toggleLocalLLM(){
+ var tbtn=$('localToggleBtn');
+ if(!tbtn||tbtn.disabled)return;
+ var starting=tbtn.textContent.indexOf('')>=0;
+ if(starting){
+ tbtn.disabled=true;
+ window._localReadyToasted=false;
+ // 
+ if(!isLocalPreset()){
+ saveFormToPreset(currentPresetIdx);
+ // 
+ var localIdx=-1;
+ for(var i=0;i<providerPresets.length;i++){
+ if(providerPresets[i].name&&providerPresets[i].name.indexOf(' Llama.cpp')>=0){localIdx=i;break;}
+ }
+ if(localIdx>=0){
+ currentPresetIdx=localIdx;
+ renderProviderSlider();
+ loadPresetToForm(currentPresetIdx);
+ updateLocalLLMUI();
+ }
+ }
+ api('POST','/api/local-llm/start',{},function(d,s){
+ if(s===200&&d.ok){
+ _pollLocalLLMProgress();
+ }else{
+ tbtn.disabled=false;
+ toast(d.error||'','error');
+ refreshLocalLLMProgress();
+ }
+ });
+ }else{
+ tbtn.disabled=true;
+ api('POST','/api/local-llm/stop',{},function(d,s){
+ tbtn.disabled=false;
+ window._localReadyToasted=false;
+ refreshLocalLLMProgress();
+ if(s===200&&d.ok){toast('','success');}else{toast(d.error||'','error');}
+ });
+ }
+}
+
+function switchProviderPreset(idx){
+ if(idx===currentPresetIdx)return;
+ // 
+ saveFormToPreset(currentPresetIdx);
+ currentPresetIdx=idx;
+ renderProviderSlider();
+ loadPresetToForm(currentPresetIdx);
+}
+
+function loadPresetToForm(idx){
+ var p=providerPresets[idx];
+ if(!p)return;
+ if(isLocalPreset()){
+ // 
+ p.base_url='http://127.0.0.1:8080/v1';
+ p.model='NVIDIA-Nemotron-3-Nano-4B-Q4_K_M';
+ }else{
+ $('sUrl').value=p.base_url||'';
+ $('sKey').value=p.api_key||'';
+ if(p.model){
+ $('sModel').innerHTML='<option value="'+esc(p.model)+'">'+esc(p.model)+'</option>';
+ }else{
+    $('sModel').innerHTML='<option value="">选择模型</option>';
+ }
+ $('sUseCustomJson').checked=!!p.use_custom_json;
+ $('sCustomJson').value=p.custom_json||'';
+ toggleCustomJson();
+ }
+}
+
+function saveFormToPreset(idx){
+ var p=providerPresets[idx];
+ if(!p)return;
+ if(isLocalPreset()){
+ p.base_url='http://127.0.0.1:8080/v1';
+ p.api_key='';
+ p.model='NVIDIA-Nemotron-3-Nano-4B-Q4_K_M';
+ p.use_custom_json=false;
+ p.custom_json='';
+ }else{
+ p.base_url=$('sUrl').value;
+ p.api_key=$('sKey').value;
+ p.model=$('sModel').value;
+ p.use_custom_json=$('sUseCustomJson').checked;
+ p.custom_json=$('sCustomJson').value;
+ }
+}
+
+function toggleCustomJson(){
+ var wrap=$('sCustomJsonWrap');
+ if(!wrap)return;
+ wrap.style.display=$('sUseCustomJson').checked?'block':'none';
+}
+
+function applyZoomFromInput(){
+ var z=parseFloat($('sZoom').value)||1.0;
+ if(z<0.5)z=0.5;if(z>2.0)z=2.0;
+ $('sZoom').value=z;
+ settings.ui_scale=z;
+ document.documentElement.style.zoom=z;
+ var d={ui_scale:z};
+ api('POST','/api/settings',d,function(r,s){if(s===200){settings=r;toast('已应用缩放','success');}});
+}
+
+function switchSTab(btn,id){btn.parentElement.querySelectorAll('.tab-b').forEach(function(b){b.classList.remove('active')});btn.classList.add('active');btn.closest('.modal').querySelectorAll('[id^="st"]').forEach(function(t){t.style.display='none'});$(id).style.display='block'}
+
+function saveSettings(){
+ saveFormToPreset(currentPresetIdx);
+ var d={
+ provider_presets:providerPresets,
+ active_provider_idx:currentPresetIdx,
+ ai_auto_comment:$('sAutoC').value==='true',
+ ai_idle_seconds:parseInt($('sIdle').value)||5,
+ ai_temperature:parseFloat($('sTemp').value)||0.7,
+ model_context_length:parseInt($('sCtxLen').value)||0,
+ ui_scale:parseFloat($('sZoom').value)||1.0
+ };
+  // 同时保存当前激活 preset 的字段到顶层，确保向后兼容
+ var active=providerPresets[currentPresetIdx];
+ if(active){
+ if(active.use_custom_json&&active.custom_json){
+ try{
+ var cj=JSON.parse(active.custom_json);
+ if(cj&&typeof cj==='object'){
+ d.base_url=cj.base_url||active.base_url||'';
+ d.api_key=cj.api_key||active.api_key||'';
+ d.model=cj.model||active.model||'';
+ }else{
+ d.base_url=active.base_url||'';
+ d.api_key=active.api_key||'';
+ d.model=active.model||'';
+ }
+ }catch(e){
+ d.base_url=active.base_url||'';
+ d.api_key=active.api_key||'';
+ d.model=active.model||'';
+ }
+ }else{
+ d.base_url=active.base_url||'';
+ d.api_key=active.api_key||'';
+ d.model=active.model||'';
+ }
+ }
+ console.log('saveSettings request:', JSON.stringify(d));
+ api('POST','/api/settings',d,function(r,s){
+ console.log('saveSettings response:', s, JSON.stringify(r));
+ if(s===200){
+ settings=r;providerPresets=r.provider_presets||providerPresets;currentPresetIdx=r.active_provider_idx||0;applySettings();
+ refreshLocalLLMProgress();
+ toast('','success');
+ }
+ })
+}
+
+function fetchModels(){var btn=$('fetchBtn');btn.innerHTML='<span class="sp"></span>';btn.disabled=true;api('POST','/api/fetch-models',{base_url:$('sUrl').value,api_key:$('sKey').value},function(d,s){btn.disabled=false;btn.textContent='获取';if(s===200&&d.models){$('sModel').innerHTML='<option value="">选择模型</option>'+d.models.map(function(m){return'<option value="'+esc(m)+'">'+esc(m)+'</option>'}).join('');saveFormToPreset(currentPresetIdx);}})}
+
+function openModal(id){$(id).classList.add('open')}function closeModal(id){$(id).classList.remove('open')}
+function toggleBookMenu(bid,btn){var dd=document.getElementById('bmenu_'+bid);var wasOpen=dd.classList.contains('show');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});if(!wasOpen)dd.classList.add('show')}
+function _fallbackDownload(blob,fn){var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=fn;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(url);a.remove()},1000)}
+function _downloadBlob(blob,fn){if(typeof showSaveFilePicker==='function'){try{showSaveFilePicker({suggestedName:fn}).then(function(handle){return handle.createWritable()}).then(function(writable){return writable.write(blob).then(function(){writable.close()})}).catch(function(err){if(err.name!=='AbortError')_fallbackDownload(blob,fn)})}catch(e){_fallbackDownload(blob,fn)}}else{_fallbackDownload(blob,fn)}}
+function doExportBook(bid,f){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});var ext={md:'md',txt:'txt',zip:'zip'}[f]||f;var x=new XMLHttpRequest();x.open('GET','/api/book/'+bid+'/export?format='+f,true);x.responseType='blob';x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var m=disp.match(/filename\*?=['"]?([^;'"]+)/i);var fn=m?decodeURIComponent(m[1].replace(/UTF-8''/i,'')):'book.'+ext;_downloadBlob(blob,fn)}else{toast('','error')}};x.onerror=function(){toast('','error')};x.send()}
+var _epubExportBid=null;
+function openEpubExport(bid,title){_epubExportBid=bid;$('epubTitle').value=title||'';$('epubAuthor').value='';$('epubDesc').value='';$('epubCoverImg').style.display='none';$('epubCoverImg').src='';$('epubCoverPlaceholder').style.display='';openModal('epubExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
+function onEpubCoverChange(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){$('epubCoverImg').src=ev.target.result;$('epubCoverImg').style.display='block';$('epubCoverPlaceholder').style.display='none'};r.readAsDataURL(f)}
+function doExportEpub(){var bid=_epubExportBid;if(!bid)return;var title=$('epubTitle').value.trim()||'';var author=$('epubAuthor').value.trim();var desc=$('epubDesc').value.trim();var cover=$('epubCoverImg').src||'';if(cover&&cover.indexOf('data:image')!==0)cover='';var payload={title:title,author:author,description:desc,cover_base64:cover};closeModal('epubExportModal');$('loadingOverlay').classList.add('show');var x=new XMLHttpRequest();x.open('POST','/api/book/'+bid+'/export-epub',true);x.responseType='blob';x.onload=function(){$('loadingOverlay').classList.remove('show');if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var m=disp.match(/filename\*?=['"]?([^;'"]+)/i);var fn=m?decodeURIComponent(m[1].replace(/UTF-8''/i,'')):'book.epub';_downloadBlob(blob,fn)}else{var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);toast(d.error||'','error')}catch(e){toast('','error')}};r.readAsText(x.response)}};x.onerror=function(){$('loadingOverlay').classList.remove('show');toast('','error')};x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(payload))}
+function openImportNew(){openModal('importModal')}
+function openCreateBookModal(){openModal('createBookModal')}
+function doCreateBookFromModal(){closeModal('createBookModal');createBook()}
+function openImport(){openImportNew()}
+function doExport(f){var bid=bookId;if(!bid){toast('请先打开一本书','warn');return}var ext={md:'md',txt:'txt',zip:'zip'}[f]||f;var x=new XMLHttpRequest();x.open('GET','/api/book/'+bid+'/export?format='+f,true);x.responseType='blob';x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var m=disp.match(/filename\*?=['"]?([^;'"]+)/i);var fn=m?decodeURIComponent(m[1].replace(/UTF-8''/i,'')):'book.'+ext;_downloadBlob(blob,fn)}else{toast('','error')}};x.onerror=function(){toast('','error')};x.send()}
+function doLogout(){clearAppState();api('POST','/api/auth/logout',undefined,function(){location.href='/login'})}
+
+function setupImport(){var drop=$('impDrop'),file=$('impFile');drop.ondragover=function(e){e.preventDefault();drop.style.borderColor='var(--accent)'};drop.ondragleave=function(){drop.style.borderColor=''};drop.ondrop=function(e){e.preventDefault();drop.style.borderColor='';if(e.dataTransfer.files.length)doImport(e.dataTransfer.files[0])};file.onchange=function(){if(file.files.length)doImport(file.files[0])}}
+
+function setImportProgress(pct,text){$('impProgressFill').style.width=pct+'%';$('impProgressText').textContent=text}
+function doImport(file){
+ if(file.size>100*1024*1024){$('impSt').textContent=' 100MB，请拆分成 smaller 文件或压缩后重试';$('impSt').style.color='var(--danger)';return}
+ $('impDrop').style.display='none';
+ $('impProgressWrap').style.display='';
+ $('impSt').textContent='';$('impSt').style.color='';
+  setImportProgress(0,'读取文件中...');
+ var startTime=Date.now();
+ var reader=new FileReader();
+ reader.onprogress=function(e){if(e.lengthComputable){var pct=Math.round(e.loaded/e.total*25);setImportProgress(pct,'读取文件 ('+Math.round(e.loaded/1024)+'KB / '+Math.round(e.total/1024)+'KB)...')}};
+ reader.onerror=function(){$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='已导入 '+d.imported+' ';
+ cachedBooks=null;if(d.book_id){currentBookTitle=d.title;openBook(d.book_id)}
+        setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
+ }else{
+ setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'');$('impSt').style.color='var(--danger)'}
+ });
+ };
+ reader.readAsDataURL(file);
+}
+
+function switchBottomTab(tab){
+ currentBottomTab=tab;
+ document.querySelectorAll('.bottom-tab').forEach(function(b){b.classList.toggle('active',b.dataset.btab===tab)});
+ $('timelinePane').classList.toggle('active',tab==='timeline');
+ $('predictionPane').classList.toggle('active',tab==='prediction');
+ $('outlinePane').classList.toggle('active',tab==='outline');
+ $('readthroughPane').classList.toggle('active',tab==='readthrough');
+ if(!bottomPanelOpen){openBottomPanel()}
+ if(tab==='outline'){loadOutlineSource()}
+}
+
+function clearAIChat(){aiMessages=[];renderAIMessages();saveAIMessages()}
+
+var predicting=false;
+function startPrediction(){
+  if(!bookId){toast('请先打开一本书','warn');return}
+ if(predicting)return;
+ predicting=true;
+ toast('...','success');
+ _streamGenerate('prediction',$('predLog'),function(fullText){
+ predicting=false;
+ if(fullText){
+ var html='<div style="padding:10px 14px;font-size:12px;line-height:1.7;color:var(--t2);">';
+ html+=_mdToHtml(fullText);
+ html+='</div>';
+ $('predictionResultBody').innerHTML=html;
+      $('predLog').textContent='预言生成完成';
+ toast('','success');
+ }else{
+      $('predictionResultBody').innerHTML='<div style="text-align:center;padding:40px 20px"><div style="font-size:28px;margin-bottom:12px">&#128302;</div><h3 style="font-size:15px;color:var(--t1);margin-bottom:8px">生成失败</h3><p style="font-size:12px;color:var(--t2);max-width:420px;margin:0 auto 20px;line-height:1.6">生成失败，请重试</p></div>';
+      toast('预言生成失败','error');
+ }
+ });
+}
+function resetPrediction(){
+ $('predictionResultBody').innerHTML='<div style="text-align:center;padding:40px 20px"><div style="font-size:28px;margin-bottom:12px">&#128302;</div><h3 style="font-size:15px;color:var(--t1);margin-bottom:8px">读者预言</h3><p style="font-size:12px;color:var(--t2);max-width:420px;margin:0 auto 20px;line-height:1.6">点击上方"预言"按钮生成。生成后此处会显示结果。</p></div>';
+}
+
+function _mdToHtml(md){
+ if(!md)return'';
+ var html='';var lines=md.split('\n');var inList=false;
+ lines.forEach(function(line){
+ line=line.trimEnd();
+ if(line.startsWith('## ')){
+ if(inList){html+='</ul>';inList=false}
+ html+='<h3 style="font-size:14px;font-weight:700;color:var(--accent);margin:16px 0 8px;letter-spacing:.3px">'+esc(line.slice(3))+'</h3>';
+ }else if(line.startsWith('# ')){
+ if(inList){html+='</ul>';inList=false}
+ html+='<h2 style="font-size:15px;font-weight:700;color:var(--t1);margin:18px 0 10px;letter-spacing:.3px">'+esc(line.slice(2))+'</h2>';
+ }else if(line.startsWith('- ')||line.startsWith('* ')){
+ if(!inList){html+='<ul style="margin:4px 0 8px;padding-left:18px">';inList=true}
+ html+='<li style="font-size:12px;line-height:1.7;color:var(--t2);margin:3px 0">'+esc(line.slice(2))+'</li>';
+ }else if(line.trim()===''){
+ if(inList){html+='</ul>';inList=false}
+ }else{
+ if(inList){html+='</ul>';inList=false}
+ html+='<p style="font-size:12px;line-height:1.7;color:var(--t2);margin:4px 0">'+esc(line)+'</p>';
+ }
+ });
+ if(inList)html+='</ul>';
+ return html;
+}
+
+function toggleBottomPanel(){if(bottomPanelOpen)closeBottomPanel();else openBottomPanel()}
+
+function openBottomPanel(){
+ bottomPanelOpen=true;
+ var panel=$('bottomPanel');
+ panel.classList.remove('collapsed');
+ var h=window.innerHeight-44;
+ panel.style.height=h+'px';
+ bottomPanelHeight=h;
+}
+
+function closeBottomPanel(){
+ bottomPanelOpen=false;
+ var panel=$('bottomPanel');
+ var handle=$('bottomHandle');
+ panel.style.height=(handle?handle.offsetHeight:30)+'px';
+ panel.classList.add('collapsed');
+}
+
+function setupBottomPanelDrag(){
+ var handle=$('bottomHandle'),panel=$('bottomPanel');
+ var dragging=false,startY=0,startH=0;
+
+ handle.addEventListener('click',function(e){
+ if(e.target.closest('.bottom-tab')||e.target.closest('.bottom-toggle')||e.target.closest('.handle-grip'))return;
+ toggleBottomPanel();
+ });
+
+ var grip=handle.querySelector('.handle-grip');
+ grip.addEventListener('mousedown',function(e){
+ dragging=true;
+ startY=e.clientY;
+ startH=bottomPanelOpen?panel.offsetHeight:bottomPanelHeight;
+ document.body.style.cursor='ns-resize';
+ document.body.style.userSelect='none';
+ e.preventDefault();
+ e.stopPropagation();
+ });
+
+ document.addEventListener('mousemove',function(e){
+ if(!dragging)return;
+ var maxH=window.innerHeight-44;
+ var minH=handle.offsetHeight||30;
+ var h=Math.max(minH,Math.min(maxH,startH+(startY-e.clientY)));
+ panel.style.height=h+'px';
+ panel.classList.remove('collapsed');
+ panel.style.transition='none';
+ bottomPanelHeight=h;
+ bottomPanelOpen=true;
+ });
+
+ document.addEventListener('mouseup',function(){
+ if(!dragging)return;
+ dragging=false;
+ document.body.style.cursor='';
+ document.body.style.userSelect='';
+ panel.style.transition='';
+ var minH=handle.offsetHeight||30;
+ if(panel.offsetHeight<=minH+8){
+ closeBottomPanel();
+ }else{
+ bottomPanelHeight=panel.offsetHeight;
+ savedBottomPanelHeight=bottomPanelHeight;
+ }
+ });
+
+ grip.addEventListener('dblclick',function(e){
+ e.stopPropagation();
+ var h=savedBottomPanelHeight||window.innerHeight-44;
+ panel.style.height=h+'px';
+ panel.classList.remove('collapsed');
+ bottomPanelHeight=h;
+ bottomPanelOpen=true;
+ });
+}
+
+
+
+function openReadthrough(){
+ if(!bookId){toast('','warn');return}
+ if(bottomPanelOpen && currentBottomTab==='readthrough'){
+ closeBottomPanel();
+ return;
+ }
+ switchBottomTab('readthrough');
+ if(rtPollTimer===null)pollRTStatus();
+}
+
+/* === === */
+var rtPollTimer=null;
+function loadOutlineSource(){
+ if(!bookId)return;
+ api('GET','/api/book/'+bookId+'/readthrough/file?type=outline',undefined,function(d,s){
+ var ss=$('outlineSource');
+ if(s===200 && d.exists && d.text){
+ ss.value=d.text;
+      ss.placeholder='outline.md 已加载';
+ }else{
+ ss.value='';
+      ss.placeholder='未生成过大纲，需要首次生成';
+ }
+ });
+}
+function loadSourceToRT(){
+ if(!bookId)return;
+ api('GET','/api/book/'+bookId+'/readthrough/file?type=source',undefined,function(d,s){
+ var ss=$('rtSource');
+ if(s===200 && d.exists && d.text){
+ ss.value=d.text;
+      ss.placeholder='source.md 已加载';
+ }else{
+ ss.value='';
+      ss.placeholder='通读完成后此处显示笔记...';
+ }
+ });
+}
+function startRT(){
+ if(!bookId){toast('','warn');return}
+ if(rtLastStatus==='running'){
+ stopRT();
+ return;
+ }
+ if(rtLastStatus==='done' || (rtLastStatus==='idle' && $('rtSource').value.trim()!=='')){
+ clearRT();
+ return;
+ }
+ rtLastDoneChapters=0;
+ api('POST','/api/book/'+bookId+'/readthrough/start',{},function(d,s){
+    if(s!==200){toast(d.error||'启动失败','error');}
+ });
+ $('rtStartBtn').textContent='';$('rtStream').textContent='';pollRTStatus();
+}
+function stopRT(){
+ api('POST','/api/book/'+bookId+'/readthrough/stop',{},function(d){
+ toast('...','warn');
+ });
+}
+function clearRT(){
+  if(!confirm('确定清空所有通读笔记并重新开始？'))return;
+ api('POST','/api/book/'+bookId+'/readthrough/clear',{},function(d,s){
+ if(s===200){
+ $('rtStream').textContent='...';
+ $('rtSource').value='';
+ loadSourceToRT();
+ $('rtProgress').style.width='0%';$('rtPhase').textContent='...';
+ $('rtChapters').textContent='0/0 ';
+ $('rtStartBtn').style.display='';
+ $('rtStartBtn').textContent='';
+ toast('','success');
+ rtLastStatus='idle';
+ rtLastDoneChapters=0;
+ // 
+ startRT();
+    }else toast(d.error||'清空失败','error');
+ });
+}
+function pollRTStatus(){
+ clearInterval(rtPollTimer);
+ rtPollTimer=setInterval(function(){api('GET','/api/book/'+bookId+'/readthrough/status',undefined,updateRTUI);},400);
+ api('GET','/api/book/'+bookId+'/readthrough/status',undefined,updateRTUI);
+}
+function updateRTUI(d,s){
+ if(s!==200)return;
+ var st=d.status||'idle';
+ rtLastStatus=st;
+ var doneCh=d.done_chapters||0;
+ $('rtProgress').style.width=(d.progress||0)+'%';
+ $('rtPhase').textContent=d.phase||st;
+  $('rtChapters').textContent=doneCh+'/'+(d.total_chapters||0)+' 章';
+ if(d.stream_buffer!==undefined){
+ var sc=$('rtStream');sc.textContent=d.stream_buffer||'';sc.parentElement.scrollTop=sc.parentElement.scrollHeight;
+ }
+ if(d.logs && d.logs.length){
+ $('rtLogs').textContent=d.logs.join('\n');
+ var lw=$('rtLogs');lw.parentElement.scrollTop=lw.parentElement.scrollHeight;
+ }
+ if(st==='running'){
+    $('rtStartBtn').style.display='';$('rtStartBtn').textContent='重新通读';
+ if(doneCh>rtLastDoneChapters){
+ rtLastDoneChapters=doneCh;
+ loadSourceToRT();
+ }
+ }else if(st==='done'){
+ clearInterval(rtPollTimer);rtPollTimer=null;
+ $('rtStartBtn').style.display='';$('rtStartBtn').textContent='';
+    $('rtPhase').textContent='完成';toast('通读完成！','success');
+ rtLastDoneChapters=doneCh;
+ loadSourceToRT();
+ }else if(st==='idle'){
+ clearInterval(rtPollTimer);rtPollTimer=null;
+ if(d.has_source || $('rtSource').value.trim()!==''){
+ $('rtStartBtn').textContent='';
+ }else{
+ $('rtStartBtn').textContent='';
+ }
+ rtLastDoneChapters=doneCh;
+ loadSourceToRT();
+ }else if(st==='error'){
+ clearInterval(rtPollTimer);rtPollTimer=null;
+ $('rtStartBtn').style.display='';$('rtStartBtn').textContent='';
+ toast(d.error||'','error');
+ rtLastDoneChapters=doneCh;
+ loadSourceToRT();
+ }
+}
+
+function generateOutlineFromSource(){
+ if(!bookId){toast('','warn');return}
+ toast('...','success');
+ _streamGenerate('outline',$('outlineLog'),function(fullText){
+ if(fullText){
+      toast('大纲已保存到 outline.md','success');
+      $('outlineLog').textContent='大纲生成完成';
+ loadOutlineSource();
+ }else{
+ toast('','error');
+ $('outlineLog').textContent='';
+ }
+ });
+}
+
+function loadAnnotations(){
+ if(!bookId)return;
+ api('GET','/api/book/'+bookId+'/annotations',undefined,function(d,s){
+ if(s===200&&d.annotations){
+ bookAnnotations={};
+ d.annotations.forEach(function(a){
+ if(!bookAnnotations[a.chapter_id])bookAnnotations[a.chapter_id]=[];
+ bookAnnotations[a.chapter_id].push(a);
+ });
+ syncHighlights();
+ }
+ });
+}
+
+function syncHighlights(){
+ var ta=$('editorArea');
+ var hc=$('highlightContent');
+ if(!ta||!hc)return;
+ var text=ta.value;
+ var anns=(bookAnnotations[chapterId]||[]);
+ var verifiedAnns=[];
+ anns.forEach(function(ann){
+ if(text.slice(ann.start,ann.end)===ann.text){
+ verifiedAnns.push(ann);
+ }else{
+ var idx=text.indexOf(ann.text);
+ if(idx>=0){
+ verifiedAnns.push({id:ann.id,start:idx,end:idx+ann.text.length,text:ann.text,note:ann.note,color:ann.color});
+ }
+ }
+ });
+
+ var events=[];
+ verifiedAnns.forEach(function(ann){
+ events.push({pos:Math.max(0,ann.start),type:'start',ann:ann});
+ events.push({pos:Math.min(text.length,ann.end),type:'end',ann:ann});
+ });
+ events.sort(function(a,b){
+ if(a.pos!==b.pos)return a.pos-b.pos;
+ return a.type==='end'?-1:1;
+ });
+
+ var active=new Set();
+ var lastPos=0;
+ var html='';
+ var i=0;
+ while(i<events.length){
+ var pos=events[i].pos;
+ if(pos>lastPos){
+ var seg=esc(text.slice(lastPos,pos));
+ if(active.size>0){
+ var first=active.values().next().value;
+ var cls=first.color||'yellow';
+ html+='<mark class="'+esc(cls)+'">'+seg+'</mark>';
+ }else{
+ html+=seg;
+ }
+ lastPos=pos;
+ }
+ while(i<events.length&&events[i].pos===pos){
+ if(events[i].type==='start')active.add(events[i].ann);
+ else active.delete(events[i].ann);
+ i++;
+ }
+ }
+ if(lastPos<text.length){
+ var seg=esc(text.slice(lastPos));
+ if(active.size>0){
+ var first=active.values().next().value;
+ var cls=first.color||'yellow';
+ html+='<mark class="'+esc(cls)+'">'+seg+'</mark>';
+ }else{
+ html+=seg;
+ }
+ }
+
+ hc.innerHTML=html;
+ hc.style.marginTop=(-ta.scrollTop)+'px';
+}
+
+function startRTFromChat(){
+ if(!bookId)return;
+ showConfirm('',' AI token',function(){
+ switchBottomTab('readthrough');
+ startRT();
+ });
+}
+
+checkAuth();
+</script>
+</body>
+</html>

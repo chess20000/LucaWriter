@@ -1,0 +1,3969 @@
+import os
+import json
+import time
+import hashlib
+import zipfile
+import io
+import secrets
+import glob
+import re
+import shutil
+import base64
+import xml.etree.ElementTree as ET
+import subprocess
+from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse, parse_qs, quote, unquote
+import urllib.request
+import threading
+from datetime import datetime
+from ipaddress import ip_network, ip_address
+from http.cookies import SimpleCookie
+
+try:
+    import docx as docx_mod
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+
+try:
+    from PyPDF2 import PdfReader
+    HAS_PDF = True
+except ImportError:
+    HAS_PDF = False
+
+try:
+    import ebooklib
+    from ebooklib import epub as epub_mod
+    from html.parser import HTMLParser
+    HAS_EPUB = True
+except ImportError:
+    HAS_EPUB = False
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def _find_frontend_dir():
+    for d in [os.path.join(SCRIPT_DIR, '..', 'frontend'), os.path.join(SCRIPT_DIR, 'frontend'), SCRIPT_DIR, '/workspace/lucawriter/frontend', '/app']:
+        if os.path.exists(os.path.join(d, 'index.html')):
+            return d
+    return SCRIPT_DIR
+
+FRONTEND_DIR = os.environ.get('FRONTEND_DIR', _find_frontend_dir())
+
+def _find_data_dir():
+    env = os.environ.get('DATA_DIR')
+    if env:
+        return env
+    usrdata = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'usrdata'))
+    if os.path.isdir(usrdata):
+        return usrdata
+    parent_data = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'data'))
+    if os.path.isdir(parent_data):
+        return parent_data
+    os.makedirs(usrdata, exist_ok=True)
+    return usrdata
+
+DATA_DIR = _find_data_dir()
+BOOKS_DIR = os.path.join(DATA_DIR, 'books')
+LOG_DIR = os.path.join(DATA_DIR, 'logs')
+MESSAGES_DIR = os.path.join(DATA_DIR, 'messages')
+SALT_FILE = os.path.join(DATA_DIR, 'salt')
+SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
+USERS_FILE = os.path.join(DATA_DIR, 'users.json')
+SESSIONS_FILE = os.path.join(DATA_DIR, 'sessions.json')
+
+RESERVED_FILES = {'settings', 'users', 'messages', 'salt', 'outline', 'sessions', 'meta'}
+
+DEFAULT_PROVIDER_PRESETS = [
+    {'name': 'LMStudio', 'base_url': 'http://localhost:1234/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
+    {'name': 'DeepSeek', 'base_url': 'https://api.deepseek.com', 'api_key': '', 'model': 'deepseek-v4-flash', 'use_custom_json': False, 'custom_json': ''},
+    {'name': 'MiniMax', 'base_url': 'https://api.minimaxi.com/v1', 'api_key': '', 'model': 'MiniMax-M2.5', 'use_custom_json': False, 'custom_json': ''},
+    {'name': '预设4', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
+    {'name': '预设5', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
+    {'name': '本地 Llama.cpp', 'base_url': 'http://127.0.0.1:8080/v1', 'api_key': '', 'model': 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M', 'use_custom_json': False, 'custom_json': ''},
+]
+
+DEFAULT_SETTINGS = {
+    'base_url': '', 'api_key': '', 'model': '', 'models': [],
+    'ai_frequency': 500, 'ai_max_tokens': 512, 'ai_temperature': 0.7,
+    'ai_auto_comment': True,
+    'ai_system_prompt': '你是一个真诚、有温度的文风指导老师。回答像朋友聊天一样自然。只输出纯文本，不加格式标记。',
+    'outline_enabled': True, 'outline_frequency': 2000,
+    'provider_presets': [],
+    'active_provider_idx': 0,
+    'model_context_length': 0,
+}
+DEFAULT_OUTLINE = {
+    'worldview': '', 'characters': [], 'timeline': [],
+    'key_events': [], 'rules': [], 'updated': 0, 'chapter_summaries': {},
+    'timeline_nodes': [],
+    'ai_suggestions': {
+        'worldview': '', 'characters': [], 'timeline': [],
+        'key_events': [], 'rules': [], 'updated': 0,
+    },
+}
+
+
+def ensure_dirs():
+    for d in [DATA_DIR, BOOKS_DIR, LOG_DIR, MESSAGES_DIR]:
+        os.makedirs(d, exist_ok=True)
+
+
+ensure_dirs()
+
+
+def get_salt():
+    if os.path.exists(SALT_FILE):
+        with open(SALT_FILE, 'r') as f:
+            s = f.read().strip()
+            if s: return s
+    salt = secrets.token_hex(32)
+    with open(SALT_FILE, 'w') as f: f.write(salt)
+    return salt
+
+
+_salt = get_salt()
+
+
+def hash_password(pw):
+    return hashlib.sha256((pw + _salt).encode()).hexdigest()
+
+
+def load_json(path, default=dict):
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f: return json.load(f)
+        except:
+            # 如果主文件损坏，尝试读取临时文件
+            tmp = path + '.tmp'
+            if os.path.exists(tmp):
+                try:
+                    with open(tmp, 'r', encoding='utf-8') as f: return json.load(f)
+                except: return default()
+            return default()
+    return default()
+
+
+_meta_lock = threading.Lock()
+
+def save_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    # meta.json 用锁保护，避免多线程并发写导致损坏
+    if path.endswith('meta.json'):
+        with _meta_lock:
+            tmp = path + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, path)
+    else:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def log_action(action, details=''):
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        log_file = os.path.join(LOG_DIR, f'{today}.log')
+        ts = datetime.now().strftime('%H:%M:%S')
+        line = f"[{ts}] {action}"
+        if details: line += f" - {details}"
+        with open(log_file, 'a', encoding='utf-8') as f: f.write(line + "\n")
+    except: pass
+
+
+def is_valid_id(oid):
+    if not oid or not isinstance(oid, str): return False
+    if '..' in oid or '/' in oid or '\\' in oid: return False
+    return bool(re.match(r'^[a-zA-Z0-9_\-]+$', oid))
+
+
+def is_safe_url(url):
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme.lower() not in ('http', 'https'): return False
+        host = parsed.hostname
+        if not host: return False
+        if host.lower() in ('localhost', '127.0.0.1', '0.0.0.0', '::1'):
+            return True
+        try:
+            ip = ip_address(host)
+            if ip.is_loopback: return True
+            if ip.is_multicast or ip.is_reserved: return False
+            for n in [ip_network('10.0.0.0/8'), ip_network('172.16.0.0/12'),
+                       ip_network('192.168.0.0/16'), ip_network('169.254.0.0/16')]:
+                if ip in n: return True
+        except ValueError: pass
+        return True
+    except: return False
+
+
+def get_settings():
+    s = load_json(SETTINGS_FILE)
+    changed = False
+    for k, v in DEFAULT_SETTINGS.items():
+        if k not in s: s[k] = v; changed = True
+    # 迁移：旧版本 max_tokens 默认 80，对长上下文+推理模型不够，自动提升
+    if s.get('ai_max_tokens', 0) < 200:
+        s['ai_max_tokens'] = 512; changed = True
+    # 迁移/初始化 provider_presets
+    presets = s.get('provider_presets', [])
+    if not presets or len(presets) < 6:
+        # 尝试从旧版顶层配置创建第一个预设
+        old_url = s.get('base_url', '')
+        old_key = s.get('api_key', '')
+        old_model = s.get('model', '')
+        presets = list(DEFAULT_PROVIDER_PRESETS)
+        if old_url or old_key or old_model:
+            presets[0]['base_url'] = old_url or presets[0]['base_url']
+            presets[0]['api_key'] = old_key
+            presets[0]['model'] = old_model
+        s['provider_presets'] = presets
+        changed = True
+    else:
+        # 迁移：把旧版 Ollama 预设替换为 DeepSeek
+        for i, p in enumerate(presets):
+            if p.get('name') == 'Ollama':
+                p['name'] = 'DeepSeek'
+                p['base_url'] = 'https://api.deepseek.com'
+                p['model'] = 'deepseek-v4-flash'
+                changed = True
+            # 同时确保 MiniMax URL 带 /v1
+            if p.get('name') == 'MiniMax' and not p.get('base_url', '').endswith('/v1'):
+                p['base_url'] = 'https://api.minimaxi.com/v1'
+                changed = True
+        # 迁移：确保本地 Llama.cpp 预设存在
+        has_local = any('llama.cpp' in (p.get('name') or '').lower() for p in presets)
+        if not has_local:
+            presets.append({'name': '本地 Llama.cpp', 'base_url': 'http://127.0.0.1:8080/v1', 'api_key': '', 'model': 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M', 'use_custom_json': False, 'custom_json': ''})
+            changed = True
+    # 确保 active_provider_idx 有效
+    idx = s.get('active_provider_idx', 0)
+    if idx < 0 or idx >= len(presets):
+        idx = 0
+        s['active_provider_idx'] = idx
+        changed = True
+    # 将当前激活 preset 的字段提升到顶层，保持向后兼容
+    active = presets[idx]
+    if active.get('use_custom_json') and active.get('custom_json'):
+        try:
+            custom = json.loads(active['custom_json'])
+            if isinstance(custom, dict):
+                s['base_url'] = custom.get('base_url', active.get('base_url', ''))
+                s['api_key'] = custom.get('api_key', active.get('api_key', ''))
+                s['model'] = custom.get('model', active.get('model', ''))
+            else:
+                s['base_url'] = active.get('base_url', '')
+                s['api_key'] = active.get('api_key', '')
+                s['model'] = active.get('model', '')
+        except:
+            s['base_url'] = active.get('base_url', '')
+            s['api_key'] = active.get('api_key', '')
+            s['model'] = active.get('model', '')
+    else:
+        s['base_url'] = active.get('base_url', '')
+        s['api_key'] = active.get('api_key', '')
+        s['model'] = active.get('model', '')
+    if changed: save_json(SETTINGS_FILE, s)
+    return s
+
+
+def get_book_dir(book_id):
+    return os.path.join(BOOKS_DIR, book_id)
+
+
+def get_book_meta(book_id):
+    p = os.path.join(get_book_dir(book_id), 'meta.json')
+    return load_json(p) if os.path.exists(p) else None
+
+
+def list_chapter_files(book_id):
+    d = os.path.join(get_book_dir(book_id), 'chapters')
+    if not os.path.isdir(d): return []
+    return sorted([f for f in os.listdir(d) if f.endswith('.json') and not f.startswith('.')],
+                   key=lambda f: os.path.getmtime(os.path.join(d, f)))
+
+
+def get_outline(book_id):
+    p = os.path.join(get_book_dir(book_id), 'outline.json')
+    o = load_json(p)
+    changed = False
+    for k, v in DEFAULT_OUTLINE.items():
+        if k not in o: o[k] = v; changed = True
+    if changed: save_json(p, o)
+    return o
+
+
+def get_core_memory(book_id):
+    p = os.path.join(get_book_dir(book_id), 'core_memory.md')
+    if os.path.exists(p):
+        with open(p, 'r', encoding='utf-8') as f:
+            return f.read()
+    return ''
+
+
+def save_core_memory(book_id, content):
+    p = os.path.join(get_book_dir(book_id), 'core_memory.md')
+    with open(p, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+
+def get_chapter_summary(book_id, chapter_id):
+    p = os.path.join(get_book_dir(book_id), 'chapter_summaries', f"{chapter_id}.md")
+    if os.path.exists(p):
+        with open(p, 'r', encoding='utf-8') as f:
+            return f.read()
+    return ''
+
+
+def save_chapter_summary(book_id, chapter_id, content):
+    d = os.path.join(get_book_dir(book_id), 'chapter_summaries')
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, f"{chapter_id}.md")
+    with open(p, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+
+def get_volume_summaries(book_id):
+    d = os.path.join(get_book_dir(book_id), 'volume_summaries')
+    if not os.path.isdir(d): return {}
+    result = {}
+    for fn in sorted(os.listdir(d)):
+        if fn.endswith('.md'):
+            with open(os.path.join(d, fn), 'r', encoding='utf-8') as f:
+                result[fn.replace('.md', '')] = f.read()
+    return result
+
+
+def build_pyramid_context(book_id):
+    core = get_core_memory(book_id) or '（尚无核心记忆）'
+    vols = get_volume_summaries(book_id)
+    vol_text = ''
+    for k, v in vols.items():
+        vol_text += f'\n## {k}\n{v}'
+    meta = get_book_meta(book_id) or {}
+    order = meta.get('chapter_order', [])
+    recent_ch = ''
+    for cid in order[-3:]:
+        cs = get_chapter_summary(book_id, cid)
+        if cs:
+            recent_ch += f'\n--- 章节摘要 ---\n{cs}'
+    return f"""【全书核心记忆】
+{core}
+
+【卷级脉络】
+{vol_text}
+
+【最近章节摘要】
+{recent_ch}
+"""
+
+
+def has_users():
+    return bool(load_json(USERS_FILE))
+
+
+def validate_session(token):
+    if not token: return False
+    for s in load_json(SESSIONS_FILE, list):
+        if s.get('token') == token and s.get('expires', 0) > time.time(): return True
+    return False
+
+
+def get_cookie_token(headers):
+    c = headers.get('Cookie', '')
+    if not c: return None
+    cookie = SimpleCookie()
+    try: cookie.load(c)
+    except: return None
+    return cookie['session'].value if 'session' in cookie else None
+
+
+def make_session(username):
+    token = secrets.token_hex(32)
+    sessions = load_json(SESSIONS_FILE, list)
+    sessions = [s for s in sessions if s.get('expires', 0) > time.time()]
+    sessions.append({'token': token, 'user': username, 'expires': time.time() + 86400 * 30})
+    save_json(SESSIONS_FILE, sessions)
+    return token
+
+
+def migrate_old_data():
+    old = []
+    for f in glob.glob(os.path.join(DATA_DIR, '*.json')):
+        fn = os.path.basename(f)
+        name = fn.replace('.json', '')
+        if name.startswith('.') or name in RESERVED_FILES: continue
+        try:
+            with open(f, 'r', encoding='utf-8') as fp: ch = json.load(fp)
+            ch['_old_file'] = f
+            old.append(ch)
+        except: continue
+    if not old: return
+    bid = 'book_' + str(int(time.time()))
+    bd = get_book_dir(bid)
+    cd = os.path.join(bd, 'chapters')
+    os.makedirs(cd, exist_ok=True)
+    os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+    order = [ch.get('id', f'ch_{i}') for i, ch in enumerate(old)]
+    save_json(os.path.join(bd, 'meta.json'), {'id': bid, 'title': '我的小说', 'created': time.time(), 'updated': time.time(), 'chapter_order': order})
+    for ch in old:
+        cid = ch.get('id', 'ch_migrated')
+        save_json(os.path.join(cd, f"{cid}.json"), {'id': cid, 'title': ch.get('title', ''), 'content': ch.get('content', ''), 'updated': ch.get('updated', time.time())})
+        of = ch.get('_old_file')
+        if of and os.path.exists(of):
+            try: os.remove(of)
+            except: pass
+    save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+    log_action('MIGRATE', f'{len(old)} chapters to {bid}')
+
+
+migrate_old_data()
+
+
+_CHAPTER_SPLIT_RE = re.compile(r'^\s*(?:第[一二三四五六七八九十百千万\d]+[章回节]|Chapter\s+\d+|CHAPTER\s+\d+)')
+_MD_CHAPTER_RE = re.compile(r'^##\s+')
+
+def parse_txt(text, filename):
+    chapters = []
+    lines = text.split('\n')
+    # 检测是否有章节标题
+    has_chapters = any(_CHAPTER_SPLIT_RE.match(l) for l in lines[:5000])
+    if not has_chapters or len(lines) < 10:
+        return [{'title': filename.replace('.txt', ''), 'content': text.strip()}]
+    current_title = filename.replace('.txt', '')
+    current_lines = []
+    for line in lines:
+        if _CHAPTER_SPLIT_RE.match(line):
+            if current_lines:
+                chapters.append({'title': current_title, 'content': '\n'.join(current_lines).strip()})
+            current_title = line.strip()[:100]
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_lines:
+        chapters.append({'title': current_title, 'content': '\n'.join(current_lines).strip()})
+    return chapters
+
+
+def parse_md(text, filename):
+    chapters = []
+    lines = text.split('\n')
+    has_chapters = any(_MD_CHAPTER_RE.match(l) for l in lines[:5000])
+    if not has_chapters or len(lines) < 10:
+        return [{'title': filename.replace('.md', ''), 'content': text.strip()}]
+    current_title = filename.replace('.md', '')
+    current_lines = []
+    for line in lines:
+        if _MD_CHAPTER_RE.match(line):
+            if current_lines:
+                chapters.append({'title': current_title, 'content': '\n'.join(current_lines).strip()})
+            current_title = line.lstrip('#').strip()[:100]
+            current_lines = []
+        else:
+            current_lines.append(line)
+    if current_lines:
+        chapters.append({'title': current_title, 'content': '\n'.join(current_lines).strip()})
+    return chapters
+
+
+def parse_docx_bytes(raw, filename):
+    if HAS_DOCX:
+        try:
+            doc = docx_mod.Document(io.BytesIO(raw))
+            chapters = []
+            current_title = filename.replace('.docx', '')
+            current_parts = []
+            for p in doc.paragraphs:
+                if p.style and p.style.name and 'Heading' in p.style.name and current_parts:
+                    chapters.append({'title': current_title, 'content': '\n\n'.join(current_parts)})
+                    current_title = p.text.strip()[:100]
+                    current_parts = []
+                elif p.text.strip():
+                    current_parts.append(p.text.strip())
+            if current_parts:
+                chapters.append({'title': current_title, 'content': '\n\n'.join(current_parts)})
+            return chapters, None
+        except Exception as e:
+            log_action('DOCX_PARSE_ERROR', str(e)[:200])
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), 'r') as zf:
+            # 只读前 20MB 的 document.xml，防止超大文件卡死
+            info = zf.getinfo('word/document.xml')
+            if info.file_size > 20 * 1024 * 1024:
+                # 流式读取，分段解析
+                xml_parts = []
+                with zf.open('word/document.xml') as xf:
+                    while len(''.join(xml_parts)) < 10 * 1024 * 1024:
+                        chunk = xf.read(64 * 1024).decode('utf-8', errors='ignore')
+                        if not chunk: break
+                        xml_parts.append(chunk)
+                xml = ''.join(xml_parts)
+            else:
+                xml = zf.read('word/document.xml').decode('utf-8', errors='ignore')
+        # 按段落提取文本，避免 ElementTree 对大 XML 的内存开销
+        paras = []
+        for m in re.finditer(r'<w:p\b[^>]*>(.*?)</w:p>', xml, re.S):
+            p_xml = m.group(1)
+            parts = []
+            for tm in re.finditer(r'<w:t[^>]*>([^<]*)</w:t>', p_xml):
+                t = tm.group(1)
+                if t: parts.append(t)
+            if parts:
+                paras.append(''.join(parts))
+        content = '\n\n'.join(paras)
+        if not content:
+            return None, 'DOCX 内容为空'
+        return [{'title': filename.replace('.docx', ''), 'content': content}], None
+    except Exception as e:
+        log_action('DOCX_PARSE_ERROR', str(e)[:200])
+        return None, f'DOCX解析失败: {str(e)[:80]}'
+
+
+def parse_pdf_bytes(raw, filename):
+    if not HAS_PDF: return None, '需安装 PyPDF2（pip install PyPDF2）'
+    try:
+        reader = PdfReader(io.BytesIO(raw))
+        pages = reader.pages[:500]  # 限制 500 页，防止超大 PDF 卡死
+        texts = []
+        for page in pages:
+            try:
+                t = page.extract_text()
+                if t: texts.append(t)
+            except:
+                continue
+        text = '\n\n'.join(texts)
+        return parse_txt(text, filename), None
+    except Exception as e:
+        log_action('PDF_PARSE_ERROR', str(e)[:200])
+        return None, f'PDF解析失败: {str(e)[:80]}'
+
+
+_TAG_RE = re.compile(r'<[^>]+>', re.S)
+_SCRIPT_RE = re.compile(r'<script[^>]*>.*?</script>', re.S|re.I)
+_STYLE_RE = re.compile(r'<style[^>]*>.*?</style>', re.S|re.I)
+_TITLE_RE = re.compile(r'<title[^>]*>(.*?)</title>', re.S|re.I)
+_H1_RE = re.compile(r'<h[12][^>]*>(.*?)</h[12]>', re.S|re.I)
+
+_BLOCK_TAG_RE = re.compile(r'</?(?:p|div|h[1-6]|li|tr|section|article|blockquote|pre|address)[^>]*>', re.S|re.I)
+_BR_RE = re.compile(r'<br\s*/?>', re.S|re.I)
+
+def _strip_tags(html):
+    """轻量 HTML 到纯文本，保留段落换行"""
+    text = _SCRIPT_RE.sub(' ', html)
+    text = _STYLE_RE.sub(' ', text)
+    # 块级标签和 <br> 替换为换行
+    text = _BR_RE.sub('\n', text)
+    text = _BLOCK_TAG_RE.sub('\n', text)
+    text = _TAG_RE.sub(' ', text)
+    # 合并连续空格，但保留换行；再把连续3个以上换行压缩为2个
+    lines = text.split('\n')
+    cleaned = []
+    for line in lines:
+        line = re.sub(r'[ \t]+', ' ', line).strip()
+        if line:
+            cleaned.append(line)
+    return '\n\n'.join(cleaned)
+
+def _extract_title(html):
+    m = _H1_RE.search(html)
+    if m:
+        return _TAG_RE.sub('', m.group(1)).strip()
+    m = _TITLE_RE.search(html)
+    if m:
+        return _TAG_RE.sub('', m.group(1)).strip()
+    return ''
+
+def _extract_html_heading(html):
+    """从HTML中提取可能的章节标题（优先h1/h2/h3，不依赖<title>）"""
+    for tag in ['h1', 'h2', 'h3']:
+        m = re.search(rf'<{tag}[^>]*>(.*?)</{tag}>', html, re.S|re.I)
+        if m:
+            text = _TAG_RE.sub('', m.group(1)).strip()
+            if text and len(text) < 200 and text.lower() not in ('cover', 'bookcover', '封面', '标题', 'title', 'contents', '目录'):
+                return text
+    return ''
+
+_PHOTO_RE = re.compile(r'照片|图片|插图|图\s*\d|photo|picture|image|caption|fig\.?\s*\d', re.I)
+
+def _guess_chapter_from_text(text):
+    """从正文开头猜测章节名"""
+    lines = text.split('\n')
+    for i, line in enumerate(lines[:25]):
+        line = line.strip()
+        if not line:
+            continue
+        # 常见中文章节格式
+        if re.match(r'^第[一二三四五六七八九十百千零\d]+[章回节卷篇部集]', line):
+            return line[:100]
+        # 序/引/楔/终/跋/后记/前言/序言/尾声/引子
+        if re.match(r'^[序前引终楔跋][章曲言子]$', line):
+            return line[:100]
+        if line in ('引子', '楔子', '尾声', '后记', '前言', '序言', '终章', '跋', '序章', '引言', '前传', '外传'):
+            return line[:100]
+        # 括号编号章节：（一）xxx、（1）xxx
+        m = re.match(r'^（[一二三四五六七八九十百千零\d]+）[\.、:：]?\s*(.+)', line)
+        if m and len(line) < 60:
+            return line[:100]
+        # 数字/中文数字+点/顿号，且不像图片说明
+        m = re.match(r'^[\d一二三四五六七八九十]+[\.、]\s*(.+)', line)
+        if m and len(line) < 50:
+            tail = m.group(1)
+            # 排除明显是图注的内容
+            if not _PHOTO_RE.search(tail) and len(tail) > 1:
+                return line[:100]
+        # 英文 Part / Chapter / Book / Section
+        if re.match(r'^(Part|Chapter|Book|Section)\s+[\dIVX]+', line, re.I):
+            return line[:100]
+        # 英文数字+空格+大写标题（如 "1 THE SEARCH BEGINS"），排除大数字（如地址 175 Fifth Ave）
+        m = re.match(r'^(\d+)\s+[A-Z]', line)
+        if m and int(m.group(1)) <= 99 and len(line) < 100:
+            return line[:100]
+        # 单独数字行，下一行是大写标题（如 "1\n\nBetween One Footstep..."）
+        m = re.match(r'^(\d+)$', line)
+        if m and int(m.group(1)) <= 99:
+            for j in range(i+1, min(i+4, len(lines))):
+                nxt = lines[j].strip()
+                if nxt and re.match(r'^[A-Z]', nxt) and len(nxt) < 100:
+                    return f"{line} {nxt}"[:100]
+        # Prologue / Epilogue / Introduction / Preface
+        if re.match(r'^(Prologue|Epilog(ue)?|Introduction|Preface)\b', line, re.I):
+            return line[:100]
+        # 卷/集开头
+        if re.match(r'^[卷集][一二三四五六七八九十百千零\d]+[\.、:：]?\s*', line):
+            return line[:100]
+    return ''
+
+def parse_epub_bytes(raw, filename):
+    """解析EPUB，返回 (chapters, book_title, err)"""
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), 'r') as zf:
+            namelist = zf.namelist()
+            opf_name = next((n for n in namelist if n.endswith('.opf')), None)
+            if not opf_name:
+                return None, '', 'EPUB中没有找到OPF文件'
+
+            opf_raw = zf.read(opf_name)
+            opf = opf_raw.decode('utf-8', errors='ignore')
+
+            # 提取书名
+            book_title = ''
+            title_match = re.search(r'<dc:title[^>]*>(.*?)</dc:title>', opf, re.S|re.I)
+            if title_match:
+                book_title = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', title_match.group(1)).strip()
+                book_title = _TAG_RE.sub('', book_title).strip()
+            if not book_title:
+                book_title = filename
+                for ext_test in ['.epub', '.txt', '.md']:
+                    if book_title.lower().endswith(ext_test):
+                        book_title = book_title[:-len(ext_test)]
+                        break
+
+            # 提取 spine
+            spine_ids = []
+            for m in re.finditer(r'<itemref[^>]+idref=["\']([^"\']+)', opf):
+                spine_ids.append(m.group(1))
+
+            # 建立 manifest id->href 映射（支持两种属性顺序）
+            id_to_href = {}
+            for m in re.finditer(r'<item[^>]+id=["\']([^"\']+)["\'][^>]+href=["\']([^"\']+)', opf):
+                id_to_href[m.group(1)] = m.group(2)
+            for m in re.finditer(r'<item[^>]+href=["\']([^"\']+)["\'][^>]+id=["\']([^"\']+)', opf):
+                id_to_href[m.group(2)] = m.group(1)
+
+            # 读取 NCX 建立 href->title 映射
+            ncx_name = next((n for n in namelist if n.endswith('.ncx')), None)
+            ncx_titles = {}
+            if ncx_name:
+                try:
+                    ncx = zf.read(ncx_name).decode('utf-8', errors='ignore')
+                    for m in re.finditer(r'<navPoint[^>]*>.*?<text[^>]*>(.*?)</text>.*?<content[^>]+src=["\']([^"\']+)', ncx, re.S|re.I):
+                        title_text = _TAG_RE.sub('', m.group(1)).strip()
+                        src = m.group(2).split('#')[0]
+                        ncx_titles[src] = title_text
+                except:
+                    pass
+
+            # 按 spine 顺序读取章节
+            chapters = []
+            seen = set()
+            for sid in spine_ids:
+                href = id_to_href.get(sid, '')
+                if not href:
+                    continue
+                full_name = next((n for n in namelist if n.endswith('/' + href) or n == href), None)
+                if not full_name or full_name in seen:
+                    continue
+                seen.add(full_name)
+                try:
+                    html = zf.read(full_name).decode('utf-8', errors='ignore')
+                except:
+                    continue
+
+                text = _strip_tags(html)
+                if not text or len(text) < 30:
+                    continue
+
+                # 提取章节标题：NCX > HTML heading > 正文猜测 > 文件名
+                title = ''
+                if href in ncx_titles and ncx_titles[href]:
+                    title = ncx_titles[href]
+                if not title:
+                    title = _extract_html_heading(html)
+                if not title:
+                    title = _guess_chapter_from_text(text)
+                if not title:
+                    title = full_name.split('/')[-1].replace('.xhtml', '').replace('.html', '')[:50]
+
+                # 跳过常见非内容页（如果NCX里有这些标题则保留）
+                skip_titles = {'封面', '目录', 'contents', 'cover', 'bookcover', 'title page', '版权页', '制作信息', '彩插'}
+                if title.lower() in skip_titles and not (href in ncx_titles and ncx_titles[href]):
+                    # 如果内容很短，很可能是非内容页
+                    if len(text) < 500:
+                        continue
+
+                chapters.append({'title': title or f'章节{len(chapters)+1}', 'content': text})
+
+            # 兜底：如果没按 spine 读到，遍历所有 html
+            if not chapters:
+                for name in namelist:
+                    if not (name.endswith('.xhtml') or name.endswith('.html') or name.endswith('.htm')):
+                        continue
+                    if name in seen or name.startswith('META-INF/'):
+                        continue
+                    try:
+                        html = zf.read(name).decode('utf-8', errors='ignore')
+                    except:
+                        continue
+                    text = _strip_tags(html)
+                    if not text or len(text) < 30:
+                        continue
+                    title = _extract_html_heading(html) or _guess_chapter_from_text(text)
+                    if not title:
+                        title = name.split('/')[-1].replace('.xhtml', '').replace('.html', '')[:50]
+                    chapters.append({'title': title or f'章节{len(chapters)+1}', 'content': text})
+
+            if not chapters:
+                return None, book_title, '未能解析出有效章节'
+            return chapters, book_title, None
+
+    except Exception as e:
+        log_action('EPUB_PARSE_ERROR', str(e)[:200])
+        return None, '', f'EPUB解析失败: {str(e)[:80]}'
+
+
+IMPORT_PARSERS = {
+    '.txt': lambda raw, fn: (parse_txt(raw.decode('utf-8', errors='ignore'), fn), None),
+    '.md': lambda raw, fn: (parse_md(raw.decode('utf-8', errors='ignore'), fn), None),
+    '.docx': parse_docx_bytes,
+    '.pdf': parse_pdf_bytes,
+    '.epub': parse_epub_bytes,
+}
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+    def log_message(self, fmt, *args): pass
+
+    def send_cors(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
+    def json_resp(self, code, data, extra_headers=None):
+        try:
+            self.send_response(code)
+            self.send_header('Content-Type', 'application/json; charset=utf-8')
+            self.send_header('Connection', 'close')
+            self.send_cors()
+            if extra_headers:
+                for k, v in extra_headers.items(): self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(json.dumps(data, ensure_ascii=False).encode())
+        except: pass
+
+    def html_resp(self, content):
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.wfile.write(content.encode('utf-8'))
+        except: pass
+
+    def read_json(self):
+        cl = int(self.headers.get('Content-Length', 0))
+        if cl > 200 * 1024 * 1024: return None
+        body = self.rfile.read(cl) if cl > 0 else b'{}'
+        try: return json.loads(body.decode('utf-8')) if body else {}
+        except: return {}
+
+    def is_authed(self):
+        if not has_users(): return True
+        return validate_session(get_cookie_token(self.headers))
+
+    def serve_file(self, name):
+        for p in [os.path.join(FRONTEND_DIR, name), f'/app/{name}', f'./{name}']:
+            try:
+                with open(p, 'r', encoding='utf-8') as f: return f.read()
+            except: continue
+        return None
+
+    def do_OPTIONS(self):
+        self.send_response(200); self.send_cors(); self.end_headers()
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+
+        if path in ('/', '/index.html'):
+            c = self.serve_file('index.html')
+            if c: self.html_resp(c)
+            else: self.json_resp(500, {'error': 'no index.html'})
+            return
+
+        if path == '/login':
+            c = self.serve_file('login.html')
+            if c: self.html_resp(c)
+            else: self.json_resp(500, {'error': 'no login.html'})
+            return
+
+        if path == '/api/auth/status':
+            self.json_resp(200, {'has_users': has_users(), 'logged_in': self.is_authed()})
+            return
+
+        if not self.is_authed():
+            self.json_resp(401, {'error': '未登录'}); return
+
+        if path == '/api/books':
+            books = []
+            if os.path.isdir(BOOKS_DIR):
+                for d in sorted(os.listdir(BOOKS_DIR)):
+                    bp = os.path.join(BOOKS_DIR, d)
+                    if not os.path.isdir(bp): continue
+                    meta = load_json(os.path.join(bp, 'meta.json'))
+                    if not meta: continue
+                    ch_dir = os.path.join(bp, 'chapters')
+                    cc = len(os.listdir(ch_dir)) if os.path.isdir(ch_dir) else 0
+                    books.append({'id': d, 'title': meta.get('title', d), 'created': meta.get('created', 0), 'updated': meta.get('updated', 0), 'chapter_count': cc})
+            books.sort(key=lambda x: x.get('updated', 0), reverse=True)
+            self.json_resp(200, {'books': books}); return
+
+        qs = parse_qs(urlparse(self.path).query)
+
+        if path.startswith('/api/book/') and '/chapters' in path:
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            meta = get_book_meta(bid) or {}
+            ch_dir = os.path.join(get_book_dir(bid), 'chapters')
+            chapters = []
+            order = meta.get('chapter_order', [])
+            if os.path.isdir(ch_dir):
+                for fn in os.listdir(ch_dir):
+                    if fn.endswith('.json') and not fn.startswith('.'):
+                        try:
+                            with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                                ch = json.load(f)
+                                ch['id'] = fn.replace('.json', '')
+                                chapters.append(ch)
+                        except: continue
+            ch_map = {c['id']: c for c in chapters}
+            ordered = []
+            for cid in order:
+                if cid in ch_map: ordered.append(ch_map.pop(cid))
+            ordered.extend(ch_map.values())
+            self.json_resp(200, {'chapters': ordered, 'chapter_order': [c['id'] for c in ordered], 'current_chapter_id': meta.get('current_chapter_id', '')}); return
+
+        if path.startswith('/api/book/') and '/chapter/' in path:
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            cid = parts[5] if len(parts) > 5 else ''
+            if not is_valid_id(bid) or not is_valid_id(cid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            cp = os.path.join(get_book_dir(bid), 'chapters', f"{cid}.json")
+            if os.path.exists(cp):
+                try:
+                    with open(cp, 'r', encoding='utf-8') as f: self.json_resp(200, json.load(f))
+                except: self.json_resp(500, {'error': '读取失败'})
+            else: self.json_resp(404, {'error': '章节不存在'})
+            return
+
+        if path.startswith('/api/book/') and path.endswith('/outline'):
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            o = get_outline(bid)
+            o['memory'] = get_core_memory(bid)
+            self.json_resp(200, o); return
+
+        if path.startswith('/api/book/') and path.endswith('/trash'):
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(bid): self.json_resp(400, {'error': 'Invalid ID'}); return
+            td = os.path.join(get_book_dir(bid), 'trash')
+            chapters = []
+            if os.path.isdir(td):
+                for fn in os.listdir(td):
+                    if fn.endswith('.json'):
+                        try:
+                            with open(os.path.join(td, fn), 'r', encoding='utf-8') as f: chapters.append(json.load(f))
+                        except: continue
+            chapters.sort(key=lambda x: x.get('deleted', 0), reverse=True)
+            self.json_resp(200, {'chapters': chapters}); return
+
+        if path.startswith('/api/book/') and '/export' in path:
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            fmt = qs.get('format', ['zip'])[0]
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            ch_dir = os.path.join(get_book_dir(bid), 'chapters')
+            meta = get_book_meta(bid) or {}
+            safe_title = re.sub(r'[^\w\u4e00-\u9fff.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
+            all_chapters = {}
+            if os.path.isdir(ch_dir):
+                for fn in os.listdir(ch_dir):
+                    if fn.endswith('.json'):
+                        try:
+                            with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                                ch = json.load(f)
+                                all_chapters[ch.get('id', fn)] = ch
+                        except: continue
+            order = meta.get('chapter_order', [])
+            ordered = [all_chapters.pop(cid) for cid in order if cid in all_chapters]
+            ordered.extend(all_chapters.values())
+            if fmt == 'md':
+                text = f"# {meta.get('title', '')}\n\n"
+                for ch in ordered:
+                    text += f"## {ch.get('title', '')}\n\n{ch.get('content', '')}\n\n---\n\n"
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/markdown; charset=utf-8')
+                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{quote(safe_title + '.md')}")
+                self.send_cors(); self.end_headers()
+                self.wfile.write(text.encode('utf-8'))
+            elif fmt == 'txt':
+                text = f"{meta.get('title', '')}\n\n"
+                for ch in ordered:
+                    text += f"{ch.get('title', '')}\n\n{ch.get('content', '')}\n\n"
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{quote(safe_title + '.txt')}")
+                self.send_cors(); self.end_headers()
+                self.wfile.write(text.encode('utf-8'))
+            else:
+                buf = io.BytesIO()
+                with zipfile.ZipFile(buf, 'w') as zf:
+                    for ch in ordered:
+                        cid = ch.get('id', 'unknown')
+                        fn = f"{cid}.json"
+                        zf.writestr(fn, json.dumps(ch, ensure_ascii=False, indent=2))
+                buf.seek(0)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/zip')
+                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{quote(safe_title + '.zip')}")
+                self.send_cors(); self.end_headers()
+                self.wfile.write(buf.getvalue())
+            return
+
+        if path == '/api/settings':
+            gs = get_settings()
+            log_action('SETTINGS_GET', f"return model_context_length={gs.get('model_context_length')}")
+            self.json_resp(200, gs); return
+
+        if path == '/api/local-llm/status':
+            self.json_resp(200, {'running': _local_llm_status()}); return
+
+        if path == '/api/local-llm/progress':
+            with _LOCAL_LLM_LOCK:
+                st = dict(_LOCAL_LLM_STATE)
+            st['running'] = _local_llm_status()
+            self.json_resp(200, st); return
+
+        if path == '/api/active-connections':
+            self.json_resp(200, {'connections': get_active_connections()}); return
+
+        if path.startswith('/api/book/') and path.endswith('/messages'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            date_str = qs.get('date', [datetime.now().strftime('%Y-%m-%d')])[0]
+            msg_dir = os.path.join(get_book_dir(bid), 'messages')
+            os.makedirs(msg_dir, exist_ok=True)
+            msg_file = os.path.join(msg_dir, f'{date_str}.json')
+            messages = load_json(msg_file, list)
+            self.json_resp(200, {'messages': messages, 'date': date_str}); return
+
+        if path.startswith('/api/book/') and path.endswith('/annotations'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            ann_path = os.path.join(get_book_dir(bid), 'annotations.json')
+            anns_data = load_json(ann_path, dict)
+            self.json_resp(200, {'annotations': anns_data.get('annotations', [])}); return
+
+        # 通读页面
+        if path == '/readthrough':
+            c = self.serve_file('readthrough.html')
+            if c: self.html_resp(c)
+            else: self.json_resp(500, {'error': 'no readthrough.html'})
+            return
+
+        # 通读 API (GET)
+        if path.startswith('/api/book/') and '/readthrough/' in path:
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            sub = parts[5] if len(parts) > 5 else ''
+            if sub == 'config':
+                self.json_resp(200, get_readthrough_config(bid)); return
+            elif sub == 'status':
+                with _rebuild_lock:
+                    t = _rebuild_tasks.get(bid, {'status': 'idle', 'progress': 0, 'phase': '', 'total_chapters': 0, 'done_chapters': 0, 'logs': [], 'error': ''})
+                    resp = dict(t)
+                    resp['logs'] = resp.get('logs', [])[-30:]
+                resp['has_source'] = bool(get_source(bid))
+                self.json_resp(200, resp); return
+            elif sub == 'file':
+                ft = qs.get('type', ['source'])[0]
+                if ft == 'source':
+                    text = get_source(bid); self.json_resp(200, {'text': text, 'exists': bool(text), 'type': ft}); return
+                elif ft == 'outline':
+                    text = get_outline_md(bid); self.json_resp(200, {'text': text, 'exists': bool(text), 'type': ft}); return
+                elif ft == 'timeline':
+                    text = get_timeline_md(bid); self.json_resp(200, {'text': text, 'exists': bool(text), 'type': ft}); return
+                elif ft == 'prediction':
+                    text = get_prediction_md(bid); self.json_resp(200, {'text': text, 'exists': bool(text), 'type': ft}); return
+                else:
+                    self.json_resp(400, {'error': '未知文件类型'}); return
+
+        # 通用后台任务状态查询
+        if path.startswith('/api/book/') and '/task/' in path:
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            sub = parts[5] if len(parts) > 5 else ''
+            if sub == 'status':
+                task_id = qs.get('task_id', [''])[0]
+                task_type = qs.get('type', [''])[0]
+                if task_id:
+                    t = bg_task_get(task_id)
+                    if not t:
+                        self.json_resp(404, {'error': '任务不存在'}); return
+                    self.json_resp(200, t); return
+                elif task_type:
+                    t = bg_task_get_by_book_type(bid, task_type)
+                    if not t:
+                        self.json_resp(200, {'status': 'idle', 'progress': 0}); return
+                    self.json_resp(200, t); return
+                else:
+                    # 返回该书所有活跃任务
+                    active = []
+                    with _bg_lock:
+                        for t in _bg_tasks.values():
+                            if t['book_id'] == bid and t['status'] == 'running':
+                                active.append(dict(t))
+                    self.json_resp(200, {'tasks': active}); return
+            elif sub == 'list':
+                tasks = []
+                with _bg_lock:
+                    for t in _bg_tasks.values():
+                        if t['book_id'] == bid:
+                            tasks.append(dict(t))
+                tasks.sort(key=lambda x: x.get('updated', 0), reverse=True)
+                self.json_resp(200, {'tasks': tasks}); return
+
+        self.json_resp(404, {'error': 'Not found'})
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        data = self.read_json()
+        if data is None: self.json_resp(413, {'error': 'Too large'}); return
+
+        if path == '/api/auth/status':
+            self.json_resp(200, {'has_users': has_users(), 'logged_in': self.is_authed()}); return
+
+        if path == '/api/auth/setup':
+            if has_users(): self.json_resp(403, {'error': '已有用户'}); return
+            u = data.get('username', '').strip()
+            p = data.get('password', '')
+            if not u or len(p) < 4: self.json_resp(400, {'error': '用户名不能为空，密码至少4位'}); return
+            save_json(USERS_FILE, {u: {'password': hash_password(p), 'created': time.time()}})
+            token = make_session(u)
+            log_action('SETUP', u)
+            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax'}); return
+
+        if path == '/api/auth/login':
+            u = data.get('username', '').strip()
+            p = data.get('password', '')
+            users = load_json(USERS_FILE)
+            if u not in users or users[u]['password'] != hash_password(p):
+                self.json_resp(401, {'error': '用户名或密码错误'}); return
+            token = make_session(u)
+            log_action('LOGIN', u)
+            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax'}); return
+
+        if path == '/api/auth/logout':
+            t = get_cookie_token(self.headers)
+            if t:
+                sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') != t]
+                save_json(SESSIONS_FILE, sessions)
+            self.json_resp(200, {'ok': True}, {'Set-Cookie': 'session=; Path=/; Max-Age=0; SameSite=Lax'}); return
+
+        if not self.is_authed():
+            self.json_resp(401, {'error': '未登录'}); return
+
+        if path == '/api/books/create':
+            title = data.get('title', '新书本').strip()
+            bid = 'book_' + str(int(time.time() * 1000))
+            bd = get_book_dir(bid)
+            ch_dir = os.path.join(bd, 'chapters')
+            os.makedirs(ch_dir, exist_ok=True)
+            os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+            first_cid = 'ch_' + str(int(time.time() * 1000))
+            save_json(os.path.join(ch_dir, f"{first_cid}.json"), {'id': first_cid, 'title': '第一章', 'content': '', 'updated': time.time()})
+            meta = {'id': bid, 'title': title, 'created': time.time(), 'updated': time.time(), 'chapter_order': [first_cid], 'current_chapter_id': first_cid}
+            save_json(os.path.join(bd, 'meta.json'), meta)
+            save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+            log_action('BOOK_CREATE', bid)
+            self.json_resp(200, {'book': meta}); return
+
+        if path == '/api/books/import':
+            filename = data.get('filename', '')
+            file_b64 = data.get('data', '')
+            if not filename or not file_b64:
+                self.json_resp(400, {'error': '缺少文件'}); return
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in IMPORT_PARSERS:
+                self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub'}); return
+            try:
+                raw = base64.b64decode(file_b64)
+            except:
+                self.json_resp(400, {'error': '文件数据无效'}); return
+            try:
+                parser = IMPORT_PARSERS[ext]
+                chapters, err = parser(raw, filename)
+            except Exception as e:
+                self.json_resp(500, {'error': f'解析失败: {str(e)[:100]}'}); return
+            if err: self.json_resp(400, {'error': err}); return
+            if not chapters: self.json_resp(400, {'error': '未能解析出章节'}); return
+            book_title = data.get('title', '').strip() or filename.replace(ext, '')
+            bid = 'book_' + str(int(time.time() * 1000))
+            bd = get_book_dir(bid)
+            ch_dir = os.path.join(bd, 'chapters')
+            os.makedirs(ch_dir, exist_ok=True)
+            os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+            ch_order = []
+            for i, ch in enumerate(chapters):
+                cid = 'ch_' + re.sub(r'[^\w]', '_', ch.get('title', 'untitled')[:30]) + '_' + str(int(time.time() * 1000)) + str(i)
+                if not is_valid_id(cid):
+                    cid = 'ch_' + str(int(time.time() * 1000)) + str(i)
+                ch_data = {'id': cid, 'title': ch.get('title', '未命名')[:200], 'content': ch.get('content', ''), 'updated': time.time()}
+                save_json(os.path.join(ch_dir, f"{cid}.json"), ch_data)
+                ch_order.append(cid)
+            meta = {'id': bid, 'title': book_title, 'created': time.time(), 'updated': time.time(), 'chapter_order': ch_order, 'current_chapter_id': ch_order[0] if ch_order else ''}
+            save_json(os.path.join(bd, 'meta.json'), meta)
+            save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+            log_action('IMPORT', f'{bid}: {len(chapters)} chapters from {filename}')
+            self.json_resp(200, {'book': meta, 'imported': len(chapters)}); return
+
+        if path == '/api/books/rename':
+            bid = data.get('book_id', '')
+            if not is_valid_id(bid): self.json_resp(400, {'error': 'Invalid ID'}); return
+            meta = get_book_meta(bid)
+            if not meta: self.json_resp(404, {'error': '书本不存在'}); return
+            meta['title'] = data.get('title', meta['title'])
+            meta['updated'] = time.time()
+            save_json(os.path.join(get_book_dir(bid), 'meta.json'), meta)
+            self.json_resp(200, {'ok': True}); return
+
+        if path == '/api/books/delete':
+            bid = data.get('book_id', '')
+            if not is_valid_id(bid): self.json_resp(400, {'error': 'Invalid ID'}); return
+            bd = get_book_dir(bid)
+            if os.path.isdir(bd): shutil.rmtree(bd, ignore_errors=True)
+            log_action('BOOK_DELETE', bid)
+            self.json_resp(200, {'ok': True}); return
+
+        if path.startswith('/api/book/'):
+            parts = path.split('/')
+            if len(parts) < 4: self.json_resp(400, {'error': 'Bad path'}); return
+            bid = parts[3]
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+
+            action = parts[4] if len(parts) > 4 else ''
+            bd = get_book_dir(bid)
+            ch_dir = os.path.join(bd, 'chapters')
+            trash_dir = os.path.join(bd, 'trash')
+            os.makedirs(ch_dir, exist_ok=True)
+            os.makedirs(trash_dir, exist_ok=True)
+
+            if action == 'chapter' and data.get('id'):
+                cid = data['id']
+                if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
+                ch = {'id': cid, 'title': data.get('title', ''), 'content': data.get('content', ''), 'updated': time.time()}
+                save_json(os.path.join(ch_dir, f"{cid}.json"), ch)
+                meta = get_book_meta(bid) or {}
+                if cid not in meta.get('chapter_order', []):
+                    meta.setdefault('chapter_order', []).append(cid)
+                meta['current_chapter_id'] = cid
+                meta['updated'] = time.time()
+                save_json(os.path.join(bd, 'meta.json'), meta)
+                self.json_resp(200, {'status': 'ok', 'chapter': ch}); return
+
+            if action == 'set-current-chapter' and data.get('id'):
+                cid = data['id']
+                if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
+                meta = get_book_meta(bid) or {}
+                meta['current_chapter_id'] = cid
+                meta['updated'] = time.time()
+                save_json(os.path.join(bd, 'meta.json'), meta)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'reorder':
+                meta = get_book_meta(bid) or {}
+                meta['chapter_order'] = data.get('order', [])
+                meta['updated'] = time.time()
+                save_json(os.path.join(bd, 'meta.json'), meta)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'delete' and data.get('id'):
+                cid = data['id']
+                if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
+                cp = os.path.join(ch_dir, f"{cid}.json")
+                if os.path.exists(cp):
+                    try:
+                        with open(cp, 'r', encoding='utf-8') as f: ch = json.load(f)
+                        ch['deleted'] = time.time()
+                        save_json(os.path.join(trash_dir, f"{cid}.json"), ch)
+                        os.remove(cp)
+                    except: pass
+                meta = get_book_meta(bid) or {}
+                if cid in meta.get('chapter_order', []):
+                    meta['chapter_order'].remove(cid)
+                if meta.get('current_chapter_id') == cid:
+                    meta['current_chapter_id'] = ''
+                save_json(os.path.join(bd, 'meta.json'), meta)
+                self.json_resp(200, {'status': 'ok'}); return
+
+            if action == 'restore' and data.get('id'):
+                cid = data['id']
+                tp = os.path.join(trash_dir, f"{cid}.json")
+                if os.path.exists(tp):
+                    try:
+                        with open(tp, 'r', encoding='utf-8') as f: ch = json.load(f)
+                        ch['updated'] = time.time()
+                        ch.pop('deleted', None)
+                        save_json(os.path.join(ch_dir, f"{cid}.json"), ch)
+                        os.remove(tp)
+                        meta = get_book_meta(bid) or {}
+                        if cid not in meta.get('chapter_order', []):
+                            meta.setdefault('chapter_order', []).append(cid)
+                            save_json(os.path.join(bd, 'meta.json'), meta)
+                    except: pass
+                self.json_resp(200, {'status': 'ok'}); return
+
+            if action == 'export-epub':
+                if not HAS_EPUB:
+                    self.json_resp(500, {'error': '缺少 ebooklib 依赖，无法导出 EPUB'}); return
+                meta = get_book_meta(bid) or {}
+                safe_title = re.sub(r'[^\w\u4e00-\u9fff.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
+                all_chapters = {}
+                if os.path.isdir(ch_dir):
+                    for fn in os.listdir(ch_dir):
+                        if fn.endswith('.json'):
+                            try:
+                                with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                                    ch = json.load(f)
+                                    all_chapters[ch.get('id', fn)] = ch
+                            except: continue
+                order = meta.get('chapter_order', [])
+                ordered = [all_chapters.pop(cid) for cid in order if cid in all_chapters]
+                ordered.extend(all_chapters.values())
+
+                title = data.get('title', '').strip() or meta.get('title', '未命名')
+                author = data.get('author', '').strip() or 'Unknown'
+                description = data.get('description', '').strip()
+                cover_b64 = data.get('cover_base64', '').strip()
+
+                book = epub_mod.EpubBook()
+                book.set_identifier(f'lucawriter-{bid}')
+                book.set_title(title)
+                book.set_language('zh')
+                book.add_author(author)
+                if description:
+                    book.add_metadata('DC', 'description', description)
+
+                # CSS
+                style = 'body{font-family:"Noto Serif SC","Source Han Serif SC",Georgia,serif;line-height:1.8;padding:0 1em}h1{font-size:1.5em;text-align:center;margin:1.5em 0}p{text-indent:2em;margin:0.5em 0}'
+                nav_css = epub_mod.EpubItem(uid="style", file_name="style/nav.css", media_type="text/css", content=style.encode('utf-8'))
+                book.add_item(nav_css)
+
+                def _text_to_html(text):
+                    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    paragraphs = text.split('\n\n')
+                    parts = []
+                    for p in paragraphs:
+                        p = p.strip()
+                        if not p:
+                            continue
+                        p = p.replace('\n', '<br/>')
+                        parts.append(f'<p>{p}</p>')
+                    return '\n'.join(parts)
+
+                epub_chapters = []
+                for idx, ch in enumerate(ordered):
+                    ch_title = ch.get('title', f'第{idx+1}章')
+                    ch_content = ch.get('content', '')
+                    c = epub_mod.EpubHtml(title=ch_title, file_name=f'chap_{idx:04d}.xhtml', lang='zh')
+                    body = f'<h1>{ch_title}</h1>'
+                    body += _text_to_html(ch_content)
+                    c.content = body
+                    c.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
+                    book.add_item(c)
+                    epub_chapters.append(c)
+
+                book.toc = tuple(epub_mod.Link(c.file_name, c.title, f'chap_{i}') for i, c in enumerate(epub_chapters))
+                book.add_item(epub_mod.EpubNcx())
+                book.add_item(epub_mod.EpubNav())
+                book.spine = ['nav'] + epub_chapters
+
+                # Cover image
+                cover_name = None
+                if cover_b64:
+                    try:
+                        if ',' in cover_b64:
+                            cover_b64 = cover_b64.split(',', 1)[1]
+                        cover_raw = base64.b64decode(cover_b64)
+                        if cover_raw[:2] == b'\xff\xd8':
+                            cover_name = 'cover.jpg'
+                        else:
+                            cover_name = 'cover.png'
+                        book.set_cover(cover_name, cover_raw)
+                    except Exception as e:
+                        log_action('EPUB_COVER_ERROR', str(e)[:100])
+
+                buf = io.BytesIO()
+                epub_mod.write_epub(buf, book, {'epub3_pages': False})
+                buf.seek(0)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/epub+zip')
+                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{quote(safe_title + '.epub')}")
+                self.send_cors(); self.end_headers()
+                self.wfile.write(buf.getvalue())
+                return
+
+            if action == 'comment':
+                text = data.get('text', '')
+                if not text: self.json_resp(200, {'comment': ''}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                is_auto = data.get('auto', False)
+                if is_auto:
+                    # 自动建议：同步快速返回，不占用 chat 任务槽位
+                    set_conn_meta('auto_comment', '自动建议', bid)
+                    try:
+                        mt = settings.get('ai_max_tokens', 512)
+                        tp = settings.get('ai_temperature', 0.7)
+                        source_text = get_source(bid)
+                        bd_auto = get_book_dir(bid)
+                        meta_auto = load_json(os.path.join(bd_auto, 'meta.json'), dict)
+                        cid_auto = meta_auto.get('current_chapter_id', '')
+                        ch_title_auto = '未命名章节'
+                        if cid_auto:
+                            cp_auto = os.path.join(bd_auto, 'chapters', f'{cid_auto}.json')
+                            if os.path.exists(cp_auto):
+                                ch_data_auto = load_json(cp_auto, dict)
+                                ch_title_auto = ch_data_auto.get('title', '未命名章节')
+                        if source_text and len(source_text) > 100:
+                            source_ctx = source_text
+                        else:
+                            source_ctx = '（目前还没有完整的阅读笔记。等作者完成通读后，你就能对全书细节了如指掌了。）'
+                        sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。用户有时可能会记不清一些故事的细节设定，这种时候就需要你提醒他。如果没啥问题，你就可以当作消遣一样一边读一边发散思维。这本小说大概是这样的：
+
+{source_ctx}
+
+此时，用户正在写最新的一章：
+
+【章节名】{ch_title_auto}
+【现有正文】
+{text}
+
+用户此时停下了，需要休息一下，你可以趁这个时间看一下他未完成的最新章节，并试探性地提出一点你的见解，注意，万一这里面有什么和以往内容冲突的地方，你是唯一可以提醒他的人！"""
+                        msgs = [{'role': 'system', 'content': sys_msg}]
+                        msgs.append({'role': 'user', 'content': '请看一下这章，然后告诉我你的想法。'})
+                        result, err = call_ai(settings, msgs, mt, tp, timeout=60)
+                        if err:
+                            self.json_resp(500, {'error': err}); return
+                        self.json_resp(200, {'comment': result or '（AI未返回内容）'}); return
+                    finally:
+                        unregister_ai_connection(threading.current_thread().ident)
+                # 检查是否已有进行中的聊天任务
+                existing = bg_task_get_by_book_type(bid, 'chat')
+                if existing and existing.get('status') == 'running':
+                    self.json_resp(400, {'error': '已有聊天任务在进行中，请稍候'}); return
+                tid = bg_task_start('chat', bid, 'AI对话')
+                # 立即保存 user 消息 + pending AI 消息到文件，这样刷新后还能看到
+                today = datetime.now().strftime('%Y-%m-%d')
+                msg_dir = os.path.join(bd, 'messages')
+                os.makedirs(msg_dir, exist_ok=True)
+                msg_file = os.path.join(msg_dir, f'{today}.json')
+                messages = load_json(msg_file, list)
+                messages.append({'text': text, 'type': 'user'})
+                messages.append({'text': '', 'type': 'ai', 'reasoning': '', '_pending': True, 'task_id': tid})
+                save_json(msg_file, messages)
+                def do_chat_task(task_id, book_id, user_text, cfg_settings, history_list):
+                    set_conn_meta('chat', 'AI对话', book_id)
+                    try:
+                        mt = cfg_settings.get('ai_max_tokens', 512)
+                        tp = cfg_settings.get('ai_temperature', 0.7)
+                        source_text = get_source(book_id)
+                        if source_text and len(source_text) > 100:
+                            source_ctx = source_text
+                        else:
+                            source_ctx = '（目前还没有完整的阅读笔记。等作者完成通读后，你就能对全书细节了如指掌了。）'
+
+                        bd_chat = get_book_dir(book_id)
+                        meta_chat = load_json(os.path.join(bd_chat, 'meta.json'), dict)
+                        cid_chat = meta_chat.get('current_chapter_id', '')
+                        ch_title_chat = '未命名章节'
+                        ch_content_chat = ''
+                        if cid_chat:
+                            cp_chat = os.path.join(bd_chat, 'chapters', f'{cid_chat}.json')
+                            if os.path.exists(cp_chat):
+                                ch_data_chat = load_json(cp_chat, dict)
+                                ch_title_chat = ch_data_chat.get('title', '未命名章节')
+                                ch_content_chat = ch_data_chat.get('content', '')
+
+                        annotate_tool = """你还有一个"荧光笔"工具，可以在正文中为用户标注重点内容。
+- 添加标注格式：[ANNOTATE_ADD]{{"chapter_id":"当前章ID","text":"要标注的原文片段（需精确匹配）","note":"批注内容","color":"yellow"}}[/ANNOTATE_ADD]
+- 删除标注格式：[ANNOTATE_REMOVE]{{"text":"要删除标注的原文片段"}}[/ANNOTATE_REMOVE] 或 [ANNOTATE_REMOVE]{{"id":"标注ID"}}[/ANNOTATE_REMOVE]
+- 可用颜色：yellow（默认）、green、pink、blue
+- 注意：你不能修改原文，只能添加或删除标注。如果用户要求你标注某处内容，请输出相应指令。
+
+你还有一个"本章写完"工具（隐藏功能）。如果你判断作者已经明确表示这一章写完了（例如说"写好了""这章结束了""本章完结""写完了"等），你可以调用本章写完工具，让系统为这一章执行通读摘要。
+- 调用格式：[COMPLETE_CHAPTER]{{"chapter_id":"当前章ID"}}[/COMPLETE_CHAPTER]
+- 注意：只有作者明确表示本章已完成时才调用，不要频繁调用。"""
+
+                        is_first_round = not history_list
+                        if is_first_round:
+                            sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。用户有时可能会记不清一些故事的细节设定，这种时候就需要你提醒他。如果没啥问题，你就可以当作消遣一样一边读一边发散思维。这本小说大概是这样的：
+
+{source_ctx}
+
+此时，用户正在写最新的一章：
+
+【章节名】{ch_title_chat}
+【现有正文】
+{ch_content_chat}
+
+用户此时停了下来，对你发送了如下消息——
+
+{annotate_tool}"""
+                        else:
+                            sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。用户有时可能会记不清一些故事的细节设定，这种时候就需要你提醒他。如果没啥问题，你就可以当作消遣一样一边读一边发散思维。这本小说大概是这样的：
+
+{source_ctx}
+
+请继续和用户对话。
+
+{annotate_tool}"""
+                        msgs = [{'role': 'system', 'content': sys_msg}]
+                        for h in history_list:
+                            role = h.get('role')
+                            content = h.get('content')
+                            if role and content:
+                                msgs.append({'role': role, 'content': content})
+                        msgs.append({'role': 'user', 'content': user_text})
+
+                        content_acc = []
+                        reasoning_acc = []
+                        def on_content(tk):
+                            content_acc.append(tk)
+                            bg_task_update(task_id, result=''.join(content_acc), progress=min(95, 30 + len(''.join(content_acc)) // 10))
+                        def on_reasoning(tk):
+                            reasoning_acc.append(tk)
+                            bg_task_update(task_id, reasoning=''.join(reasoning_acc))
+
+                        full_text, err = call_ai_stream(cfg_settings, msgs, mt, tp, timeout=120,
+                                                        on_content_token=on_content,
+                                                        on_reasoning_token=on_reasoning,
+                                                        should_stop_fn=lambda: bg_task_should_stop(task_id))
+                        if err:
+                            if '用户停止' in err or bg_task_should_stop(task_id):
+                                _replace_pending_chat_msg(book_id, task_id, '[已停止]')
+                                bg_task_done(task_id, '已停止')
+                            else:
+                                _replace_pending_chat_msg(book_id, task_id, '[错误: ' + err + ']')
+                                bg_task_done(task_id, err)
+                            return
+
+                        result = re.sub(r'[#*`~]', '', full_text)
+
+                        needs_rt = False
+                        if not source_text or len(source_text) <= 100:
+                            indicators = ['还没读过', '还没看过', '尚未通读', '没有读过', '不了解全书', '不清楚全书', '需要通读', '我还没看过这本书', '尚未阅读', '没有阅读']
+                            if any(ind in result for ind in indicators):
+                                needs_rt = True
+
+                        annotation_changes = False
+                        ann_path = os.path.join(get_book_dir(book_id), 'annotations.json')
+
+                        for m in re.finditer(r'\[ANNOTATE_ADD\](.*?)\[/ANNOTATE_ADD\]', result, re.S):
+                            try:
+                                cmd = json.loads(m.group(1).strip())
+                                cid = cmd.get('chapter_id', '')
+                                text_snippet = cmd.get('text', '')
+                                note = cmd.get('note', '')
+                                color = cmd.get('color', 'yellow')
+                                cp = os.path.join(get_book_dir(book_id), 'chapters', f"{cid}.json")
+                                if os.path.exists(cp) and text_snippet:
+                                    with open(cp, 'r', encoding='utf-8') as f:
+                                        ch_data = json.load(f)
+                                    content = ch_data.get('content', '')
+                                    idx = content.find(text_snippet)
+                                    if idx >= 0:
+                                        anns_data = load_json(ann_path, dict)
+                                        anns = anns_data.get('annotations', [])
+                                        ann_id = 'ann_' + str(int(time.time() * 1000)) + '_' + str(len(anns))
+                                        anns.append({
+                                            'id': ann_id, 'chapter_id': cid,
+                                            'start': idx, 'end': idx + len(text_snippet),
+                                            'text': text_snippet, 'note': note, 'color': color,
+                                            'created': time.time()
+                                        })
+                                        save_json(ann_path, {'annotations': anns})
+                                        annotation_changes = True
+                            except Exception as e:
+                                log_action('ANNOTATE_ADD_ERROR', str(e)[:200])
+
+                        for m in re.finditer(r'\[ANNOTATE_REMOVE\](.*?)\[/ANNOTATE_REMOVE\]', result, re.S):
+                            try:
+                                cmd = json.loads(m.group(1).strip())
+                                text_snippet = cmd.get('text', '')
+                                ann_id = cmd.get('id', '')
+                                anns_data = load_json(ann_path, dict)
+                                anns = anns_data.get('annotations', [])
+                                new_anns = []
+                                for a in anns:
+                                    if ann_id and a.get('id') == ann_id:
+                                        continue
+                                    if text_snippet and a.get('text') == text_snippet:
+                                        continue
+                                    new_anns.append(a)
+                                if len(new_anns) != len(anns):
+                                    save_json(ann_path, {'annotations': new_anns})
+                                    annotation_changes = True
+                            except Exception as e:
+                                log_action('ANNOTATE_REMOVE_ERROR', str(e)[:200])
+
+                        # 解析 COMPLETE_CHAPTER 隐藏工具调用
+                        complete_chapter_triggered = False
+                        for m in re.finditer(r'\[COMPLETE_CHAPTER\](.*?)\[/COMPLETE_CHAPTER\]', result, re.S):
+                            try:
+                                cmd = json.loads(m.group(1).strip())
+                                ccid = cmd.get('chapter_id', '')
+                                if ccid:
+                                    cp = os.path.join(get_book_dir(book_id), 'chapters', f"{ccid}.json")
+                                    if os.path.exists(cp):
+                                        settings_cc = get_settings()
+                                        if settings_cc.get('base_url') and settings_cc.get('model'):
+                                            existing_cc = bg_task_get_by_book_type(book_id, 'chapter-complete')
+                                            if not (existing_cc and existing_cc.get('status') == 'running'):
+                                                tid_cc = bg_task_start('chapter-complete', book_id, f'本章通读')
+                                                threading.Thread(target=_do_chapter_complete, args=(tid_cc, book_id, ccid, settings_cc), daemon=True).start()
+                                                complete_chapter_triggered = True
+                            except Exception as e:
+                                log_action('COMPLETE_CHAPTER_ERROR', str(e)[:200])
+
+                        result = re.sub(r'\[ANNOTATE_ADD\].*?\[/ANNOTATE_ADD\]', '', result, flags=re.S).strip()
+                        result = re.sub(r'\[ANNOTATE_REMOVE\].*?\[/ANNOTATE_REMOVE\]', '', result, flags=re.S).strip()
+                        result = re.sub(r'\[COMPLETE_CHAPTER\].*?\[/COMPLETE_CHAPTER\]', '', result, flags=re.S).strip()
+
+                        _replace_pending_chat_msg(book_id, task_id, result, ''.join(reasoning_acc))
+                        bg_task_update(task_id, result=result, reasoning=''.join(reasoning_acc), progress=100, needs_readthrough=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered)
+                        bg_task_done(task_id)
+                    except Exception as e:
+                        err_str = str(e)
+                        if bg_task_should_stop(task_id):
+                            _replace_pending_chat_msg(book_id, task_id, '[已停止]')
+                            bg_task_done(task_id, '已停止')
+                        else:
+                            _replace_pending_chat_msg(book_id, task_id, '[错误: ' + err_str + ']')
+                            bg_task_done(task_id, err_str)
+                threading.Thread(target=do_chat_task, args=(tid, bid, text, settings, data.get('history', [])), daemon=True).start()
+                self.json_resp(200, {'status': 'started', 'task_id': tid}); return
+
+            if action == 'annotations':
+                sub = data.get('action', '')
+                ann_path = os.path.join(bd, 'annotations.json')
+                anns_data = load_json(ann_path, dict)
+                anns = anns_data.get('annotations', [])
+                if sub == 'get':
+                    self.json_resp(200, {'annotations': anns}); return
+                elif sub == 'add':
+                    cid = data.get('chapter_id', '')
+                    text_snippet = data.get('text', '')
+                    note = data.get('note', '')
+                    color = data.get('color', 'yellow')
+                    start_pos = data.get('start', -1)
+                    end_pos = data.get('end', -1)
+                    cp = os.path.join(ch_dir, f"{cid}.json")
+                    if not os.path.exists(cp):
+                        self.json_resp(404, {'error': '章节不存在'}); return
+                    with open(cp, 'r', encoding='utf-8') as f:
+                        ch_data = json.load(f)
+                    content = ch_data.get('content', '')
+                    if start_pos >= 0 and end_pos > start_pos:
+                        if content[start_pos:end_pos] == text_snippet:
+                            idx = start_pos
+                        else:
+                            idx = content.find(text_snippet)
+                    else:
+                        idx = content.find(text_snippet)
+                    if idx < 0:
+                        self.json_resp(400, {'error': '未找到指定文本'}); return
+                    ann_id = 'ann_' + str(int(time.time() * 1000)) + '_' + str(len(anns))
+                    anns.append({
+                        'id': ann_id, 'chapter_id': cid,
+                        'start': idx, 'end': idx + len(text_snippet),
+                        'text': text_snippet, 'note': note, 'color': color,
+                        'created': time.time()
+                    })
+                    save_json(ann_path, {'annotations': anns})
+                    self.json_resp(200, {'annotation': anns[-1]}); return
+                elif sub == 'remove':
+                    ann_id = data.get('id', '')
+                    text_snippet = data.get('text', '')
+                    new_anns = []
+                    for a in anns:
+                        if ann_id and a.get('id') == ann_id:
+                            continue
+                        if text_snippet and a.get('text') == text_snippet:
+                            continue
+                        new_anns.append(a)
+                    if len(new_anns) != len(anns):
+                        save_json(ann_path, {'annotations': new_anns})
+                    self.json_resp(200, {'removed': len(anns) - len(new_anns)}); return
+                elif sub == 'clear':
+                    cid = data.get('chapter_id', '')
+                    if cid:
+                        new_anns = [a for a in anns if a.get('chapter_id') != cid]
+                    else:
+                        new_anns = []
+                    if len(new_anns) != len(anns):
+                        save_json(ann_path, {'annotations': new_anns})
+                    self.json_resp(200, {'removed': len(anns) - len(new_anns)}); return
+                self.json_resp(400, {'error': '未知操作'}); return
+
+            if action == 'outline-update':
+                content = data.get('content', '')
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                outline = get_outline(bid)
+                if not content:
+                    all_content = ''
+                    if os.path.isdir(ch_dir):
+                        for fn in sorted(os.listdir(ch_dir)):
+                            if fn.endswith('.json'):
+                                try:
+                                    with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                                        ch = json.load(f)
+                                        all_content += ch.get('content', '')[:1500]
+                                except: continue
+                    content = all_content[-3000:]
+                if not content: self.json_resp(200, outline); return
+                existing = json.dumps({'worldview': outline.get('worldview', ''), 'characters': outline.get('characters', []),
+                                       'timeline': outline.get('timeline', []), 'key_events': outline.get('key_events', []),
+                                       'rules': outline.get('rules', [])}, ensure_ascii=False)
+                prompt = f"""根据作者写的内容，生成故事大纲建议。
+
+当前人工大纲：
+{existing}
+
+故事内容：
+{content[-3000:]}
+
+输出大纲建议JSON，不加其他文字：
+{{"worldview":"世界观建议","characters":["人物1：简述"],"timeline":["事件1"],"key_events":["关键事件1"],"rules":["规则1"]}}"""
+                result, err = call_ai(settings, [{'role': 'system', 'content': '只输出JSON。你是写作助手，根据内容提供大纲建议，但作者才是故事的主人。'}, {'role': 'user', 'content': prompt}], 800, 0.3)
+                if err: self.json_resp(502, {'error': err}); return
+                try:
+                    result = re.sub(r'```json\s*', '', result)
+                    result = re.sub(r'```\s*', '', result)
+                    no = json.loads(result.strip())
+                    ai_sug = outline.get('ai_suggestions', {})
+                    for k in ['worldview', 'characters', 'timeline', 'key_events', 'rules']:
+                        if k in no: ai_sug[k] = no[k]
+                    ai_sug['updated'] = time.time()
+                    outline['ai_suggestions'] = ai_sug
+                    outline['updated'] = time.time()
+                    save_json(os.path.join(bd, 'outline.json'), outline)
+                except: pass
+                self.json_resp(200, outline); return
+
+            if action == 'outline-check':
+                content = data.get('content', '')
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                outline = get_outline(bid)
+                if not outline.get('worldview') and not outline.get('characters'):
+                    self.json_resp(200, {'contradictions': []}); return
+                if not content:
+                    all_content = ''
+                    if os.path.isdir(ch_dir):
+                        for fn in sorted(os.listdir(ch_dir)):
+                            if fn.endswith('.json'):
+                                try:
+                                    with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                                        ch = json.load(f)
+                                        all_content += ch.get('content', '')[:1500]
+                                except: continue
+                    content = all_content[-3000:]
+                if not content:
+                    self.json_resp(200, {'contradictions': []}); return
+                outline_str = json.dumps({'worldview': outline.get('worldview', ''), 'characters': outline.get('characters', []),
+                                          'rules': outline.get('rules', []), 'key_events': outline.get('key_events', [])}, ensure_ascii=False)
+                prompt = f"""检查新内容是否与已有大纲矛盾。
+
+已有大纲：
+{outline_str}
+
+新内容：
+{content[-2000:]}
+
+无矛盾输出：无矛盾
+有矛盾列出每条：1. 矛盾简述"""
+                result, err = call_ai(settings, [{'role': 'system', 'content': '只输出矛盾列表或"无矛盾"。'}, {'role': 'user', 'content': prompt}], 300, 0.2)
+                if err: self.json_resp(502, {'error': err}); return
+                contradictions = []
+                if result and '无矛盾' not in result:
+                    for l in result.strip().split('\n'):
+                        l = re.sub(r'^\d+[\.\、\)\]]\s*', '', l.strip())
+                        if l: contradictions.append(l)
+                self.json_resp(200, {'contradictions': contradictions}); return
+
+            if action == 'outline-save':
+                outline = get_outline(bid)
+                for k in ['worldview', 'characters', 'timeline', 'key_events', 'rules', 'chapter_summaries', 'timeline_nodes', 'ai_suggestions']:
+                    if k in data: outline[k] = data[k]
+                outline['updated'] = time.time()
+                save_json(os.path.join(bd, 'outline.json'), outline)
+                if 'memory' in data: save_core_memory(bid, data['memory'])
+                o = dict(outline)
+                o['memory'] = get_core_memory(bid)
+                self.json_resp(200, o); return
+
+            if action == 'memory-update':
+                content = data.get('content', '')
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                existing_memory = get_core_memory(bid)
+                all_content = ''
+                if os.path.isdir(ch_dir):
+                    for fn in sorted(os.listdir(ch_dir)):
+                        if fn.endswith('.json'):
+                            try:
+                                with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                                    ch = json.load(f)
+                                    all_content += ch.get('content', '')[:1500]
+                            except: continue
+                all_content = all_content[-4000:]
+                if not all_content and not content:
+                    self.json_resp(200, {'memory': existing_memory}); return
+                prompt = f"""你是一本小说的AI记忆管理系统。根据作者最新的写作内容，更新这本小说的全局记忆大纲。
+
+当前记忆：
+{existing_memory or '（尚无记忆）'}
+
+最新写作内容：
+{content or all_content}
+
+请用markdown格式输出更新后的记忆，包含以下部分（如果没有相关信息可写"待定"）：
+
+## 故事梗概
+## 主要角色（含当前状态）
+## 世界观设定
+## 时间线
+## 关键事件
+## 伏笔与线索
+## 人物关系
+
+规则：
+- 只输出markdown，不加其他文字
+- 保留已有信息，增量更新
+- 如新内容和已有记忆矛盾，以新内容为准"""
+                result, err = call_ai(settings, [{'role': 'system', 'content': '你是小说记忆管理系统。只输出markdown格式记忆，不加其他文字。'}, {'role': 'user', 'content': prompt}], 2000, 0.3)
+                if err:
+                    log_action('MEMORY_ERROR', f'{bid}: {err}')
+                    self.json_resp(502, {'error': err}); return
+                save_core_memory(bid, result)
+                self.json_resp(200, {'memory': result}); return
+
+            if action == 'chapter-summary' and data.get('id'):
+                cid = data['id']
+                if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
+                cp = os.path.join(ch_dir, f"{cid}.json")
+                if not os.path.exists(cp): self.json_resp(404, {'error': '章节不存在'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                try:
+                    with open(cp, 'r', encoding='utf-8') as f: ch = json.load(f)
+                    content = ch.get('content', '')
+                except: self.json_resp(500, {'error': '读取失败'}); return
+                if not content: self.json_resp(200, {'summary': ''}); return
+                pyramid = build_pyramid_context(bid)
+                prompt = f"""你是小说章节摘要助手。请阅读以下章节内容，提取结构化摘要，限制在500字以内。
+
+{pyramid}
+
+章节内容：
+{content}
+
+请输出以下格式的摘要：
+- 出场角色及关键行为
+- 本章核心事件
+- 角色状态变化
+- 新伏笔或线索
+- 重要对话或 revelation
+
+只输出摘要内容，不加其他文字。"""
+                result, err = call_ai(settings, [{'role': 'system', 'content': '你是小说章节摘要助手。只输出纯文本摘要，不加格式标记。'}, {'role': 'user', 'content': prompt}], 600, 0.3)
+                if err: self.json_resp(502, {'error': err}); return
+                save_chapter_summary(bid, cid, result)
+                self.json_resp(200, {'summary': result}); return
+
+            if action == 'chapter-complete' and data.get('id'):
+                cid = data['id']
+                if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
+                cp = os.path.join(ch_dir, f"{cid}.json")
+                if not os.path.exists(cp): self.json_resp(404, {'error': '章节不存在'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                # 检查是否已有进行中的本章通读任务
+                existing = bg_task_get_by_book_type(bid, 'chapter-complete')
+                if existing and existing.get('status') == 'running':
+                    self.json_resp(400, {'error': '已有本章通读任务在进行中'}); return
+                tid = bg_task_start('chapter-complete', bid, f'本章通读')
+                threading.Thread(target=_do_chapter_complete, args=(tid, bid, cid, settings), daemon=True).start()
+                self.json_resp(200, {'status': 'started', 'task_id': tid}); return
+
+            if action == 'reader-prediction':
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                source_text = get_source(bid)
+                if not source_text:
+                    self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
+                existing = bg_task_get_by_book_type(bid, 'prediction')
+                if existing and existing.get('status') == 'running':
+                    self.json_resp(400, {'error': '已有预言任务在进行中'}); return
+                tid = bg_task_start('prediction', bid, '生成预言')
+                def do_prediction_task(task_id, book_id, cfg_settings):
+                    try:
+                        bg_task_update(task_id, progress=5)
+                        prompt = f"""你是一位正在追读这部小说的资深读者。基于作者已公布的阅读笔记（你没有作者视角，不知道后续），分析剧情并推测未来走向。
+
+【你已读到的全书笔记】
+{get_source(book_id)}
+
+【分析要求】
+1. 伏笔梳理：列出所有已埋下但尚未回收的伏笔，标注每个伏笔的当前状态和可能的发展方向
+2. 角色推演：基于已有资料，分析主要角色的动机弧光，推测他们接下来最可能做出的选择
+3. 剧情预测：给出2-3种最合理的未来剧情走向，每种都要说明推理依据
+4. 危机预判：故事目前积累的张力会在哪里爆发？最可能的冲突触发点是什么？
+5. 阅读期待：作为读者，你最想看什么展开？为什么？
+
+【输出要求】
+- 用第一人称"我"的口吻，像资深读者在写长评
+- 分析要有理有据，基于笔记中的具体细节，不要凭空编造
+- 约1500-2500字
+- 输出 markdown 格式，用 ## 分隔各个分析板块"""
+                        bg_task_update(task_id, progress=30)
+                        result, reasoning, err = call_ai_full(cfg_settings, [
+                            {'role': 'system', 'content': '你是一位资深的网文读者，擅长分析剧情伏笔和角色动机。你基于已有的阅读笔记进行推理，不凭空编造。输出 markdown 格式。'},
+                            {'role': 'user', 'content': prompt}
+                        ], 2500, 0.7)
+                        if err:
+                            bg_task_done(task_id, err)
+                            return
+                        save_prediction_md(book_id, result)
+                        bg_task_update(task_id, result=result, reasoning=reasoning or '', progress=100)
+                        bg_task_done(task_id)
+                    except Exception as e:
+                        bg_task_done(task_id, str(e))
+                threading.Thread(target=do_prediction_task, args=(tid, bid, settings), daemon=True).start()
+                self.json_resp(200, {'status': 'started', 'task_id': tid}); return
+
+            if action == 'timeline-generate':
+                source_text = get_source(bid) or ''
+                if not source_text:
+                    self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                existing = bg_task_get_by_book_type(bid, 'timeline')
+                if existing and existing.get('status') == 'running':
+                    self.json_resp(400, {'error': '已有时间线任务在进行中'}); return
+                tid = bg_task_start('timeline', bid, '生成时间线')
+                def do_timeline_task(task_id, book_id, cfg_settings):
+                    try:
+                        bg_task_update(task_id, progress=5)
+                        outline = get_outline(book_id)
+                        existing_nodes = outline.get('timeline_nodes', [])
+                        existing_brief = json.dumps([{'id': n.get('id', ''), 'title': n.get('title', '')} for n in existing_nodes], ensure_ascii=False)
+                        prompt = f"""你是小说时间线整理专家。基于全书阅读笔记，梳理故事的时间线节点。
+
+已有时间线节点（如有）：
+{existing_brief}
+
+全书阅读笔记：
+{get_source(book_id)}
+
+【要求】
+1. 基于笔记内容，按故事内时间顺序排列所有关键事件
+2. 每个节点必须是从笔记中提取的真实事件，不要编造
+3. 合并已有节点，避免重复，但保留新发现的事件
+4. 用自己的语言简述每个事件，不要复制原文
+
+【输出格式】只输出JSON数组，不加任何其他文字：
+[{{"id":"n1","title":"事件简称（8字以内）","detail_hint":"事件详细说明（30-80字）","order":1}}]
+
+规则：
+- id 用 n1, n2... 顺序编号
+- title 尽量简短精炼
+- order 严格按故事时间顺序（不是章节顺序）
+- detail_hint 用自己的话描述这个事件的核心内容"""
+                        bg_task_update(task_id, progress=30)
+                        result, err = call_ai(cfg_settings, [
+                            {'role': 'system', 'content': '你是小说时间线整理专家。基于阅读笔记梳理时间线时，必须用自己的语言简述事件，禁止复制原文。只输出JSON数组。'},
+                            {'role': 'user', 'content': prompt}
+                        ], 2000, 0.3)
+                        if err:
+                            bg_task_done(task_id, err)
+                            return
+                        try:
+                            result = re.sub(r'```json\s*', '', result)
+                            result = re.sub(r'```\s*', '', result)
+                            nodes = json.loads(result.strip())
+                            if isinstance(nodes, list):
+                                for n in nodes:
+                                    n.setdefault('id', 'n' + str(len(outline.get('timeline_nodes', [])) + 1))
+                                    n.setdefault('title', '未命名事件')
+                                    n.setdefault('detail_hint', '')
+                                    n.setdefault('order', len(nodes))
+                                    n.setdefault('children', [])
+                                existing_map = {n['id']: n for n in outline.get('timeline_nodes', [])}
+                                for n in nodes:
+                                    if n['id'] in existing_map:
+                                        existing_map[n['id']].update(n)
+                                    else:
+                                        existing_map[n['id']] = n
+                                merged = sorted(existing_map.values(), key=lambda x: x.get('order', 0))
+                                outline['timeline_nodes'] = merged
+                                outline['updated'] = time.time()
+                                save_json(os.path.join(get_book_dir(book_id), 'outline.json'), outline)
+                                tl_lines = ['# 故事时间线\n']
+                                for n in merged:
+                                    tl_lines.append(f"## {n.get('title', '')}\n{n.get('detail_hint', '')}\n")
+                                save_timeline_md(book_id, '\n'.join(tl_lines))
+                        except Exception as e:
+                            bg_task_done(task_id, str(e))
+                            return
+                        bg_task_update(task_id, result=result, progress=100)
+                        bg_task_done(task_id)
+                    except Exception as e:
+                        bg_task_done(task_id, str(e))
+                threading.Thread(target=do_timeline_task, args=(tid, bid, settings), daemon=True).start()
+                self.json_resp(200, {'status': 'started', 'task_id': tid}); return
+
+            if action == 'timeline-detail':
+                node_id = data.get('node_id', '')
+                if not node_id: self.json_resp(400, {'error': '缺少节点ID'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                outline = get_outline(bid)
+
+                def find_node(nodes, nid):
+                    for n in nodes:
+                        if n.get('id') == nid: return n
+                        found = find_node(n.get('children', []), nid)
+                        if found: return found
+                    return None
+
+                target = find_node(outline.get('timeline_nodes', []), node_id)
+                if not target: self.json_resp(404, {'error': '节点不存在'}); return
+                existing_children = target.get('children', [])
+                children_brief = json.dumps([{'title': c.get('title', '')} for c in existing_children], ensure_ascii=False)
+                all_content = ''
+                if os.path.isdir(ch_dir):
+                    for fn in sorted(os.listdir(ch_dir))[:8]:
+                        if fn.endswith('.json'):
+                            try:
+                                with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                                    ch = json.load(f)
+                                    all_content += ch.get('content', '')[:2000]
+                            except: continue
+                prompt = f"""你是小说时间线整理助手。为事件「{target.get('title', '')}」生成详细子时间线。
+
+已有子节点：{children_brief}
+
+相关故事内容片段：
+{all_content[-2000:]}
+
+提示：{target.get('detail_hint', '')}
+
+请输出子时间线节点JSON数组：
+[{{"id":"{node_id}_1","title":"子事件简述（8字内）","order":1}}]
+
+只输出JSON数组，不加其他文字。"""
+                result, err = call_ai(settings, [{'role': 'system', 'content': '只输出JSON数组。'}, {'role': 'user', 'content': prompt}], 600, 0.3)
+                if err: self.json_resp(502, {'error': err}); return
+                try:
+                    result = re.sub(r'```json\s*', '', result)
+                    result = re.sub(r'```\s*', '', result)
+                    children = json.loads(result.strip())
+                    if not isinstance(children, list):
+                        self.json_resp(502, {'error': 'AI返回格式错误: 不是数组'}); return
+                    for i, c in enumerate(children):
+                        c.setdefault('id', f'{node_id}_{i+1}')
+                        c.setdefault('title', '子事件')
+                        c.setdefault('order', i)
+                        c.setdefault('children', [])
+                    nodes = outline.get('timeline_nodes', [])
+                    for n in nodes:
+                        if n.get('id') == node_id:
+                            n['children'] = children
+                            break
+                    outline['timeline_nodes'] = nodes
+                    outline['updated'] = time.time()
+                    save_json(os.path.join(bd, 'outline.json'), outline)
+                except json.JSONDecodeError as e:
+                    self.json_resp(502, {'error': f'AI返回JSON解析失败: {str(e)[:100]}'}); return
+                except Exception as e:
+                    self.json_resp(502, {'error': f'处理失败: {str(e)[:100]}'}); return
+                self.json_resp(200, {'node': target, 'children': target.get('children', [])}); return
+
+            if action == 'import':
+                filename = data.get('filename', '')
+                file_b64 = data.get('data', '')
+                if not filename or not file_b64:
+                    self.json_resp(400, {'error': '缺少文件'}); return
+                ext = os.path.splitext(filename)[1].lower()
+                if ext not in IMPORT_PARSERS:
+                    self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub'}); return
+                try:
+                    raw = base64.b64decode(file_b64)
+                except Exception as e:
+                    self.json_resp(400, {'error': '文件数据无效'}); return
+                log_action('IMPORT_START', f'{bid}: {filename} size={len(raw)}')
+                try:
+                    parser = IMPORT_PARSERS[ext]
+                    result = parser(raw, filename)
+                    if len(result) == 3:
+                        chapters, book_title, err = result
+                    else:
+                        chapters, err = result
+                        book_title = ''
+                except Exception as e:
+                    log_action('IMPORT_PARSE_ERROR', f'{bid}: {str(e)[:200]}')
+                    self.json_resp(500, {'error': f'解析失败: {str(e)[:100]}'}); return
+                if err:
+                    log_action('IMPORT_PARSE_ERR', f'{bid}: {err}')
+                    self.json_resp(400, {'error': err}); return
+                if not chapters: self.json_resp(400, {'error': '未能解析出章节'}); return
+                meta = get_book_meta(bid) or {}
+                meta.setdefault('chapter_order', [])
+                if book_title:
+                    meta['title'] = book_title
+                imported = 0
+                for ch in chapters:
+                    try:
+                        cid = 'ch_' + re.sub(r'[^\w]', '_', ch.get('title', 'untitled')[:30]) + '_' + str(int(time.time() * 1000)) + str(imported)
+                        if not is_valid_id(cid):
+                            cid = 'ch_' + str(int(time.time() * 1000)) + str(imported)
+                        ch_data = {'id': cid, 'title': ch.get('title', '未命名')[:200], 'content': ch.get('content', ''), 'updated': time.time()}
+                        save_json(os.path.join(ch_dir, f"{cid}.json"), ch_data)
+                        meta['chapter_order'].append(cid)
+                        imported += 1
+                    except Exception as e:
+                        log_action('IMPORT_CH_ERR', f'{bid}: {str(e)[:100]}')
+                        continue
+                meta['updated'] = time.time()
+                save_json(os.path.join(bd, 'meta.json'), meta)
+                log_action('IMPORT', f'{bid}: {imported} chapters from {filename}')
+                self.json_resp(200, {'imported': imported}); return
+
+            if action == 'update-source':
+                text = data.get('text', '')
+                chapter_title = data.get('chapter_title', '未命名章节')
+                if not text.strip():
+                    self.json_resp(200, {'status': 'skipped', 'reason': '章节内容为空'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                existing = bg_task_get_by_book_type(bid, 'source-update')
+                if existing and existing.get('status') == 'running':
+                    self.json_resp(400, {'error': '已有 source 更新任务在进行中'}); return
+                tid = bg_task_start('source-update', bid, '更新全书笔记')
+                def do_update_source(task_id, book_id, chapter_text, ch_title, cfg_settings):
+                    set_conn_meta('source-update', '更新全书笔记', book_id)
+                    try:
+                        mt = cfg_settings.get('ai_max_tokens', 2048)
+                        tp = cfg_settings.get('ai_temperature', 0.3)
+                        source_text = get_source(book_id) or ''
+                        if source_text and len(source_text) > 100:
+                            prompt = f"""你是 Luca，作者的写作搭档。你的任务是根据当前章节内容，更新本书的阅读笔记 source.md。
+
+现有 source.md：
+
+{source_text}
+
+当前章节标题：{ch_title}
+当前章节内容：
+
+{chapter_text}
+
+任务：
+1. 将本章的新信息（人物、事件、设定、伏笔、数值等）合并进 source.md
+2. 不要删除已有信息，只做补充和修正
+3. 保持 markdown 结构清晰
+4. 输出完整的更新后的 source.md，不要加任何开场白或结束语。"""
+                        else:
+                            prompt = f"""你是 Luca，作者的写作搭档。请根据以下章节内容，创建一份结构化的全书阅读笔记 source.md。
+
+当前章节标题：{ch_title}
+当前章节内容：
+
+{chapter_text}
+
+请输出 markdown 格式的阅读笔记，包含：
+- 人物档案
+- 事件编年
+- 世界观与设定
+- 数值记录
+- 伏笔与线索
+
+不要加任何开场白或结束语，直接输出 markdown。"""
+                        result, err = call_ai(cfg_settings, [
+                            {'role': 'system', 'content': '你是资料整理员，负责维护小说全书阅读笔记。只输出完整的 markdown 内容，不要加任何开场白或结束语。'},
+                            {'role': 'user', 'content': prompt}
+                        ], mt, tp, timeout=180)
+                        if err:
+                            bg_task_done(task_id, err)
+                            return
+                        save_source(book_id, result or '')
+                        bg_task_done(task_id)
+                    except Exception as e:
+                        bg_task_done(task_id, str(e))
+                threading.Thread(target=do_update_source, args=(tid, bid, text, chapter_title, settings), daemon=True).start()
+                self.json_resp(200, {'status': 'started', 'task_id': tid}); return
+
+        if path == '/api/import-book':
+            import_start = time.time()
+            filename = data.get('filename', '')
+            file_b64 = data.get('data', '')
+            if not filename or not file_b64:
+                self.json_resp(400, {'error': '缺少文件'}); return
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in IMPORT_PARSERS:
+                self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub'}); return
+            try:
+                raw = base64.b64decode(file_b64)
+            except Exception as e:
+                self.json_resp(400, {'error': '文件数据无效'}); return
+            file_size = len(raw)
+            if file_size > 150 * 1024 * 1024:
+                self.json_resp(400, {'error': '文件超过 150MB，请拆分成 smaller 文件'}); return
+            log_action('IMPORT_BOOK_START', f'{filename} size={file_size} ext={ext}')
+            try:
+                parser = IMPORT_PARSERS[ext]
+                result = parser(raw, filename)
+                if len(result) == 3:
+                    chapters, book_title, err = result
+                else:
+                    chapters, err = result
+                    book_title = ''
+            except Exception as e:
+                log_action('IMPORT_BOOK_PARSE_ERR', f'{filename}: {str(e)[:200]}')
+                self.json_resp(500, {'error': f'解析失败: {str(e)[:100]}'}); return
+            if err:
+                log_action('IMPORT_BOOK_PARSE_ERR', f'{filename}: {err}')
+                self.json_resp(400, {'error': err}); return
+            if not chapters: self.json_resp(400, {'error': '未能解析出章节'}); return
+            bid = 'book_' + str(int(time.time() * 1000))
+            bd = get_book_dir(bid)
+            ch_dir = os.path.join(bd, 'chapters')
+            os.makedirs(ch_dir, exist_ok=True)
+            os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+            order = []
+            imported = 0
+            for ch in chapters:
+                try:
+                    cid = 'ch_' + re.sub(r'[^\w]', '_', ch.get('title', 'untitled')[:30]) + '_' + str(int(time.time() * 1000)) + str(imported)
+                    if not is_valid_id(cid):
+                        cid = 'ch_' + str(int(time.time() * 1000)) + str(imported)
+                    content = ch.get('content', '')
+                    ch_data = {'id': cid, 'title': ch.get('title', '未命名')[:200], 'content': content, 'updated': time.time()}
+                    save_json(os.path.join(ch_dir, f"{cid}.json"), ch_data)
+                    order.append(cid)
+                    imported += 1
+                except Exception as e:
+                    continue
+            title = book_title or filename
+            if not book_title:
+                for ext_test in ['.txt', '.md', '.docx', '.pdf', '.epub']:
+                    if title.lower().endswith(ext_test):
+                        title = title[:-len(ext_test)]
+                        break
+            meta = {'id': bid, 'title': title, 'created': time.time(), 'updated': time.time(), 'chapter_order': order}
+            save_json(os.path.join(bd, 'meta.json'), meta)
+            save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+            elapsed = round(time.time() - import_start, 2)
+            log_action('IMPORT_BOOK', f'{bid}: {imported} chapters from {filename} in {elapsed}s')
+            self.json_resp(200, {'book_id': bid, 'title': title, 'imported': imported}); return
+
+        if path == '/api/settings':
+            settings = get_settings()
+            log_action('SETTINGS_SAVE', f"request model_context_length={data.get('model_context_length', 'NOT_PRESENT')}")
+            for k in DEFAULT_SETTINGS:
+                if k in data:
+                    v = data[k]
+                    if k in ('ai_frequency', 'ai_max_tokens', 'outline_frequency', 'model_context_length'):
+                        try: v = int(v)
+                        except: continue
+                    elif k == 'ai_temperature':
+                        try: v = round(float(v), 2)
+                        except: continue
+                    elif k == 'ui_scale':
+                        try: v = round(float(v), 2)
+                        except: continue
+                        if v < 0.5: v = 0.5
+                        if v > 2.0: v = 2.0
+                    elif k in ('ai_auto_comment', 'outline_enabled'):
+                        v = bool(v)
+                    elif k == 'active_provider_idx':
+                        try: v = int(v)
+                        except: continue
+                    elif k == 'provider_presets':
+                        if isinstance(v, list):
+                            # 确保每个预设都有必要字段
+                            clean_presets = []
+                            for p in v:
+                                if not isinstance(p, dict):
+                                    continue
+                                clean_presets.append({
+                                    'name': str(p.get('name', '')),
+                                    'base_url': str(p.get('base_url', '')),
+                                    'api_key': str(p.get('api_key', '')),
+                                    'model': str(p.get('model', '')),
+                                    'use_custom_json': bool(p.get('use_custom_json', False)),
+                                    'custom_json': str(p.get('custom_json', '')),
+                                })
+                            v = clean_presets
+                        else:
+                            continue
+                    settings[k] = v
+            # 如果 provider_presets 被更新，同步顶层字段
+            presets = settings.get('provider_presets', [])
+            idx = settings.get('active_provider_idx', 0)
+            if presets and 0 <= idx < len(presets):
+                active = presets[idx]
+                if active.get('use_custom_json') and active.get('custom_json'):
+                    try:
+                        custom = json.loads(active['custom_json'])
+                        if isinstance(custom, dict):
+                            settings['base_url'] = custom.get('base_url', active.get('base_url', ''))
+                            settings['api_key'] = custom.get('api_key', active.get('api_key', ''))
+                            settings['model'] = custom.get('model', active.get('model', ''))
+                        else:
+                            settings['base_url'] = active.get('base_url', '')
+                            settings['api_key'] = active.get('api_key', '')
+                            settings['model'] = active.get('model', '')
+                    except:
+                        settings['base_url'] = active.get('base_url', '')
+                        settings['api_key'] = active.get('api_key', '')
+                        settings['model'] = active.get('model', '')
+                else:
+                    settings['base_url'] = active.get('base_url', '')
+                    settings['api_key'] = active.get('api_key', '')
+                    settings['model'] = active.get('model', '')
+            save_json(SETTINGS_FILE, settings)
+            log_action('SETTINGS_SAVE_OK', f"saved model_context_length={settings.get('model_context_length')}")
+            # 如果当前激活预设不是本地 Llama.cpp，自动关闭本地服务器
+            active_preset = (settings.get('provider_presets') or [{}])[settings.get('active_provider_idx', 0)]
+            active_name = (active_preset.get('name') or '').lower()
+            if 'llama.cpp' not in active_name and _local_llm_status():
+                _stop_local_llm()
+            self.json_resp(200, settings); return
+
+        if path == '/api/local-llm/start':
+            ok, err = _start_local_llm()
+            self.json_resp(200, {'ok': ok, 'error': err}); return
+
+        if path == '/api/local-llm/stop':
+            ok, err = _stop_local_llm()
+            self.json_resp(200, {'ok': ok, 'error': err}); return
+
+        if path.startswith('/api/book/') and path.endswith('/messages'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            date_str = data.get('date', datetime.now().strftime('%Y-%m-%d'))
+            msg_dir = os.path.join(get_book_dir(bid), 'messages')
+            os.makedirs(msg_dir, exist_ok=True)
+            msg_file = os.path.join(msg_dir, f'{date_str}.json')
+            messages = data.get('messages', [])
+            save_json(msg_file, messages)
+            self.json_resp(200, {'saved': len(messages), 'date': date_str}); return
+
+        if path == '/api/fetch-models':
+            base_url = data.get('base_url', '')
+            api_key = data.get('api_key', '')
+            if not base_url: self.json_resp(400, {'error': '缺少 base_url'}); return
+            if not is_safe_url(base_url): self.json_resp(400, {'error': 'URL不允许'}); return
+            try:
+                headers = {'Content-Type': 'application/json'}
+                if api_key: headers['Authorization'] = f'Bearer {api_key}'
+                bu = base_url.rstrip('/')
+                if bu.endswith('/v1'):
+                    url = f"{bu}/models"
+                else:
+                    url = f"{bu}/v1/models"
+                req = urllib.request.Request(url, headers=headers, method='GET')
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    result = json.loads(resp.read().decode())
+                    ml = [m['id'] for m in result.get('data', [])]
+                    settings = get_settings()
+                    settings['models'] = ml[:50]
+                    save_json(SETTINGS_FILE, settings)
+                    self.json_resp(200, {'models': ml[:50]})
+            except Exception as e:
+                err = str(e)[:200]
+                if hasattr(e, 'read'):
+                    try: err += ' | ' + e.read().decode()[:200]
+                    except: pass
+                self.json_resp(500, {'error': err})
+            return
+
+        if path == '/api/stop-all-ai':
+            # 关闭所有活跃 AI 连接
+            conns = get_active_connections()
+            closed = len(conns)
+            # 清空连接注册表，底层 socket 会随线程结束自动释放
+            close_all_ai_connections()
+            self.json_resp(200, {'status': 'ok', 'closed': closed}); return
+
+        # 通读 API (POST)
+        path_lower = path.lower()
+        if '/readthrough' in path_lower and path_lower.startswith('/api/book/'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {}); return
+            if path.endswith('/start') or path.endswith('/readthrough/start'):
+                settings = get_settings()
+                prov = get_ai_providers()
+                if not settings.get('base_url'):
+                    p = (prov.get('providers', [{}])[0] if prov.get('providers') else {})
+                    if p: settings = {'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')}
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                with _rebuild_lock:
+                    t = _rebuild_tasks.get(bid)
+                    if t and t.get('status') == 'running':
+                        self.json_resp(400, {'error': '通读正在进行中'}); return
+                cfg = get_readthrough_config(bid)
+                if cfg.get('model'): settings['model'] = cfg['model']
+                cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
+                if os.path.exists(cp_file): os.remove(cp_file)
+                threading.Thread(target=do_readthrough, args=(bid, settings, cfg), daemon=True).start()
+                self.json_resp(200, {'status': 'started'}); return
+            if path.endswith('/stop') or path.endswith('/readthrough/stop'):
+                with _rebuild_lock:
+                    t = _rebuild_tasks.get(bid)
+                    if t and t.get('status') == 'running':
+                        t['stopped'] = True
+                # 关闭该书本的所有 readthrough 连接
+                close_connections_by_book(bid)
+                cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
+                if os.path.exists(cp_file): os.remove(cp_file)
+                self.json_resp(200, {'status': 'stopping'}); return
+            if path.endswith('/clear') or path.endswith('/readthrough/clear'):
+                cp = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
+                if os.path.exists(cp): os.remove(cp)
+                with _rebuild_lock:
+                    if bid in _rebuild_tasks: del _rebuild_tasks[bid]
+                save_source(bid, '')
+                save_outline_md(bid, '')
+                meta = get_book_meta(bid) or {}
+                meta.pop('readthrough_at', None)
+                save_json(os.path.join(get_book_dir(bid), 'meta.json'), meta)
+                self.json_resp(200, {'status': 'cleared'}); return
+            if path.endswith('/config') or path.endswith('/readthrough/config'):
+                cfg = get_readthrough_config(bid)
+                for k in ('model', 'max_tokens', 'temperature', 'chunk_size', 'max_input'):
+                    if k in data:
+                        try: cfg[k] = type(data[k])(data[k])
+                        except: cfg[k] = data[k]
+                save_readthrough_config(bid, cfg)
+                self.json_resp(200, cfg); return
+            if path.endswith('/generate-outline') or path.endswith('/readthrough/generate-outline'):
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                source_text = get_source(bid)
+                if not source_text:
+                    self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
+                cfg = get_readthrough_config(bid)
+                outline, err = _ai_outline(settings, source_text, config=cfg)
+                if err:
+                    self.json_resp(502, {'error': err}); return
+                save_outline_md(bid, outline)
+                self.json_resp(200, {'outline': outline}); return
+            if path.endswith('/source') or path.endswith('/readthrough/source'):
+                save_source(bid, data.get('source', ''))
+                self.json_resp(200, {'source': data.get('source', '')}); return
+
+        # 通用后台生成（时间线/大纲/预言）
+        if path_lower.startswith('/api/book/') and path_lower.endswith('/generate-stream'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {}); return
+            gen_type = data.get('type', '')
+            settings = get_settings()
+            if not settings.get('base_url') or not settings.get('model'):
+                self.json_resp(400, {'error': '请先配置API'}); return
+            source_text = get_source(bid)
+            if not source_text:
+                self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
+            existing = bg_task_get_by_book_type(bid, gen_type)
+            if existing and existing.get('status') == 'running':
+                self.json_resp(400, {'error': f'已有{gen_type}任务在进行中'}); return
+            tid = bg_task_start(gen_type, bid, f'生成{gen_type}')
+            def do_generate_task(task_id, book_id, gtype, cfg_settings):
+                type_map = {'timeline': ('timeline', '时间线'), 'outline': ('outline', '大纲'), 'prediction': ('prediction', '预言')}
+                conn_type, conn_label = type_map.get(gtype, ('generate', '生成'))
+                set_conn_meta(conn_type, conn_label, book_id)
+                try:
+                    bg_task_update(task_id, progress=5)
+                    outline = get_outline(book_id)
+                    msgs = []
+                    tmp = 0.3
+                    st = get_source(book_id)
+                    if gtype == 'timeline':
+                        existing_nodes = outline.get('timeline_nodes', [])
+                        existing_brief = json.dumps([{'id': n.get('id', ''), 'title': n.get('title', '')} for n in existing_nodes], ensure_ascii=False)
+                        prompt = f"""你是小说时间线整理专家。基于全书阅读笔记，梳理故事的时间线节点。
+
+已有时间线节点（如有）：
+{existing_brief}
+
+全书阅读笔记：
+{st}
+
+【要求】
+1. 基于笔记内容，按故事内时间顺序排列所有关键事件
+2. 每个节点必须是从笔记中提取的真实事件，不要编造
+3. 合并已有节点，避免重复，但保留新发现的事件
+4. 用自己的语言简述每个事件，不要复制原文
+
+【输出格式】只输出JSON数组，不加任何其他文字：
+[{{"id":"n1","title":"事件简称（8字以内）","detail_hint":"事件详细说明（30-80字）","order":1}}]
+
+规则：
+- id 用 n1, n2... 顺序编号
+- title 尽量简短精炼
+- order 严格按故事时间顺序（不是章节顺序）
+- detail_hint 用自己的话描述这个事件的核心内容"""
+                        msgs = [{'role': 'system', 'content': '你是小说时间线整理专家。基于阅读笔记梳理时间线时，必须用自己的语言简述事件，禁止复制原文。只输出JSON数组。'}, {'role': 'user', 'content': prompt}]
+                    elif gtype == 'outline':
+                        prompt = f"""基于以下全书阅读笔记，整理一份结构清晰、内容完整的故事大纲。
+
+{st}
+
+【要求】
+1. 用自己的语言重新组织，不要复制原文句子
+2. 必须包含所有主要情节线，不要遗漏任何重要事件
+3. 角色发展要有连贯性，体现变化和成长
+4. 标注伏笔和悬念的位置
+5. 输出 markdown 格式
+
+【输出格式】
+# 故事大纲
+
+## 一、主线剧情
+（按时间顺序梳理核心故事线，包含所有关键转折）
+
+## 二、支线脉络
+（各条支线的发展，与主线的交汇点）
+
+## 三、角色弧光
+（主要角色的出场、动机变化、关键抉择、成长轨迹）
+
+## 四、势力格局
+（各方势力的消长、联盟、对抗关系演变）
+
+## 五、世界观展开
+（设定揭示的顺序，规则的建立与打破）
+
+## 六、伏笔与悬念
+（已埋下的伏笔当前状态：未回收/已回收/待发展）
+
+## 七、关键转折点
+（对每个重要转折标注：章节位置、触发原因、影响范围）
+
+只输出 markdown，不要加任何开场白或结束语。"""
+                        msgs = [{'role': 'system', 'content': '你是专业的小说结构分析师。基于阅读笔记整理大纲时，必须用自己的语言重新叙述，保留所有有用细节，禁止复制原文。只输出 markdown。'}, {'role': 'user', 'content': prompt}]
+                    elif gtype == 'prediction':
+                        prompt = f"""你是一位正在追读这部小说的资深读者。基于作者已公布的阅读笔记（你没有作者视角，不知道后续），分析剧情并推测未来走向。
+
+【你已读到的全书笔记】
+{st}
+
+【分析要求】
+1. 伏笔梳理：列出所有已埋下但尚未回收的伏笔，标注每个伏笔的当前状态和可能的发展方向
+2. 角色推演：基于已有资料，分析主要角色的动机弧光，推测他们接下来最可能做出的选择
+3. 剧情预测：给出2-3种最合理的未来剧情走向，每种都要说明推理依据
+4. 危机预判：故事目前积累的张力会在哪里爆发？最可能的冲突触发点是什么？
+5. 阅读期待：作为读者，你最想看什么展开？为什么？
+
+【输出要求】
+- 用第一人称"我"的口吻，像资深读者在写长评
+- 分析要有理有据，基于笔记中的具体细节，不要凭空编造
+- 约1500-2500字
+- 输出 markdown 格式，用 ## 分隔各个分析板块"""
+                        msgs = [{'role': 'system', 'content': '你是一位资深的网文读者，擅长分析剧情伏笔和角色动机。你基于已有的阅读笔记进行推理，不凭空编造。输出 markdown 格式。'}, {'role': 'user', 'content': prompt}]
+                        tmp = 0.7
+                    else:
+                        bg_task_done(task_id, '未知生成类型')
+                        return
+                    bg_task_update(task_id, progress=30)
+                    full_text = ''
+                    def on_content(tk):
+                        nonlocal full_text
+                        full_text += tk
+                        # 基于字数估算进度
+                        est = min(95, 30 + len(full_text) // 20)
+                        bg_task_update(task_id, stream_buffer=full_text[-500:], progress=est)
+                    result, err = call_ai_stream(cfg_settings, msgs, None, tmp, timeout=180,
+                                                 on_content_token=on_content)
+                    if err:
+                        bg_task_done(task_id, err)
+                        return
+                    bg_task_update(task_id, progress=95)
+                    if gtype == 'timeline':
+                        try:
+                            result = re.sub(r'```json\s*', '', full_text)
+                            result = re.sub(r'```\s*', '', result)
+                            nodes = json.loads(result.strip())
+                            if isinstance(nodes, list):
+                                for n in nodes:
+                                    n.setdefault('id', 'n' + str(len(outline.get('timeline_nodes', [])) + 1))
+                                    n.setdefault('title', '未命名事件')
+                                    n.setdefault('detail_hint', '')
+                                    n.setdefault('order', len(nodes))
+                                    n.setdefault('children', [])
+                                existing_map = {n['id']: n for n in outline.get('timeline_nodes', [])}
+                                for n in nodes:
+                                    if n['id'] in existing_map:
+                                        existing_map[n['id']].update(n)
+                                    else:
+                                        existing_map[n['id']] = n
+                                merged = sorted(existing_map.values(), key=lambda x: x.get('order', 0))
+                                outline['timeline_nodes'] = merged
+                                outline['updated'] = time.time()
+                                save_json(os.path.join(get_book_dir(book_id), 'outline.json'), outline)
+                                tl_lines = ['# 故事时间线\n']
+                                for n in merged:
+                                    tl_lines.append(f"## {n.get('title', '')}\n{n.get('detail_hint', '')}\n")
+                                save_timeline_md(book_id, '\n'.join(tl_lines))
+                        except Exception as e:
+                            bg_task_done(task_id, str(e))
+                            return
+                    elif gtype == 'outline':
+                        save_outline_md(book_id, full_text)
+                    elif gtype == 'prediction':
+                        save_prediction_md(book_id, full_text)
+                    bg_task_update(task_id, result=full_text, progress=100)
+                    bg_task_done(task_id)
+                except Exception as e:
+                    bg_task_done(task_id, str(e))
+            threading.Thread(target=do_generate_task, args=(tid, bid, gen_type, settings), daemon=True).start()
+            self.json_resp(200, {'status': 'started', 'task_id': tid}); return
+
+        self.json_resp(404, {'error': 'Not found'})
+
+# ===== 通用后台任务系统（保留内部状态以支持轮询，但不再用于前端显示）=====
+_bg_lock = threading.Lock()
+_bg_tasks = {}
+_bg_task_counter = 0
+
+def bg_task_start(task_type, book_id, name):
+    global _bg_task_counter
+    _bg_task_counter += 1
+    tid = f"{task_type}_{book_id}_{_bg_task_counter}"
+    with _bg_lock:
+        _bg_tasks[tid] = {
+            'id': tid, 'type': task_type, 'book_id': book_id, 'name': name,
+            'status': 'running', 'progress': 0, 'result': '', 'error': '',
+            'reasoning': '', 'created': time.time(), 'updated': time.time(),
+            'stream_buffer': '',
+        }
+    return tid
+
+def bg_task_update(tid, **kwargs):
+    with _bg_lock:
+        if tid in _bg_tasks:
+            _bg_tasks[tid].update(kwargs)
+            _bg_tasks[tid]['updated'] = time.time()
+
+def bg_task_done(tid, error=None):
+    with _bg_lock:
+        if tid in _bg_tasks:
+            _bg_tasks[tid]['status'] = 'error' if error else 'done'
+            _bg_tasks[tid]['progress'] = 100
+            if error:
+                _bg_tasks[tid]['error'] = error
+            _bg_tasks[tid]['updated'] = time.time()
+
+def bg_task_stop(tid):
+    with _bg_lock:
+        if tid in _bg_tasks:
+            _bg_tasks[tid]['stopped'] = True
+
+def bg_task_should_stop(tid):
+    with _bg_lock:
+        t = _bg_tasks.get(tid)
+        return t is not None and t.get('stopped', False)
+
+def bg_task_get(tid):
+    with _bg_lock:
+        return dict(_bg_tasks.get(tid, {})) if tid in _bg_tasks else None
+
+def bg_task_get_by_book_type(book_id, task_type):
+    with _bg_lock:
+        for t in _bg_tasks.values():
+            if t['book_id'] == book_id and t['type'] == task_type:
+                return dict(t)
+        return None
+
+def bg_task_cleanup_old():
+    now = time.time()
+    with _bg_lock:
+        old = [k for k, v in _bg_tasks.items() if v['status'] in ('done', 'error', 'stopped') and now - v.get('updated', 0) > 86400]
+        for k in old:
+            del _bg_tasks[k]
+
+def _replace_pending_chat_msg(book_id, task_id, text, reasoning=''):
+    """替换 messages 文件中指定 task_id 的 pending AI 消息。"""
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        msg_file = os.path.join(get_book_dir(book_id), 'messages', f'{today}.json')
+        messages = load_json(msg_file, list)
+        replaced = False
+        for i in range(len(messages) - 1, -1, -1):
+            m = messages[i]
+            if m.get('type') == 'ai' and m.get('_pending') and m.get('task_id') == task_id:
+                messages[i] = {'text': text, 'type': 'ai', 'reasoning': reasoning}
+                replaced = True
+                break
+        if not replaced:
+            messages.append({'text': text, 'type': 'ai', 'reasoning': reasoning})
+        save_json(msg_file, messages)
+    except Exception as e:
+        log_action('CHAT_REPLACE_ERROR', f'{book_id}/{task_id}: {str(e)[:100]}')
+
+# ===== 统一活跃 AI 连接池 =====
+_ai_conn_lock = threading.Lock()
+_ai_connections = {}
+_conn_meta = threading.local()
+
+def set_conn_meta(conn_type, label, book_id=''):
+    """设置当前线程的连接元数据，供 call_ai_stream / call_ai_full 注册连接时用"""
+    _conn_meta.type = conn_type
+    _conn_meta.label = label
+    _conn_meta.book_id = book_id
+
+def register_ai_connection(conn_id, resp_obj):
+    """注册一个活跃 HTTP 连接"""
+    with _ai_conn_lock:
+        _ai_connections[conn_id] = {
+            'id': conn_id,
+            'type': getattr(_conn_meta, 'type', 'unknown'),
+            'label': getattr(_conn_meta, 'label', '未知'),
+            'book_id': getattr(_conn_meta, 'book_id', ''),
+            'created': time.time(),
+            '_resp': resp_obj,
+        }
+
+def unregister_ai_connection(conn_id):
+    """注销一个活跃 HTTP 连接"""
+    with _ai_conn_lock:
+        _ai_connections.pop(conn_id, None)
+
+def get_active_connections():
+    """返回当前所有活跃连接的列表（不包含内部 _resp 对象）"""
+    with _ai_conn_lock:
+        result = []
+        for c in _ai_connections.values():
+            item = {k: v for k, v in c.items() if not k.startswith('_')}
+            result.append(item)
+        return result
+
+def close_all_ai_connections():
+    """强制关闭所有活跃 AI 连接"""
+    with _ai_conn_lock:
+        conns = list(_ai_connections.values())
+        _ai_connections.clear()
+    for c in conns:
+        try:
+            resp = c.get('_resp')
+            if resp: resp.close()
+        except: pass
+    return len(conns)
+
+def close_connections_by_book(book_id):
+    """关闭指定书本的所有活跃 AI 连接"""
+    with _ai_conn_lock:
+        to_close = [c for c in _ai_connections.values() if c.get('book_id') == book_id]
+        for c in to_close:
+            _ai_connections.pop(c['id'], None)
+    for c in to_close:
+        try:
+            resp = c.get('_resp')
+            if resp: resp.close()
+        except: pass
+    return len(to_close)
+
+def close_connections_by_type(conn_type):
+    """关闭指定类型的所有活跃 AI 连接"""
+    with _ai_conn_lock:
+        to_close = [c for c in _ai_connections.values() if c.get('type') == conn_type]
+        for c in to_close:
+            _ai_connections.pop(c['id'], None)
+    for c in to_close:
+        try:
+            resp = c.get('_resp')
+            if resp: resp.close()
+        except: pass
+    return len(to_close)
+
+# ===== 通读全书 =====
+_rebuild_lock = threading.Lock()
+_rebuild_tasks = {}
+_rebuild_connections = {}
+
+def _rebuild_log(bid, msg):
+    with _rebuild_lock:
+        t = _rebuild_tasks.get(bid, {})
+        t.setdefault('logs', []).append({'time': datetime.now().strftime('%H:%M:%S'), 'msg': msg})
+
+def _rebuild_set(bid, **kw):
+    with _rebuild_lock:
+        if kw.get('status') == 'stopped':
+            kw = dict(kw)
+            kw['status'] = 'idle'
+            kw['progress'] = 0
+            kw['phase'] = '准备中'
+            kw['done_chapters'] = 0
+            cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
+            if os.path.exists(cp_file):
+                try: os.remove(cp_file)
+                except: pass
+        _rebuild_tasks[bid] = {**_rebuild_tasks.get(bid, {}), **kw}
+
+def _rebuild_should_stop(bid):
+    with _rebuild_lock:
+        t = _rebuild_tasks.get(bid)
+        return t is not None and t.get('stopped', False)
+
+def get_readthrough_config(bid):
+    p = os.path.join(get_book_dir(bid), 'readthrough.json')
+    return load_json(p, dict)
+
+def save_readthrough_config(bid, cfg):
+    p = os.path.join(get_book_dir(bid), 'readthrough.json')
+    save_json(p, cfg)
+
+def get_source(bid):
+    p = os.path.join(get_book_dir(bid), 'source.md')
+    if os.path.exists(p):
+        with open(p, 'r', encoding='utf-8') as f:
+            return f.read()
+    return ''
+
+def save_source(bid, text):
+    p = os.path.join(get_book_dir(bid), 'source.md')
+    with open(p, 'w', encoding='utf-8') as f:
+        f.write(text)
+
+def get_outline_md(bid):
+    p = os.path.join(get_book_dir(bid), 'outline.md')
+    if os.path.exists(p):
+        with open(p, 'r', encoding='utf-8') as f:
+            return f.read()
+    return ''
+
+def save_outline_md(bid, text):
+    p = os.path.join(get_book_dir(bid), 'outline.md')
+    with open(p, 'w', encoding='utf-8') as f:
+        f.write(text)
+
+def save_timeline_md(bid, text):
+    p = os.path.join(get_book_dir(bid), 'timeline.md')
+    with open(p, 'w', encoding='utf-8') as f:
+        f.write(text)
+
+def get_timeline_md(bid):
+    p = os.path.join(get_book_dir(bid), 'timeline.md')
+    if os.path.exists(p):
+        with open(p, 'r', encoding='utf-8') as f: return f.read()
+    return ''
+
+def save_prediction_md(bid, text):
+    p = os.path.join(get_book_dir(bid), 'prediction.md')
+    with open(p, 'w', encoding='utf-8') as f:
+        f.write(text)
+
+def get_prediction_md(bid):
+    p = os.path.join(get_book_dir(bid), 'prediction.md')
+    if os.path.exists(p):
+        with open(p, 'r', encoding='utf-8') as f: return f.read()
+    return ''
+
+def _read_chapter_file(bid, cid):
+    p = os.path.join(get_book_dir(bid), 'chapters', f'{cid}.json')
+    if os.path.exists(p):
+        with open(p, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return None
+
+def get_ai_providers():
+    return load_json(AI_PROVIDERS_FILE, dict)
+
+AI_PROVIDERS_FILE = os.path.join(DATA_DIR, 'ai_providers.json')
+
+# ===== 本地 Llama.cpp 服务器控制 =====
+_LOCAL_LLM_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'local_llm'))
+_LOCAL_LLM_MODEL = os.path.join(_LOCAL_LLM_DIR, 'models', 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf')
+_LOCAL_LLM_LOCK = threading.Lock()
+_LOCAL_LLM_PROC = None
+_LOCAL_LLM_STATE = {'status': 'idle', 'progress': 0, 'error': '', 'updated': 0}
+
+def _local_llm_status():
+    try:
+        req = urllib.request.Request('http://127.0.0.1:8080/v1/models', method='GET')
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+def _local_llm_set(status=None, progress=None, error=None):
+    with _LOCAL_LLM_LOCK:
+        if status is not None: _LOCAL_LLM_STATE['status'] = status
+        if progress is not None: _LOCAL_LLM_STATE['progress'] = progress
+        if error is not None: _LOCAL_LLM_STATE['error'] = error
+        _LOCAL_LLM_STATE['updated'] = time.time()
+
+def _parse_log_progress(line):
+    """根据 llama-server 日志估算进度"""
+    l = line.lower()
+    if 'load_backend' in l:
+        return 15
+    if 'main: loading model' in l or 'srv    load_model' in l:
+        return 25
+    if 'llama_model_loader:' in l:
+        return 40
+    if 'fitting params to free memory' in l or 'common_fit_params' in l:
+        return 60
+    if 'successfully fit params' in l:
+        return 80
+    if 'all slots are idle' in l or 'http server listening' in l or 'init: http server started' in l:
+        return 100
+    if 'error' in l or 'fail' in l or 'cannot' in l:
+        return -1
+    return None
+
+def _monitor_local_llm(proc):
+    """后台线程：读取子进程输出并更新进度"""
+    _local_llm_set(status='starting', progress=5)
+    try:
+        # llama-server 输出量大，我们直接轮询 HTTP 端口更可靠
+        for i in range(60):
+            time.sleep(1)
+            # 通过日志文件判断进度
+            log_path = os.path.join(_LOCAL_LLM_DIR, 'server.log')
+            if os.path.exists(log_path):
+                try:
+                    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                        max_prog = 5
+                        err = None
+                        for line in lines[-100:]:
+                            prog = _parse_log_progress(line)
+                            if prog == -1:
+                                err = line.strip()
+                            elif prog is not None and prog > max_prog:
+                                max_prog = prog
+                        if err and max_prog < 100:
+                            _local_llm_set(status='error', progress=max_prog, error=err)
+                            return
+                        if max_prog >= 100:
+                            _local_llm_set(status='ready', progress=100)
+                            return
+                        _local_llm_set(status='loading', progress=max_prog)
+                except Exception:
+                    pass
+            # 同时检测 HTTP 是否已就绪
+            if _local_llm_status():
+                _local_llm_set(status='ready', progress=100)
+                return
+        # 超时
+        _local_llm_set(status='error', progress=_LOCAL_LLM_STATE.get('progress', 50), error='启动超时')
+    except Exception as e:
+        _local_llm_set(status='error', progress=0, error=str(e))
+
+def _start_local_llm():
+    global _LOCAL_LLM_PROC
+    exe = os.path.join(_LOCAL_LLM_DIR, 'llama-server.exe')
+    if not os.path.exists(exe):
+        return False, '找不到 llama-server.exe'
+    if not os.path.exists(_LOCAL_LLM_MODEL):
+        return False, '找不到模型文件'
+    # 如果已经在运行，直接返回成功
+    if _local_llm_status():
+        _local_llm_set(status='ready', progress=100)
+        return True, ''
+    with _LOCAL_LLM_LOCK:
+        if _LOCAL_LLM_STATE.get('status') in ('starting', 'loading'):
+            return True, '正在启动中'
+    try:
+        log_path = os.path.join(_LOCAL_LLM_DIR, 'server.log')
+        # 清空旧日志
+        open(log_path, 'w').close()
+        log_fp = open(log_path, 'a', encoding='utf-8', errors='ignore')
+        cmd = [
+            exe,
+            '-m', _LOCAL_LLM_MODEL,
+            '--host', '127.0.0.1',
+            '--port', '8080',
+            '-c', '131072',
+            '-np', '1',
+            '--timeout', '300',
+        ]
+        _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR, stdout=log_fp, stderr=subprocess.STDOUT)
+        threading.Thread(target=_monitor_local_llm, args=(_LOCAL_LLM_PROC,), daemon=True).start()
+        return True, ''
+    except Exception as e:
+        _local_llm_set(status='error', progress=0, error=str(e))
+        return False, str(e)
+
+def _stop_local_llm():
+    global _LOCAL_LLM_PROC
+    try:
+        subprocess.run(['taskkill', '/F', '/IM', 'llama-server.exe'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+    with _LOCAL_LLM_LOCK:
+        _LOCAL_LLM_PROC = None
+        _LOCAL_LLM_STATE['status'] = 'idle'
+        _LOCAL_LLM_STATE['progress'] = 0
+        _LOCAL_LLM_STATE['error'] = ''
+    return True, ''
+
+def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=False):
+    """构建 OpenAI 兼容 API 请求"""
+    s = dict(settings)
+    if not s.get('base_url') or not s.get('model'):
+        prov = get_ai_providers()
+        ap = (prov.get('providers', [{}])[0] if prov.get('providers') else {})
+        if ap:
+            s['base_url'] = ap.get('base_url', '') or s.get('base_url', '')
+            s['api_key'] = ap.get('api_key', '') or s.get('api_key', '')
+            s['model'] = ap.get('model', '') or s.get('model', '')
+    base = s.get('base_url', '').rstrip('/')
+    key = s.get('api_key', '')
+    model = s.get('model', '')
+    if not base or not model:
+        return None, None, None, None, None, '缺少 API 配置'
+    if not is_safe_url(base):
+        return None, None, None, None, None, 'URL不允许'
+    if base.endswith('/v1'):
+        url = f'{base}/chat/completions'
+    else:
+        url = f'{base}/v1/chat/completions'
+    headers = {'Content-Type': 'application/json'}
+    if key:
+        headers['Authorization'] = f'Bearer {key}'
+    # 检测是否为 MiniMax
+    is_minimax = 'minimaxi' in base.lower()
+    body = {'model': model, 'messages': messages}
+    # MiniMax temperature 范围 (0,1]，默认推荐 1.0
+    if is_minimax:
+        t = float(temperature) if temperature is not None else 0.7
+        body['temperature'] = max(0.01, min(1.0, t))
+    else:
+        body['temperature'] = temperature
+    if max_tokens is not None and max_tokens > 0:
+        if is_minimax:
+            # MiniMax 上限 2048
+            body['max_tokens'] = min(int(max_tokens), 2048)
+        else:
+            body['max_tokens'] = int(max_tokens)
+    if stream:
+        body['stream'] = True
+    return url, headers, json.dumps(body).encode(), 'POST', {'text_path': 'choices.0.message.content'}, None
+
+def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_token=None, on_content_token=None, on_reasoning_token=None, should_stop_fn=None):
+    """流式调用 AI。
+    full_text 只累加正文 token（delta.content / message.content），用于保存。
+    on_token 收到所有 token（正文+思考），用于 UI 实时显示。
+    on_content_token / on_reasoning_token 可分别监听两类 token。
+    """
+    url, headers, body_bytes, method, resp_parse, err = _prepare_ai_request(settings, messages, max_tokens, temperature, stream=True)
+    if err:
+        if on_token: on_token(f'[请求构建失败: {err}]\n')
+        return None, err
+    full_text = ''          # 仅正文（用于持久化）
+    reasoning_text = ''     # 仅思考（用于持久化）
+    tid = threading.current_thread().ident
+    # 用于解析 <think>...</think> 标签的状态机
+    _think_buf = ''
+    _in_think = False
+    _think_opened = False
+    _think_closed = False
+    try:
+        req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        register_ai_connection(tid, resp)
+        for raw_line in resp:
+            if should_stop_fn and should_stop_fn():
+                return full_text, '用户停止'
+            try:
+                line = raw_line.decode('utf-8', errors='replace').strip()
+                if not line: continue
+                if line == 'data: [DONE]': continue
+                if line.startswith('data: '):
+                    data_str = line[6:]
+                    try:
+                        ch = json.loads(data_str)
+                        for c in ch.get('choices', []):
+                            if not isinstance(c, dict): continue
+                            delta = c.get('delta', {}) or {}
+                            msg = c.get('message', {}) or {}
+
+                            # 1) 正文 token
+                            content_tk = _extract_text(delta.get('content')) or _extract_text(msg.get('content'))
+                            # 2) 思考 token（原生 reasoning_content）
+                            reasoning_tk = _extract_text(delta.get('reasoning_content')) or _extract_text(msg.get('reasoning_content'))
+                            # 3) 兼容旧格式 text
+                            text_tk = _extract_text(c.get('text'))
+
+                            # 如果 content 中包含 <think> 标签，用状态机分离
+                            if content_tk and not reasoning_tk:
+                                _think_buf += content_tk
+                                # 尝试解析已缓冲的文本
+                                if not _think_opened and '<think>' in _think_buf:
+                                    _think_opened = True
+                                    # think 开始前的内容作为正文
+                                    pre = _think_buf.split('<think>', 1)[0]
+                                    if pre:
+                                        full_text += pre
+                                        if on_content_token:
+                                            try: on_content_token(pre)
+                                            except: pass
+                                        if on_token:
+                                            try: on_token(pre)
+                                            except: pass
+                                    _think_buf = _think_buf.split('<think>', 1)[1]
+                                    _in_think = True
+                                if _think_opened and _in_think and '</think>' in _think_buf:
+                                    _in_think = False
+                                    _think_closed = True
+                                    think_part, post = _think_buf.split('</think>', 1)
+                                    reasoning_text += think_part
+                                    if on_reasoning_token:
+                                        try: on_reasoning_token(think_part)
+                                        except: pass
+                                    if on_token:
+                                        try: on_token(think_part)
+                                        except: pass
+                                    _think_buf = post
+                                    # think 结束后的内容作为正文
+                                    if post:
+                                        full_text += post
+                                        if on_content_token:
+                                            try: on_content_token(post)
+                                            except: pass
+                                        if on_token:
+                                            try: on_token(post)
+                                            except: pass
+                                elif _think_opened and _in_think:
+                                    # 仍在 think 中，尝试发送已确定的 reasoning
+                                    # 为避免过早切割，只发送不含 '<' 的部分（简单策略）
+                                    safe_idx = _think_buf.rfind('<')
+                                    if safe_idx > 0:
+                                        safe_part = _think_buf[:safe_idx]
+                                        reasoning_text += safe_part
+                                        if on_reasoning_token:
+                                            try: on_reasoning_token(safe_part)
+                                            except: pass
+                                        if on_token:
+                                            try: on_token(safe_part)
+                                            except: pass
+                                        _think_buf = _think_buf[safe_idx:]
+                                elif _think_closed:
+                                    # think 已结束，所有内容都是正文
+                                    full_text += content_tk
+                                    if on_content_token:
+                                        try: on_content_token(content_tk)
+                                        except: pass
+                                    if on_token:
+                                        try: on_token(content_tk)
+                                        except: pass
+                                    _think_buf = ''
+                                # 如果没有 think 标签，正常处理
+                                elif not _think_opened:
+                                    full_text += content_tk
+                                    if on_content_token:
+                                        try: on_content_token(content_tk)
+                                        except: pass
+                                    if on_token:
+                                        try: on_token(content_tk)
+                                        except: pass
+                            else:
+                                # 原生 reasoning_content 或纯 content
+                                if content_tk:
+                                    full_text += content_tk
+                                    if on_content_token:
+                                        try: on_content_token(content_tk)
+                                        except: pass
+                                    if on_token:
+                                        try: on_token(content_tk)
+                                        except: pass
+                                if reasoning_tk:
+                                    reasoning_text += reasoning_tk
+                                    if on_reasoning_token:
+                                        try: on_reasoning_token(reasoning_tk)
+                                        except: pass
+                                    if on_token:
+                                        try: on_token(reasoning_tk)
+                                        except: pass
+                                if text_tk and not content_tk:
+                                    full_text += text_tk
+                                    if on_token:
+                                        try: on_token(text_tk)
+                                        except: pass
+                    except json.JSONDecodeError: pass
+                elif line.startswith('{'):
+                    try:
+                        ch = json.loads(line)
+                        for c in ch.get('choices', []):
+                            if not isinstance(c, dict): continue
+                            token = _extract_choice_text(c)
+                            if token:
+                                # 非流式 fallback：尝试提取 think 标签
+                                think_match = re.search(r'<think>(.*?)</think>', token, re.S)
+                                if think_match:
+                                    reasoning_text = think_match.group(1)
+                                    if on_reasoning_token:
+                                        try: on_reasoning_token(reasoning_text)
+                                        except: pass
+                                    token = re.sub(r'<think>.*?</think>', '', token, flags=re.S)
+                                full_text += token
+                                if on_token: on_token(token)
+                                return full_text, None
+                    except: pass
+            except: pass
+        # 流结束：处理缓冲区内残留
+        if _think_buf and _in_think:
+            reasoning_text += _think_buf
+            if on_reasoning_token:
+                try: on_reasoning_token(_think_buf)
+                except: pass
+            if on_token:
+                try: on_token(_think_buf)
+                except: pass
+        elif _think_buf and not _in_think:
+            full_text += _think_buf
+            if on_content_token:
+                try: on_content_token(_think_buf)
+                except: pass
+            if on_token:
+                try: on_token(_think_buf)
+                except: pass
+        return full_text, None
+    except Exception as e:
+        err_msg = f'API错误: {str(e)[:200]}'
+        if on_token: on_token(f'\n[{err_msg}]\n')
+        return None, err_msg
+    finally:
+        unregister_ai_connection(tid)
+        try: resp.close()
+        except: pass
+
+def _extract_text(val, reasoning=False):
+    if val is None: return ''
+    if isinstance(val, str): return val
+    if isinstance(val, list):
+        parts = []
+        for item in val:
+            if isinstance(item, dict):
+                parts.append(item.get('text') or item.get('content') or '')
+            elif isinstance(item, str):
+                parts.append(item)
+        return ''.join(parts)
+    return str(val)
+
+def _extract_choice_text(c):
+    """从单个 choice 中提取正文，优先 content，其次 reasoning_content"""
+    if not isinstance(c, dict): return ''
+    msg = c.get('message', {}) or {}
+    text = _extract_text(msg.get('content'))
+    if text: return text
+    # 某些模型把思考过程放在 reasoning_content
+    text = _extract_text(msg.get('reasoning_content'))
+    if text: return text
+    delta = c.get('delta', {}) or {}
+    text = _extract_text(delta.get('content'))
+    if text: return text
+    text = _extract_text(delta.get('reasoning_content'))
+    if text: return text
+    return _extract_text(c.get('text'))
+
+def _extract_choice_reasoning(c):
+    """从 choice 中专门提取 reasoning_content"""
+    if not isinstance(c, dict): return ''
+    msg = c.get('message', {}) or {}
+    text = _extract_text(msg.get('reasoning_content'))
+    if text: return text
+    delta = c.get('delta', {}) or {}
+    return _extract_text(delta.get('reasoning_content'))
+
+def call_ai_full(settings, messages, max_tokens, temperature, timeout=120):
+    """返回 (content, reasoning, err)，content 和 reasoning 分开"""
+    url, headers, body_bytes, method, resp_parse, err = _prepare_ai_request(settings, messages, max_tokens, temperature, stream=False)
+    if err: return None, None, err
+    tid = threading.current_thread().ident
+    try:
+        req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        register_ai_connection(tid, resp)
+        try:
+            raw = resp.read().decode()
+            data = json.loads(raw)
+            log_action('AI_RAW', raw[:800])
+            content = ''; reasoning = ''
+            choices = data.get('choices', [])
+            if choices and isinstance(choices, list) and isinstance(choices[0], dict):
+                c = choices[0]
+                content = _extract_text((c.get('message', {}) or {}).get('content')) or _extract_text(c.get('text'))
+                reasoning = _extract_choice_reasoning(c)
+            if not content:
+                content = _extract_text(data.get('content')) or _extract_text(data.get('text')) or _extract_text(data.get('response')) or ''
+            if not reasoning:
+                reasoning = _extract_text(data.get('reasoning_content')) or ''
+            if not content and 'output' in data:
+                out = data['output']
+                if isinstance(out, str):
+                    content = out
+                elif isinstance(out, dict):
+                    oc = out.get('choices', [])
+                    if oc and isinstance(oc, list) and isinstance(oc[0], dict):
+                        content = _extract_text((oc[0].get('message', {}) or {}).get('content')) or _extract_text(oc[0].get('text'))
+                        reasoning = _extract_choice_reasoning(oc[0])
+                    if not content:
+                        content = _extract_text(out.get('text')) or _extract_text(out.get('content')) or _extract_text(out.get('response'))
+                elif isinstance(out, list) and out:
+                    content = _extract_text(out[0].get('content') if isinstance(out[0], dict) else out[0])
+            if not content:
+                content = _extract_text(data.get('result'))
+            if content is None: content = ''
+            if reasoning is None: reasoning = ''
+            # 从 <think> 标签中提取 reasoning（MiniMax / DeepSeek 等）
+            if not reasoning and '<think>' in content:
+                think_match = re.search(r'<think>(.*?)</think>', content, re.S)
+                if think_match:
+                    reasoning = think_match.group(1)
+                    content = re.sub(r'<think>.*?</think>', '', content, flags=re.S).strip()
+            log_action('AI_RESULT', f'len={len(content)} reasoning={len(reasoning)}')
+            return content, reasoning, None
+        finally:
+            try: resp.close()
+            except: pass
+            unregister_ai_connection(tid)
+    except Exception as e:
+        err_msg = str(e)
+        status = getattr(e, 'code', 0)
+        if hasattr(e, 'read'):
+            try:
+                raw = e.read()
+                body = raw.decode() if raw else ''
+                ed = json.loads(body)
+                if isinstance(ed, dict) and 'error' in ed:
+                    err_msg = (ed['error'].get('message', str(ed['error'])) if isinstance(ed['error'], dict) else str(ed['error']))
+            except: pass
+        log_action('AI_ERROR', f'status={status} url={url} err={err_msg}')
+        return None, None, f'API错误({status}): {err_msg}'
+
+def call_ai(settings, messages, max_tokens, temperature, timeout=120):
+    """旧接口，只返回正文"""
+    content, _, err = call_ai_full(settings, messages, max_tokens, temperature, timeout)
+    return content, err
+
+def _extract_context_summary(source_text):
+    """从已有笔记中提取极简索引：人物和关键事件，供AI参考避免重复介绍。"""
+    if not source_text:
+        return ''
+    lines = source_text.split('\n')
+    chars = set()
+    events = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#') or line.startswith('###'):
+            continue
+        # 提取人物："- 张三：..." 或 "- **张三** ..."
+        m = re.match(r'^[-*]\s*\*?([^*：:]+)\*?[：:]', line)
+        if m:
+            name = m.group(1).strip()
+            if len(name) < 20 and ' ' not in name:
+                chars.add(name)
+        # 提取关键事件（含动作、决定的句子）
+        if any(k in line for k in ['决定', '前往', '到达', '发现', '获得', '失去', '死亡', '战斗', '击败', '加入', '离开', '遇见', '告知', '得知']):
+            events.append(line[:80])
+    summary = []
+    if chars:
+        summary.append('已出场人物：' + '、'.join(sorted(chars)))
+    if events:
+        summary.append('已发生事件：')
+        for e in events[-15:]:
+            summary.append('  ' + e)
+    return '\n'.join(summary)
+
+def _ai_read_chapter(settings, title, content, prev_context, config=None, on_token=None, should_stop_fn=None):
+    cfg = config or {}
+    mx = cfg.get('max_tokens', None)
+    tmp = cfg.get('temperature', 0.5)
+    ctx = f'【前情索引（只供参考，不要输出）】\n{prev_context}\n\n' if prev_context else ''
+    prompt = f"""{ctx}=== 本章：{title} ===
+
+{content}
+
+【任务】以资料整理员身份，用中文客观记录本章内容。
+
+【强制思考步骤】在输出任何内容之前，你必须先在脑中完成以下梳理（不要输出这些思考过程）：
+1. 角色梳理：本章有哪些角色出场？每个人分别做了什么、说了什么、处于什么状态？
+2. 事件梳理：本章发生了哪些关键事件？起因、经过、结果分别是什么？有没有冲突、转折或意外？
+3. 对话梳理：有没有重要的对话、誓言、威胁、揭露、谈判？对话双方是谁，核心信息是什么？
+4. 场景梳理：场景有没有切换？时间有没有推进？地点有没有变化？
+5. 设定梳理：有没有新世界观规则、新势力、新物品、新能力首次出现？
+6. 关联梳理：本章事件对主线有什么推动？有没有埋下伏笔或解开悬念？
+
+完成以上六步梳理后，确认没有遗漏任何对剧情有用的细节，再输出正式的剧情摘要和资料记录。
+
+【绝对禁止】
+- 禁止输出"好的""明白了""以下是"等任何开场白或结束语
+- 禁止评价、推测、感想、总结性评论
+- 禁止输出 ## 剧情摘要 和 ## 资料记录 之外的任何标题
+- 禁止把剧情摘要写成 bullet list，必须是连贯叙述段落
+- 禁止复制原文的任何句子、段落或片段，必须100%用自己的语言重新叙述
+- 禁止把原文内容直接搬过来充当摘要
+- 禁止流水账式罗列每一个细节
+- 禁止因为本章"看起来平淡"就跳过或极度简化——即使本章只是铺垫，也必须记录人物动向和情节推进
+
+【强制格式】你只能且必须输出以下两个部分，顺序固定：
+
+## 剧情摘要
+（此处必须是连续叙述段落，不是列表。你必须100%用自己的语言，基于上面的六步梳理，完整复述本章发生的所有事情。标准：
+- 不要漏掉任何一个情节转折、任何一段重要对话、任何一个角色行为、任何一个场景变化
+- 去掉的只有：重复的环境描写、无意义的心理渲染堆砌、流水账式动作重复（如"他又挥了一拳"这类无信息增量的描写）
+- 保留所有对理解剧情有用的细节：人物动机、对话核心内容、冲突起因与结果、伏笔暗示、势力关系变化
+- 绝对不能复制原文的任何句子，必须逐句改写、转述，用自己的词汇和句式重新表达
+- 长度标准：如果本章内容丰富，摘要应该在 1000-5000 字之间；内容少的章也不应低于 100 字
+- 绝对不允许因为"本章看起来不重要"而一笔带过或跳过）
+
+## 资料记录
+- 出场人物：列出本章出现的所有人名及其身份/实力/关系变化
+- 重要事件：时间、地点、经过、结果
+- 新设定：世界规则、势力、物品等首次出现的设定
+- 具体数值：等级、数量、时间等精确数字
+
+【再次强调】每一章都必须有完整输出，不允许跳过任何一章。除上述两个 ## 标题及其内容外，不要输出任何其他文字。"""
+    return call_ai_stream(settings, [
+        {'role': 'system', 'content': '你是格式严格的资料整理员。你的输出必须且只能包含两个部分：## 剧情摘要（用你自己的语言完整复述本章所有情节，禁止遗漏任何有用细节，禁止复制原文）和 ## 资料记录（markdown列表形式的人物、事件、设定、数值）。在处理每一章时，你必须先在脑中完成六步梳理（角色、事件、对话、场景、设定、关联），确认无遗漏后再输出。禁止开场白、结束语、评价、推测。禁止输出规定格式以外的任何内容。绝不允许跳过任何一章。'},
+        {'role': 'user', 'content': prompt}
+    ], mx, tmp, timeout=300, on_token=on_token, should_stop_fn=should_stop_fn)
+
+def _estimate_tokens(text):
+    """简易 token 估算：中文小说以字符数近似。"""
+    if not text:
+        return 0
+    return len(text)
+
+def _ai_read_chapters_batch(settings, chapters, prev_context, config=None, on_token=None, should_stop_fn=None):
+    """批量阅读多章，一次性返回所有章节的摘要。"""
+    cfg = config or {}
+    mx = cfg.get('max_tokens', None)
+    tmp = cfg.get('temperature', 0.5)
+    ctx = f'【前情索引（只供参考，不要输出）】\n{prev_context}\n\n' if prev_context else ''
+
+    parts = []
+    for ch in chapters:
+        parts.append(f'=== 本章：{ch["title"]} ===\n\n{ch["content"]}')
+    chapters_text = '\n\n'.join(parts)
+
+    prompt = f"""{ctx}以下是连续的多章小说内容，请分别为**每一章**生成独立的剧情摘要和资料记录。
+
+{chapters_text}
+
+【任务】以资料整理员身份，用中文客观记录每一章内容。
+
+【强制思考步骤】在输出任何内容之前，你必须先在脑中为每一章分别完成以下梳理（不要输出这些思考过程）：
+1. 角色梳理：本章有哪些角色出场？每个人分别做了什么、说了什么、处于什么状态？
+2. 事件梳理：本章发生了哪些关键事件？起因、经过、结果分别是什么？有没有冲突、转折或意外？
+3. 对话梳理：有没有重要的对话？核心信息是什么？
+4. 场景梳理：场景有没有切换？时间有没有推进？地点有没有变化？
+5. 设定梳理：有没有新世界规则、新势力、新物品、新能力首次出现？
+6. 关联梳理：本章事件对主线有什么推动？有没有埋下伏笔或解开悬念？
+
+完成以上六步梳理后，确认没有遗漏任何对剧情有用的细节，再输出正式的剧情摘要和资料记录。
+
+【绝对禁止】
+- 禁止输出"好的""明白了""以下是"等任何开场白或结束语
+- 禁止评价、推测、感想、总结性评论
+- 禁止复制原文的任何句子、段落或片段，必须100%用自己的语言重新叙述
+- 禁止把不同章节的内容混为一谈，每一章的输出必须完全独立
+- 禁止跳过任何一章
+- 禁止把剧情摘要写成 bullet list，必须是连贯叙述段落
+
+【强制格式】对每一章，你只能且必须输出以下两个部分，顺序固定。章节与章节之间用一行空行分隔：
+
+## {{{{章节标题}}}} 剧情摘要
+（此处必须是连续叙述段落，不是列表。用自己的语言完整复述本章所有事情。标准：
+- 不要漏掉任何一个情节转折、任何一段重要对话、任何一个角色行为、任何一个场景变化
+- 去掉的只有：重复的环境描写、无意义的心理渲染堆砌
+- 保留所有对理解剧情有用的细节：人物动机、对话核心内容、冲突起因与结果、伏笔暗示、势力关系变化
+- 绝对不能复制原文的任何句子，必须逐句改写、转述
+- 长度标准：内容丰富的章应在 1000-5000 字之间；内容少的章也不应低于 100 字
+- 绝对不允许因为"本章看起来不重要"而一笔带过）
+
+## {{{{章节标题}}}} 资料记录
+- 出场人物：列出本章出现的所有人名及其身份/实力/关系变化
+- 重要事件：时间、地点、经过、结果
+- 新设定：世界规则、势力、物品等首次出现的设定
+- 具体数值：等级、数量、时间等精确数字
+
+【再次强调】必须严格按照上述格式输出，每一章都必须有完整输出，不允许跳过任何一章。除规定的标题及其内容外，不要输出任何其他文字。"""
+
+    return call_ai_stream(settings, [
+        {'role': 'system', 'content': '你是格式严格的资料整理员。你的输出必须且只能包含每一章的两个部分：## {章节标题} 剧情摘要（用自己的语言完整复述，禁止遗漏细节，禁止复制原文）和 ## {章节标题} 资料记录（markdown列表形式的人物、事件、设定、数值）。你必须为每一章分别独立输出，章节之间用空行分隔。在处理每一章时，你必须先在脑中完成六步梳理（角色、事件、对话、场景、设定、关联），确认无遗漏后再输出。禁止开场白、结束语、评价、推测。禁止输出规定格式以外的任何内容。绝不允许跳过任何一章。'},
+        {'role': 'user', 'content': prompt}
+    ], mx, tmp, timeout=300, on_token=on_token, should_stop_fn=should_stop_fn)
+
+def _parse_batch_result(result, chapters):
+    """将批量 AI 输出按章节拆分。成功返回列表，失败返回 None。"""
+    if not result or not result.strip():
+        return None
+
+    marks = []
+    for i, ch in enumerate(chapters):
+        title = re.escape(ch['title'])
+        # 匹配行首的 "## title 剧情摘要"（允许空格变化）
+        pat = re.compile(rf'^## \s*{title}\s*剧情摘要', re.MULTILINE)
+        for m in pat.finditer(result):
+            marks.append((m.start(), i))
+
+    if len(marks) < len(chapters):
+        return None
+
+    marks.sort()
+    out = [''] * len(chapters)
+    for j, (start, ch_i) in enumerate(marks):
+        end = marks[j + 1][0] if j + 1 < len(marks) else len(result)
+        out[ch_i] = result[start:end].strip()
+    return out
+
+def _ai_merge_notes_stream(settings, notes, config=None, on_token=None, should_stop_fn=None):
+    cfg = config or {}
+    mx = cfg.get('max_tokens', None)
+    tmp = cfg.get('temperature', 0.2)
+    combined = '\n\n'.join(notes)
+    prompt = f"""将以下各章记录合并整理为一份结构化的全书阅读笔记。
+
+{combined}
+
+【绝对禁止】
+- 禁止输出任何开场白或结束语
+- 禁止评价、推测、感想
+- 禁止合并不同章节中对同一事物的不同角度描述（保留所有细节）
+
+【强制输出格式】
+# 全书阅读笔记
+## 一、人物档案
+（按角色分类，集中该角色在各章的所有信息：身份、实力变化、关系演变、关键行为）
+## 二、事件编年
+（按时间线排列所有重要事件，保留起因、经过、结果）
+## 三、世界观与设定
+（整理所有世界规则、势力、物品设定，保留首次出现的章节标记）
+## 四、数值记录
+（汇总所有具体数字：等级、数量、时间、距离等）
+## 五、伏笔与线索
+（记录所有未解决的悬念、预言、暗示及其出现章节）
+
+【再次强调】除上述 markdown 结构外，不要输出任何其他文字。同一角色的不同信息全部保留，不要概括删减。"""
+    return call_ai_stream(settings, [
+        {'role': 'system', 'content': '你是格式严格的资料整理员。合并各章记录时，必须保留所有细节，禁止概括删减。只输出规定 markdown 结构，禁止任何额外文字。'},
+        {'role': 'user', 'content': prompt}
+    ], mx, tmp, timeout=180, on_token=on_token, should_stop_fn=should_stop_fn)
+
+def _ai_outline_stream(settings, source, config=None, on_token=None, should_stop_fn=None):
+    cfg = config or {}
+    mx = cfg.get('max_tokens', None)
+    tmp = cfg.get('temperature', 0.15)
+    prompt = f"""从以下全书笔记提炼结构大纲：
+
+{source}
+
+输出 markdown：
+# 故事大纲
+## 主线
+## 分卷/分篇章概要
+## 主要角色状态
+## 关键转折点
+
+精炼简洁，只输出 markdown。"""
+    return call_ai_stream(settings, [
+        {'role': 'system', 'content': '你是大纲整理员，从全书笔记提炼大纲。只输出markdown。'},
+        {'role': 'user', 'content': prompt}
+    ], mx, tmp, timeout=120, on_token=on_token, should_stop_fn=should_stop_fn)
+
+def _ai_cleanup_source(settings, source_text, config=None, on_token=None, should_stop_fn=None):
+    """审视全书笔记，删除明显完全重复的内容，尽可能保留。"""
+    cfg = config or {}
+    mx = cfg.get('max_tokens', None)
+    tmp = cfg.get('temperature', 0.1)
+    prompt = f"""以下是全书各章的阅读笔记。你的任务是：
+
+1. 通读全文，删除**明显完全重复**的内容（即不同章节中对同一事物的描述几乎逐字相同）。
+2. **尽可能保留所有信息**——如果两段内容角度不同、细节不同、或涉及不同章节/时间点，即使主题相同也要保留。
+3. 保留所有具体数值、人名、地点、事件经过。
+4. 保留所有不同章节的独立记录。
+5. 输出完整的 markdown，不要省略任何非重复内容。
+
+注意：只删"逐字重复"或"同一句话换了个说法但信息完全相同"的内容。不要合并、不要概括、不要删减细节。
+
+---
+
+{source_text}
+
+---
+
+请输出清理后的完整 markdown："""
+    return call_ai_stream(settings, [
+        {'role': 'system', 'content': '你是去重整理员。只删除明显完全重复的内容，其他一律保留。输出完整markdown。'},
+        {'role': 'user', 'content': prompt}
+    ], mx, tmp, timeout=300, on_token=on_token, should_stop_fn=should_stop_fn)
+
+def _ai_merge_notes(settings, notes, config=None):
+    cfg = config or {}
+    mx = cfg.get('max_tokens', None)
+    tmp = cfg.get('temperature', 0.2)
+    combined = '\n\n'.join(notes)
+    prompt = f"""将全书各章记录整理为完整阅读笔记：
+
+{combined}
+
+输出 markdown 结构：
+# 全书阅读笔记
+## 一、人物档案
+## 二、事件编年
+## 三、世界观与设定
+## 四、数值记录
+## 五、伏笔与线索
+
+只输出 markdown，同一角色信息集中一处。"""
+    return call_ai(settings, [
+        {'role': 'system', 'content': '你是资料整理员，合并各章记录为结构化全书笔记。只输出markdown。'},
+        {'role': 'user', 'content': prompt}
+    ], mx, tmp, timeout=180)
+
+def _ai_outline(settings, source, config=None):
+    cfg = config or {}
+    mx = cfg.get('max_tokens', None)
+    tmp = cfg.get('temperature', 0.3)
+    prompt = f"""基于以下全书阅读笔记，整理一份结构清晰、内容完整的故事大纲。
+
+{source}
+
+【要求】
+1. 用自己的语言重新组织，不要复制原文句子
+2. 必须包含所有主要情节线，不要遗漏任何重要事件
+3. 角色发展要有连贯性，体现变化和成长
+4. 标注伏笔和悬念的位置
+5. 输出 markdown 格式
+
+【输出格式】
+# 故事大纲
+
+## 一、主线剧情
+（按时间顺序梳理核心故事线，包含所有关键转折）
+
+## 二、支线脉络
+（各条支线的发展，与主线的交汇点）
+
+## 三、角色弧光
+（主要角色的出场、动机变化、关键抉择、成长轨迹）
+
+## 四、势力格局
+（各方势力的消长、联盟、对抗关系演变）
+
+## 五、世界观展开
+（设定揭示的顺序，规则的建立与打破）
+
+## 六、伏笔与悬念
+（已埋下的伏笔当前状态：未回收/已回收/待发展）
+
+## 七、关键转折点
+（对每个重要转折标注：章节位置、触发原因、影响范围）
+
+只输出 markdown，不要加任何开场白或结束语。"""
+    return call_ai(settings, [
+        {'role': 'system', 'content': '你是专业的小说结构分析师。基于阅读笔记整理大纲时，必须用自己的语言重新叙述，保留所有有用细节，禁止复制原文。只输出 markdown。'},
+        {'role': 'user', 'content': prompt}
+    ], mx, tmp, timeout=180)
+
+def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings):
+    """后台线程：单章通读，生成章节摘要并增量更新 source.md"""
+    set_conn_meta('chapter-complete', '本章通读', book_id)
+    try:
+        bg_task_update(task_id, progress=5)
+        cp = os.path.join(get_book_dir(book_id), 'chapters', f"{chapter_id}.json")
+        if not os.path.exists(cp):
+            bg_task_done(task_id, '章节不存在')
+            return
+        with open(cp, 'r', encoding='utf-8') as f:
+            ch = json.load(f)
+        title = ch.get('title', '未命名章节')
+        content = ch.get('content', '')
+        if not content.strip():
+            bg_task_done(task_id, '章节内容为空')
+            return
+        bg_task_update(task_id, progress=10)
+        # 构建前情索引
+        current_source = get_source(book_id) or ''
+        prev_context = _extract_context_summary(current_source)
+        # 调用 AI 生成单章摘要
+        result, err = _ai_read_chapter(cfg_settings, title, content, prev_context, config=None, on_token=None, should_stop_fn=lambda: bg_task_should_stop(task_id))
+        if err:
+            bg_task_done(task_id, err)
+            return
+        if not result or not result.strip():
+            bg_task_done(task_id, 'AI 无输出')
+            return
+        bg_task_update(task_id, progress=70)
+        # 保存章节摘要
+        save_chapter_summary(book_id, chapter_id, result)
+        # 更新章节 JSON 中的 readthrough 字段
+        ch['readthrough'] = result
+        ch['completed_at'] = time.time()
+        save_json(cp, ch)
+        # 增量更新 source.md
+        source = get_source(book_id) or ''
+        if not source.strip():
+            source = '# 全书阅读笔记\n\n'
+        # 如果已有该章节的记录，先移除旧记录（简单按标题匹配）
+        chapter_header = f"\n\n### {title}\n"
+        if chapter_header in source:
+            idx = source.find(chapter_header)
+            next_idx = source.find('\n\n### ', idx + len(chapter_header))
+            if next_idx == -1:
+                source = source[:idx]
+            else:
+                source = source[:idx] + source[next_idx:]
+        source += f"\n\n### {title}\n{result}"
+        save_source(book_id, source)
+        # 更新 outline 中的 chapter_summaries
+        outline = get_outline(book_id)
+        summaries = outline.get('chapter_summaries', {})
+        summaries[chapter_id] = result[:500] + ('...' if len(result) > 500 else '')
+        outline['chapter_summaries'] = summaries
+        outline['updated'] = time.time()
+        save_json(os.path.join(get_book_dir(book_id), 'outline.json'), outline)
+        bg_task_update(task_id, result=result, progress=100)
+        bg_task_done(task_id)
+    except Exception as e:
+        bg_task_done(task_id, str(e))
+
+
+def do_readthrough(bid, settings, config=None):
+    """后台线程：逐章通读，生成 source.md + 大纲"""
+    set_conn_meta('readthrough', '通读', bid)
+    cfg = config or {}
+    try:
+        _rebuild_set(bid, status='running', progress=0, phase='准备中', total_chapters=0, done_chapters=0,
+                     stream_buffer='', stream_status='', source='', logs=[], stopped=False)
+        _rebuild_log(bid, '开始通读')
+        meta = get_book_meta(bid) or {}
+        order = meta.get('chapter_order', [])
+        ch_dir = os.path.join(get_book_dir(bid), 'chapters')
+        if not os.path.isdir(ch_dir) or not order:
+            _rebuild_set(bid, status='error', progress=100, error='没有章节')
+            return
+        total = len(order)
+        _rebuild_set(bid, total_chapters=total)
+        _rebuild_log(bid, f'全书 {total} 章')
+
+        cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
+        cp = load_json(cp_file, dict)
+        notes = cp.get('notes', [])
+        done = set(cp.get('done', []))
+        notes = []; done = set()
+
+        chapters = []
+        for i, cid in enumerate(order):
+            ch = _read_chapter_file(bid, cid)
+            if ch:
+                chapters.append({'idx': i, 'id': cid, 'title': ch.get('title', f'第{i+1}章'), 'content': ch.get('content', '')})
+
+        pending = [c for c in chapters if c['id'] not in done]
+        done_count = len(chapters) - len(pending)
+        current_source = ''
+        if not current_source:
+            current_source = '# 全书阅读笔记\n\n'
+
+        _rebuild_set(bid, phase='逐章阅读', done_chapters=done_count,
+                     progress=5 + int(done_count / total * 70), source=current_source)
+
+        # 读取用户设置的上下文长度（优先手动填写，0 表示关闭批量）
+        context_window = settings.get('model_context_length', 0)
+        use_batch = False
+        if isinstance(context_window, int) and context_window > 0:
+            use_batch = True
+            _rebuild_log(bid, f'使用批量模式，上下文限制: {context_window} tokens')
+        else:
+            _rebuild_log(bid, '未设置上下文长度，使用单章模式')
+
+        def mk_handler():
+            def h(tk):
+                with _rebuild_lock:
+                    t = _rebuild_tasks.get(bid, {})
+                    t['stream_buffer'] = t.get('stream_buffer', '') + tk
+            return h
+
+        max_batch_failures = 2
+        batch_failures = 0
+        i = 0
+        while i < len(pending):
+            if _rebuild_should_stop(bid):
+                _rebuild_log(bid, '用户停止，已保存进度')
+                _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
+                return
+
+            if use_batch:
+                # 构建本批次：尽可能多地压入完整章节，不超过 70% 预算
+                budget = int(context_window * 0.7)
+                reserve = 3000  # 预留 prompt 模板 + 输出空间
+                max_content = max(budget - reserve, 0)
+
+                batch = []
+                batch_tokens = 0
+                while i < len(pending):
+                    ch = pending[i]
+                    ch_tokens = _estimate_tokens(ch['content'])
+                    if batch and batch_tokens + ch_tokens > max_content:
+                        # 已有至少一章，加入本章会超限，结束本批
+                        break
+                    # 即使单章超限，也至少压入一章（必须完整）
+                    batch.append(ch)
+                    batch_tokens += ch_tokens
+                    i += 1
+
+                if not batch:
+                    # 保险：至少一章
+                    ch = pending[i]
+                    batch = [ch]
+                    i += 1
+
+                _rebuild_log(bid, f'批量处理 {len(batch)} 章: ' + ', '.join(c['title'] for c in batch))
+                _rebuild_set(bid, stream_buffer='', stream_status=f'正在读: {batch[0]["title"]} 等 {len(batch)} 章')
+
+                ctx = _extract_context_summary(current_source)
+                max_retries = 3
+                attempt = 0
+                result = ''
+                err = None
+                while attempt < max_retries:
+                    if _rebuild_should_stop(bid):
+                        _rebuild_log(bid, '用户停止，已保存进度')
+                        _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
+                        return
+                    result, err = _ai_read_chapters_batch(settings, batch, ctx,
+                                                           config=cfg, on_token=mk_handler(),
+                                                           should_stop_fn=lambda: _rebuild_should_stop(bid))
+                    if not err and result and result.strip():
+                        break
+                    attempt += 1
+                    _rebuild_log(bid, f'批量第{attempt}次失败，重试中...')
+                    _rebuild_set(bid, stream_buffer='', stream_status=f'批量第{attempt}次重试')
+                    time.sleep(1)
+
+                parsed = None
+                if not err and result and result.strip():
+                    parsed = _parse_batch_result(result, batch)
+
+                if parsed and all(p.strip() for p in parsed):
+                    for ch, note in zip(batch, parsed):
+                        notes.append(note)
+                        current_source += f'\n\n### {ch["title"]}\n{note}'
+                        done.add(ch['id'])
+                        done_count += 1
+                        _rebuild_log(bid, f'完成 {ch["title"]} ({done_count}/{total})')
+                else:
+                    batch_failures += 1
+                    _rebuild_log(bid, f'批量解析失败（第{batch_failures}次），回退到单章处理')
+                    if batch_failures >= max_batch_failures:
+                        use_batch = False
+                        _rebuild_log(bid, '批量模式多次失败，后续使用单章模式')
+                    # fallback 单章
+                    for ch in batch:
+                        if _rebuild_should_stop(bid):
+                            _rebuild_log(bid, '用户停止，已保存进度')
+                            _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
+                            return
+                        ctx = _extract_context_summary(current_source)
+                        _rebuild_set(bid, stream_buffer='', stream_status=f'正在读: {ch["title"]}')
+                        max_retries = 3
+                        attempt = 0
+                        result = ''
+                        err = None
+                        while attempt < max_retries:
+                            if _rebuild_should_stop(bid):
+                                _rebuild_log(bid, '用户停止，已保存进度')
+                                _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
+                                return
+                            result, err = _ai_read_chapter(settings, ch['title'], ch['content'], ctx,
+                                                            config=cfg, on_token=mk_handler(),
+                                                            should_stop_fn=lambda: _rebuild_should_stop(bid))
+                            if not err and result and result.strip():
+                                break
+                            attempt += 1
+                            _rebuild_log(bid, f'{ch["title"]} 第{attempt}次失败，重试中...')
+                            _rebuild_set(bid, stream_buffer='', stream_status=f'{ch["title"]} 第{attempt}次重试')
+                            time.sleep(1)
+                        if err or not result or not result.strip():
+                            _rebuild_log(bid, f'失败: {ch["title"]} 重试{max_retries}次后仍无输出')
+                            result = f'## {ch["title"]}\n[AI转述失败：本章无输出]\n'
+                        notes.append(result)
+                        current_source += f'\n\n### {ch["title"]}\n{result}'
+                        save_source(bid, current_source)
+                        done.add(ch['id'])
+                        done_count += 1
+                        pct = 5 + int(done_count / total * 70)
+                        _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source)
+                        save_json(cp_file, {'notes': notes, 'done': list(done)})
+                        _rebuild_log(bid, f'完成 {ch["title"]} ({done_count}/{total})')
+
+                save_source(bid, current_source)
+                pct = 5 + int(done_count / total * 70)
+                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source)
+                save_json(cp_file, {'notes': notes, 'done': list(done)})
+
+                if _rebuild_should_stop(bid):
+                    _rebuild_log(bid, '用户停止，已保存进度')
+                    _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
+                    return
+            else:
+                # 单章模式
+                ch = pending[i]
+                i += 1
+                _rebuild_log(bid, f'[{done_count+1}/{total}] {ch["title"]}')
+                if _rebuild_should_stop(bid):
+                    _rebuild_log(bid, '用户停止，已保存进度')
+                    _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
+                    return
+
+                ctx = _extract_context_summary(current_source)
+                _rebuild_set(bid, stream_buffer='', stream_status=f'正在读: {ch["title"]}')
+
+                max_retries = 3
+                attempt = 0
+                result = ''
+                err = None
+                while attempt < max_retries:
+                    if _rebuild_should_stop(bid):
+                        _rebuild_log(bid, '用户停止，已保存进度')
+                        _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
+                        return
+                    result, err = _ai_read_chapter(settings, ch['title'], ch['content'], ctx,
+                                                    config=cfg, on_token=mk_handler(),
+                                                    should_stop_fn=lambda: _rebuild_should_stop(bid))
+                    if not err and result and result.strip():
+                        break
+                    attempt += 1
+                    _rebuild_log(bid, f'{ch["title"]} 第{attempt}次失败，重试中...')
+                    _rebuild_set(bid, stream_buffer='', stream_status=f'{ch["title"]} 第{attempt}次重试')
+                    time.sleep(1)
+                if err or not result or not result.strip():
+                    _rebuild_log(bid, f'失败: {ch["title"]} 重试{max_retries}次后仍无输出')
+                    result = f'## {ch["title"]}\n[AI转述失败：本章无输出]\n'
+
+                notes.append(result)
+                current_source += f'\n\n### {ch["title"]}\n{result}'
+                save_source(bid, current_source)
+
+                done.add(ch['id'])
+                done_count += 1
+                pct = 5 + int(done_count / total * 70)
+                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source)
+                save_json(cp_file, {'notes': notes, 'done': list(done)})
+                _rebuild_log(bid, f'完成 {ch["title"]} ({done_count}/{total})')
+
+                if _rebuild_should_stop(bid):
+                    _rebuild_log(bid, '用户停止，已保存进度')
+                    _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
+                    return
+
+        if not notes:
+            _rebuild_set(bid, status='error', progress=100, error='所有章节失败')
+            return
+
+        _rebuild_set(bid, phase='完成', progress=95, stream_buffer='')
+        _rebuild_log(bid, '各章笔记已保存')
+
+        if os.path.exists(cp_file):
+            os.remove(cp_file)
+        _rebuild_log(bid, '通读完成')
+        _rebuild_set(bid, status='done', progress=100, phase='完成')
+        meta = get_book_meta(bid) or {}
+        meta['readthrough_at'] = time.time()
+        save_json(os.path.join(get_book_dir(bid), 'meta.json'), meta)
+    except Exception as e:
+        import traceback
+        err = f'通读崩溃: {str(e)[:200]}'
+        _rebuild_log(bid, err)
+        _rebuild_set(bid, status='error', progress=100, error=err + '\n' + traceback.format_exc()[-300:])
+
+
+def run():
+    server = ThreadingHTTPServer(('', 20000), Handler)
+    print('Server running on port 20000')
+    server.serve_forever()
+
+
+if __name__ == '__main__':
+    run()

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>LucaWriter</title>
+<style>
+:root{--bg:#111;--surface:#1a1a1a;--surface2:#222;--t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;--accent:#c9a96e;--on-accent:#111;--danger:#c45c5c;--border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);--r1:4px;--r4:0px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;-webkit-font-smoothing:antialiased}
+.wrap{width:100%;max-width:380px;padding:20px}
+.card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);padding:40px 32px}
+.brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:32px}
+.brand-icon{width:40px;height:40px;background:var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--on-accent);font-size:18px;font-weight:800}
+.brand h1{font-size:22px;font-weight:700;letter-spacing:-.5px}
+.fg{margin-bottom:16px}
+.fg label{display:block;font-size:9px;font-weight:700;color:var(--t2);margin-bottom:4px;letter-spacing:.5px;text-transform:uppercase}
+.fg input{width:100%;padding:10px 12px;background:var(--surface2);color:var(--t1);border:1px solid var(--border);border-radius:var(--r1);font-size:14px;outline:none;transition:border-color .1s}
+.fg input:focus{border-color:var(--accent)}
+.fg input::placeholder{color:var(--t3)}
+.fg .hint{font-size:11px;color:var(--t3);margin-top:4px}
+.btn{width:100%;padding:11px;background:var(--accent);color:var(--on-accent);border:none;border-radius:var(--r1);font-size:14px;font-weight:600;cursor:pointer;transition:opacity .1s;margin-top:4px}
+.btn:active{opacity:.8}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.err{color:var(--danger);font-size:12px;margin-top:10px;text-align:center;display:none}
+.setup-mode .brand h1::after{content:' — Setup';font-size:12px;font-weight:400;color:var(--t2);margin-left:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="card" id="mainCard">
+  <div class="brand"><div class="brand-icon">L</div><h1>LucaWriter</h1></div>
+  <form id="authForm">
+    <div class="fg"><label>Username</label><input type="text" id="username" required placeholder="Username" autocomplete="username"></div>
+    <div class="fg"><label>Password</label><input type="password" id="password" required placeholder="Password (min 4)" autocomplete="current-password"><div class="hint" id="pwHint"></div></div>
+    <div class="fg" id="pw2Group" style="display:none"><label>Confirm</label><input type="password" id="password2" placeholder="Re-enter password" autocomplete="new-password"></div>
+    <button type="submit" class="btn" id="submitBtn">Login</button>
+    <p class="err" id="errMsg"></p>
+  </form>
+</div>
+</div>
+<script>
+var isSetup=false;
+function api(m,p,d,cb){var x=new XMLHttpRequest();x.onload=function(){try{cb(JSON.parse(this.responseText),this.status)}catch(e){cb({error:'err'},this.status)}};x.onerror=function(){cb({error:'err'},0)};x.open(m,p);x.setRequestHeader('Cache-Control','no-cache');x.setRequestHeader('Pragma','no-cache');if(d!==undefined){x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(d))}else x.send()}
+
+api('GET','/api/auth/status',undefined,function(d){if(!d.has_users){isSetup=true;$('mainCard').classList.add('setup-mode');$('submitBtn').textContent='Create Account';$('username').placeholder='Set username';$('password').placeholder='Set password (min 4)';$('pwHint').textContent='Create your admin account';$('pw2Group').style.display='block';return}if(d.logged_in){location.href='/';return}});
+
+function $(id){return document.getElementById(id)}
+
+$('authForm').addEventListener('submit',function(e){
+  e.preventDefault();var u=$('username').value.trim(),p=$('password').value,p2=$('password2').value;
+  if(!u||!p){showErr('Fill in username and password');return}
+  if(isSetup){if(p.length<4){showErr('Min 4 characters');return}if(p!==p2){showErr('Passwords do not match');return}$('submitBtn').disabled=true;api('POST','/api/auth/setup',{username:u,password:p},function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Failed')})}
+  else{$('submitBtn').disabled=true;api('POST','/api/auth/login',{username:u,password:p},function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Login failed')})}
+});
+
+function showErr(t){var e=$('errMsg');e.textContent=t;e.style.display='block'}
+</script>
+</body>
+</html>
