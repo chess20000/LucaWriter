@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>LucaWriter</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:#111;
+  color:#e8e4de;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;
+  display:flex;
+  flex-direction:column;
+  height:100vh;
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+.loading-titlebar{height:44px;background:#1a1a1a;border-bottom:1px solid rgba(255,255,255,.1);flex-shrink:0;-webkit-app-region:drag;display:flex;align-items:center;padding:0 14px;justify-content:flex-end}
+.loading-titlebar .win-controls{display:flex;align-items:stretch;height:44px;-webkit-app-region:no-drag}
+.loading-titlebar .win-controls button{background:none;border:none;color:#8a8580;width:46px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;font-size:14px;padding:0}
+.loading-titlebar .win-controls button:hover{background:#2a2a2a;color:#e8e4de}
+.loading-titlebar .win-controls .wc-close:hover{background:#c45c5c;color:#fff}
+.loading-titlebar .win-controls svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.3;fill:none}
+.loading-body{flex:1;display:flex;justify-content:center;align-items:center}
+.container{text-align:center}
+.logo{
+  width:64px;height:64px;
+  background:#c9a96e;
+  border-radius:12px;
+  display:flex;align-items:center;justify-content:center;
+  color:#111;font-size:28px;font-weight:800;
+  margin:0 auto 24px;
+}
+h1{font-size:28px;font-weight:600;margin-bottom:16px;letter-spacing:-0.5px}
+.spinner{
+  width:32px;height:32px;
+  border:3px solid rgba(255,255,255,0.08);
+  border-top:3px solid #c9a96e;
+  border-radius:50%;
+  animation:spin 0.8s linear infinite;
+  margin:0 auto;
+}
+@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+p{margin-top:16px;color:#8a8580;font-size:14px}
+</style>
+</head>
+<body>
+<div class="loading-titlebar">
+  <div class="win-controls">
+    <button class="wc-min" onclick="electronAPI.minimize()" title="最小化"><svg viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5"/></svg></button>
+    <button class="wc-max" onclick="electronAPI.maximize()" title="最大化"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg></button>
+    <button class="wc-close" onclick="electronAPI.close()" title="关闭"><svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10"/><line x1="10" y1="0" x2="0" y2="10"/></svg></button>
+  </div>
+</div>
+<div class="loading-body">
+<div class="container">
+  <div class="logo">L</div>
+  <h1>LucaWriter</h1>
+  <div class="spinner"></div>
+  <p>正在启动写作搭档...</p>
+</div>
+</div>
+</body>
+</html>

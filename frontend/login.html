@@ -7,7 +7,15 @@
 <style>
 :root{--bg:#111;--surface:#1a1a1a;--surface2:#222;--t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;--accent:#c9a96e;--on-accent:#111;--danger:#c45c5c;--border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);--r1:4px;--r4:0px}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;-webkit-font-smoothing:antialiased}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+.login-titlebar{display:none;height:44px;background:var(--surface);border-bottom:1px solid var(--border2);flex-shrink:0;-webkit-app-region:drag;align-items:center;padding:0 14px;justify-content:flex-end}
+body.electron .login-titlebar{display:flex}
+.login-titlebar .win-controls{display:flex;align-items:stretch;height:44px;-webkit-app-region:no-drag}
+.login-titlebar .win-controls button{background:none;border:none;color:var(--t2);width:46px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;font-size:14px;padding:0}
+.login-titlebar .win-controls button:hover{background:var(--surface3);color:var(--t1)}
+.login-titlebar .win-controls .wc-close:hover{background:var(--danger);color:#fff}
+.login-titlebar .win-controls svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.3;fill:none}
+.login-body{flex:1;display:flex;align-items:center;justify-content:center}
 .wrap{width:100%;max-width:380px;padding:20px}
 .card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);padding:40px 32px}
 .brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:32px}
@@ -27,6 +35,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Ne
 </style>
 </head>
 <body>
+<div class="login-titlebar" id="loginTitlebar">
+  <div class="win-controls">
+    <button class="wc-min" onclick="electronAPI.minimize()" title="最小化"><svg viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5"/></svg></button>
+    <button class="wc-max" onclick="electronAPI.maximize()" title="最大化"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg></button>
+    <button class="wc-close" onclick="electronAPI.close()" title="关闭"><svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10"/><line x1="10" y1="0" x2="0" y2="10"/></svg></button>
+  </div>
+</div>
+<div class="login-body">
 <div class="wrap">
 <div class="card" id="mainCard">
   <div class="brand"><div class="brand-icon">L</div><h1>LucaWriter</h1></div>
@@ -39,7 +55,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Ne
   </form>
 </div>
 </div>
+</div>
 <script>
+if(window.electronAPI)document.body.classList.add('electron');
 var isSetup=false;
 function api(m,p,d,cb){var x=new XMLHttpRequest();x.onload=function(){try{cb(JSON.parse(this.responseText),this.status)}catch(e){cb({error:'err'},this.status)}};x.onerror=function(){cb({error:'err'},0)};x.open(m,p);x.setRequestHeader('Cache-Control','no-cache');x.setRequestHeader('Pragma','no-cache');if(d!==undefined){x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(d))}else x.send()}
 

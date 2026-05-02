@@ -8,7 +8,7 @@
 :root{
  --bg:#111;--surface:#1a1a1a;--surface2:#222;--surface3:#2a2a2a;--surface4:#333;
  --t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;
-  --accent:#c9a96e;--accent2:#ddb87a;--accent-dim:rgba(201,169,110,.12);
+  --accent:#c9a96e;--accent2:#bca55d;--accent-dim:rgba(201,169,110,.12);
   --danger:#c45c5c;--warn:#c9a96e;
  --border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);
  --r1:4px;--r2:6px;--r3:8px;--r4:12px;
@@ -39,6 +39,14 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 .topbar-btn.accent{color:var(--accent)}
 .topbar-btn.accent:hover{background:var(--accent-dim)}
 .topbar-sep{width:1px;height:16px;background:var(--border2);margin:0 2px;flex-shrink:0}
+body.electron .topbar{-webkit-app-region:drag;padding-right:0}
+body.electron .topbar-logo,body.electron .topbar-breadcrumb,body.electron .topbar-sep,body.electron .task-queue-wrap,body.electron .topbar-btn{margin-top:0;-webkit-app-region:no-drag}
+.win-controls{display:none;flex-shrink:0;-webkit-app-region:no-drag;margin-left:auto}
+body.electron .win-controls{display:flex;align-items:stretch;height:44px}
+.win-controls button{background:none;border:none;color:var(--t2);width:46px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;font-size:14px;padding:0}
+.win-controls button:hover{background:var(--surface3);color:var(--t1)}
+.win-controls .wc-close:hover{background:var(--danger);color:#fff}
+.win-controls svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.3;fill:none}
 
 .main{display:flex;flex:1;flex-direction:column;overflow:hidden}
 .main-row{display:flex;flex:1;overflow:hidden}
@@ -196,6 +204,30 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 .tq-empty{font-size:10px;color:var(--t3);white-space:nowrap;padding:0 6px}
 .task-expand{background:none;border:none;color:var(--t3);font-size:9px;cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;flex-shrink:0}
 .task-expand:hover{color:var(--t1);background:var(--surface3)}
+
+/* === Download Float Panel === */
+.dl-float-panel{display:none;position:fixed;right:20px;bottom:20px;width:380px;background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);box-shadow:0 12px 40px rgba(0,0,0,.5);z-index:200;overflow:hidden;flex-direction:column}
+.dl-float-panel.open{display:flex}
+.dl-fp-head{display:flex;align-items:center;gap:8px;padding:14px 16px 10px;cursor:default;-webkit-app-region:drag}
+.dl-fp-spinner{width:22px;height:22px;flex-shrink:0;-webkit-app-region:no-drag}
+.dl-fp-spinner svg{width:100%;height:100%;animation:dlSpin .8s linear infinite}
+@keyframes dlSpin{to{transform:rotate(360deg)}}
+.dl-fp-title{font-size:14px;font-weight:700;color:var(--t1);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;-webkit-app-region:no-drag}
+.dl-fp-minbtn{background:none;border:none;color:var(--t3);cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;border-radius:var(--r1);transition:all .1s;-webkit-app-region:no-drag;flex-shrink:0}
+.dl-fp-minbtn:hover{color:var(--t1);background:var(--surface3)}
+.dl-fp-body{padding:0 16px 14px}
+.dl-fp-bar-wrap{width:100%;height:6px;background:var(--surface3);border-radius:3px;overflow:hidden;margin-bottom:6px}
+.dl-fp-bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0%;transition:width .3s;border-radius:3px}
+.dl-fp-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.dl-fp-pct{font-size:15px;color:var(--accent);font-weight:700}
+.dl-fp-meta{font-size:10px;color:var(--t3)}
+.dl-fp-status{text-align:center;font-size:11px;color:var(--t2);margin-top:2px}
+.dl-fp-log{font-size:10px;color:var(--t2);line-height:1.7;margin-top:8px;max-height:140px;overflow-y:auto;font-family:var(--font-mono);white-space:pre-wrap;background:var(--surface2);padding:8px;border-radius:var(--r2);border:1px solid var(--border)}
+.dl-fp-footer{display:flex;gap:8px;justify-content:center;padding:10px 16px 14px}
+.dl-fp-badge{display:none;position:fixed;right:20px;bottom:20px;width:42px;height:42px;background:var(--accent);color:var(--bg);border-radius:50%;align-items:center;justify-content:center;cursor:pointer;z-index:199;box-shadow:0 4px 16px rgba(201,169,110,.4);animation:dlPulse 2s ease-in-out infinite}
+.dl-fp-badge.open{display:flex}
+.dl-fp-badge svg{width:20px;height:20px;animation:dlSpin .8s linear infinite}
+@keyframes dlPulse{0%,100%{box-shadow:0 4px 16px rgba(201,169,110,.4)}50%{box-shadow:0 4px 24px rgba(201,169,110,.7)}}
 .task-expand.open{transform:rotate(180deg)}
 .task-stop-all{background:none;border:none;color:var(--danger);font-size:10px;cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;flex-shrink:0;font-weight:600}
 .task-stop-all:hover{background:rgba(196,92,92,.15)}
@@ -402,6 +434,11 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
  <div class="topbar-sep"></div>
     <button class="topbar-btn" onclick="openReadthrough()">通读</button>
     <button class="topbar-btn" onclick="openSettings()">设置</button>
+    <div class="win-controls" id="winControls">
+      <button class="wc-min" onclick="electronAPI.minimize()" title="最小化"><svg viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5"/></svg></button>
+      <button class="wc-max" onclick="electronAPI.maximize()" title="最大化"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg></button>
+      <button class="wc-close" onclick="electronAPI.close()" title="关闭"><svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10"/><line x1="10" y1="0" x2="0" y2="10"/></svg></button>
+    </div>
  </div>
 
  <div class="main" id="mainArea">
@@ -433,10 +470,10 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
  <div class="editor-area">
  <div class="editor-top">
           <span class="editor-chapter-badge" id="editorChapterBadge" style="display:none">正在编辑</span>
-          <input id="chTitleInput" placeholder="章节标题" oninput="onTitleChange()">
+          <input id="chTitleInput" placeholder="章节标题" oninput="onTitleChange()" onkeydown="if(event.key==='Enter'){$('editorArea').focus();event.preventDefault()}">
  <span class="editor-wc" id="wordCount">0</span>
           <span class="save-indicator" id="saveIndicator">已保存</span>
- <button class="ai-send" style="padding:4px 10px;font-size:11px" onclick="completeChapter()" title="">&#10003; </button>
+ <button class="ai-send" style="padding:4px 10px;font-size:11px" onclick="completeChapter()" title="本章写完">&#10003; 本章写完</button>
  </div>
  <div class="editor-body">
  <div class="editor-highlight-layer" id="highlightLayer"><div class="editor-highlight-content" id="highlightContent"></div></div>
@@ -464,17 +501,17 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
  <div class="handle-grip"></div>
  <span class="handle-hint"></span>
  <div class="bottom-tabs">
-          <button class="bottom-tab active" data-btab="timeline" onclick="switchBottomTab('timeline')">时间线</button>
+          <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')">时间线</button>
           <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')">预言</button>
           <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')">大纲</button>
-          <button class="bottom-tab" data-btab="readthrough" onclick="switchBottomTab('readthrough')">通读</button>
+          <button class="bottom-tab active" data-btab="readthrough" onclick="switchBottomTab('readthrough')">通读</button>
  </div>
- <button class="bottom-toggle" onclick="toggleBottomPanel()" title="Toggle">&#9650;</button>
+ <button class="bottom-toggle" onclick="toggleBottomPanel()" title="切换底部面板">&#9650;</button>
  </div>
  <div class="bottom-body">
 
         <!-- 时间线 -->
- <div class="bottom-pane active timeline-pane" id="timelinePane">
+ <div class="bottom-pane timeline-pane" id="timelinePane">
  <div class="panel-layout">
  <div class="panel-left">
               <div class="panel-left-head">生成日志</div>
@@ -526,7 +563,7 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
  </div>
 
  <!-- -->
- <div class="bottom-pane readthrough-pane" id="readthroughPane">
+ <div class="bottom-pane active readthrough-pane" id="readthroughPane">
  <div class="panel-layout">
  <div class="panel-left">
               <div class="panel-left-head">AI 实时输出</div>
@@ -574,16 +611,28 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 <div class="modal-bg" id="settingsModal">
 <div class="modal">
 <h2>设置</h2>
-<div class="tab-row"><button class="tab-b active" onclick="switchSTab(this,'stAPI')">提供商</button><button class="tab-b" onclick="switchSTab(this,'stAI')">AI参数</button><button class="tab-b" onclick="switchSTab(this,'stAuto')">自动触发设置</button><button class="tab-b" onclick="switchSTab(this,'stAppearance')">外观</button></div>
+<div class="tab-row"><button class="tab-b active" onclick="switchSTab(this,'stAPI')">提供商</button><button class="tab-b" onclick="switchSTab(this,'stAI')">AI参数</button><button class="tab-b" onclick="switchSTab(this,'stAuto')">自动触发设置</button><button class="tab-b" onclick="switchSTab(this,'stSearch')">搜索</button><button class="tab-b" onclick="switchSTab(this,'stAppearance')">外观</button></div>
 <div id="stAPI">
  <div class="local-llm-box" id="localLLMBox">
- <div class="local-llm-title"> Llama.cpp</div>
+ <div class="local-llm-title"> 内置模型</div>
  <div class="local-llm-row"><span class="local-llm-dot" id="localStatusDot"></span><span id="localStatusText"></span></div>
- <div class="local-llm-model">NVIDIA Nemotron 3 Nano 4B (Q4_K_M)</div>
+ <div class="local-llm-model" id="localDetectedModel">自动检测中...</div>
  <div class="local-llm-progress" id="localProgressWrap">
  <div class="local-llm-progress-bar" id="localProgressBar"></div>
  </div>
  <div class="local-llm-progress-text" id="localProgressText"></div>
+ <div id="downloadSection" style="margin-top:10px;display:none">
+ <div style="font-size:12px;color:var(--t3);margin-bottom:8px">未检测到本地模型，可一键下载：</div>
+ <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+ <button class="topbar-btn" onclick="downloadModel('gemma-4-e2b')" id="btnDlGemma">下载 Gemma 4 E2B (1.5GB)</button>
+ <button class="topbar-btn" onclick="downloadModel('qwen3.5-9b')" id="btnDlQwen">下载 Qwen 3.5 9B (6GB)</button>
+ </div>
+ <div class="local-llm-progress" id="dlProgressWrap" style="margin-top:10px;display:none">
+ <div class="local-llm-progress-bar" id="dlProgressBar"></div>
+ </div>
+ <div class="local-llm-progress-text" id="dlProgressText"></div>
+ <button class="topbar-btn" id="btnDlCancel" onclick="cancelDownload()" style="margin:8px auto 0;display:none">取消下载</button>
+ </div>
  <button class="topbar-btn" id="localToggleBtn" onclick="toggleLocalLLM()" style="margin:0 auto;display:block">切换本地模型</button>
  </div>
  <div class="provider-slider" id="providerSlider">
@@ -606,22 +655,29 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
     <label>自定义JSON</label>
  <textarea id="sCustomJson" rows="4" placeholder='{"base_url":"","api_key":"","model":""}'></textarea>
  <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">输入 JSON 以覆盖当前预设的基本配置。示例：{"base_url":"https://api.example.com/v1","api_key":"sk-xxx","model":"gpt-4"}</p>
+  </div>
+</div>
 </div>
 <div id="stAI" style="display:none">
- <div class="mg"><label>温度</label><input id="sTemp" type="number" min="0" max="1" step="0.1" value="0.7"></div>
+  <div class="mg"><label>温度</label><input id="sTemp" type="number" min="0" max="1" step="0.1" value="0.7"></div>
 </div>
 <div id="stAuto" style="display:none">
- <div class="mg"><label>自动建议</label><select id="sAutoC"><option value="true">开启</option><option value="false">关闭</option></select></div>
- <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">写作时自动调用 Luca 给出建议。关闭后不会自动触发任何模型调用。</p>
+  <div class="mg"><label>自动建议</label><select id="sAutoC"><option value="true">开启</option><option value="false">关闭</option></select></div>
+  <div class="mg"><label>等待时间（秒）</label><input id="sIdle" type="number" min="1" max="60" step="1" value="10"></div>
+  <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">写作时自动调用 Luca 给出建议。强烈建议只使用本地模型。否则可能会用掉很多钱。</p>
+</div>
+<div id="stSearch" style="display:none">
+  开发中QAQ
 </div>
 <div id="stAppearance" style="display:none">
- <div class="mg"><label>界面缩放</label><input id="sZoom" type="number" min="0.5" max="2.0" step="0.1" value="1.0"></div>
- <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">可使用 Ctrl + +/- 或 Ctrl + 0 快速调整缩放。</p>
+  <div class="mg"><label>界面缩放</label><input id="sZoom" type="number" min="0.5" max="2.0" step="0.1" value="1.0"></div>
+  <div class="mg"><label>LUCA对话快捷键</label><select id="sShortcut"><option value="none">无</option><option value="capslock">CapsLock</option><option value="minus">- 键</option><option value="backslash">\ 键</option><option value="alt">Alt</option></select></div>
+  <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">可使用 Ctrl + +/- 或 Ctrl + 0 快速调整缩放。</p>
 </div>
 <div class="ma">
   <button class="prompt-ok" onclick="saveSettings()">保存</button>
  <button class="prompt-cancel" onclick="closeModal('settingsModal')">关闭</button>
-</div>
+ </div>
 </div></div>
 
 <div class="modal-bg" id="importModal">
@@ -643,6 +699,20 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 <div style="display:flex;flex-direction:column;gap:12px;align-items:center">
  <button class="bookshelf-new-btn" style="width:100%;padding:14px 20px;font-size:15px;border-radius:var(--r3)" onclick="doCreateBookFromModal()">+ 新建空白书本</button>
  <button class="prompt-cancel" style="width:auto;padding:6px 16px;font-size:12px;background:transparent;border:none;color:var(--t3);cursor:pointer;text-decoration:underline" onclick="closeModal('createBookModal');openImportNew()">导入现有文稿</button>
+</div>
+</div></div>
+
+<div class="modal-bg" id="exportModal">
+<div class="modal">
+<h2 id="exportTitle">导出书本</h2>
+<div style="margin-top:12px">
+<div style="width:100%;height:6px;background:var(--surface3);border-radius:var(--r1);overflow:hidden;margin-bottom:6px"><div id="exportProgressFill" style="height:100%;background:var(--accent);width:0%;transition:width .2s"></div></div>
+<div id="exportProgressText" style="font-size:11px;color:var(--t3);text-align:center">准备中...</div>
+</div>
+<div id="exportLog" style="font-size:11px;color:var(--t2);line-height:1.6;margin-top:10px;max-height:160px;overflow-y:auto;font-family:var(--font-mono);white-space:pre-wrap;background:var(--surface2);padding:10px;border-radius:var(--r2);border:1px solid var(--border)"></div>
+<div class="ma" style="margin-top:14px">
+<button class="prompt-ok" id="exportSaveBtn" style="display:none" onclick="doExportSaveNow()">保存文件</button>
+<button class="prompt-cancel" onclick="closeModal('exportModal')" id="exportCloseBtn">关闭</button>
 </div>
 </div></div>
 
@@ -671,22 +741,50 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
  <p class="epub-field-hint">推荐 600×800 JPG / PNG</p>
 </div>
 <div class="ma">
- <button class="prompt-ok" onclick="doExportEpub()">导出 EPUB</button>
- <button class="prompt-cancel" onclick="closeModal('epubExportModal')">取消</button>
+  <button class="prompt-ok" onclick="doExportEpub()">导出 EPUB</button>
+  <button class="prompt-cancel" onclick="closeModal('epubExportModal')">取消</button>
 </div>
 </div></div>
 
+<div class="dl-float-panel" id="downloadModal">
+<div class="dl-fp-head">
+<div class="dl-fp-spinner"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 2a10 10 0 0 1 10 10" stroke-opacity=".3"/></svg></div>
+<div class="dl-fp-title" id="dlModalTitle">下载模型</div>
+<button class="dl-fp-minbtn" onclick="minimizeDownloadPanel()" title="最小化到后台">&#x2014;</button>
+</div>
+<div class="dl-fp-body">
+<div class="dl-fp-bar-wrap"><div class="dl-fp-bar" id="dlModalBar"></div></div>
+<div class="dl-fp-row">
+<div class="dl-fp-pct" id="dlModalPct">0%</div>
+<div class="dl-fp-meta"><span id="dlModalSpeed">--</span> &nbsp; <span id="dlModalSize">-- / --</span></div>
+</div>
+<div class="dl-fp-status" id="dlModalStatus">准备中...</div>
+<div class="dl-fp-log" id="dlModalLog"></div>
+</div>
+<div class="dl-fp-footer">
+<button class="prompt-ok" id="dlModalCancelBtn" onclick="cancelDownload()">取消下载</button>
+<button class="prompt-cancel" id="dlModalCloseBtn" style="display:none" onclick="closeDownloadModal()">关闭</button>
+</div>
+</div>
+
+<div class="dl-fp-badge" id="downloadBadge" onclick="restoreDownloadPanel()">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+</div>
+
 <script>
+if(window.electronAPI)document.body.classList.add('electron');
 var bookId=null,chapterId=null,settings={};
 var inTrash=false;
 var charCount=0;
 var _autoCommentTimer=null;
 var _autoCommentPending=false;
+var _autoCommentLastLen=0;
 var _sourceUpdatePending=false;
+var _focusTitleAfterLoad=false;
 var allChapters=[],chapterOrder=[];
 var aiMessages=[];
 var currentChapter=null;
-var currentBottomTab='timeline';
+var currentBottomTab='readthrough';
 var bottomPanelOpen=false;
 var bottomPanelHeight=window.innerHeight-44;
 var savedBottomPanelHeight=window.innerHeight-44;
@@ -1065,6 +1163,7 @@ function selectChapter(id){
 function loadChapterData(ch){
  currentChapter=ch;$('chTitleInput').value=ch.title||'';$('editorArea').value=ch.content||'';
  charCount=ch.content?ch.content.length:0;
+ _autoCommentLastLen=charCount;
  $('wordCount').textContent=charCount;
  $('editorChapterBadge').style.display='inline';
  $('editorChapterBadge').textContent='EDITING';
@@ -1072,9 +1171,13 @@ function loadChapterData(ch){
  updateBreadcrumb();
  renderChapterList();
  syncHighlights();
+ if(_focusTitleAfterLoad){
+  _focusTitleAfterLoad=false;
+  setTimeout(function(){$('chTitleInput').focus();$('chTitleInput').select();},50);
+ }
 }
 
-function addChapter(){var id='ch_'+Date.now();var num=allChapters.length+1;var title='第'+num+'';api('POST','/api/book/'+bookId+'/chapter',{id:id,title:title,content:''},function(d,s){if(s===200){loadChapters();selectChapter(id)}else{toast('创建章节失败','error')}})}
+function addChapter(){var id='ch_'+Date.now();var title='新章节';api('POST','/api/book/'+bookId+'/chapter',{id:id,title:title,content:''},function(d,s){if(s===200){_focusTitleAfterLoad=true;loadChapters();selectChapter(id)}else{toast('创建章节失败','error')}})}
 
 function delChapter(id){showConfirm('删除','移到回收站？',function(){api('POST','/api/book/'+bookId+'/delete',{id:id},function(){if(chapterId===id){chapterId=null;currentChapter=null;$('chTitleInput').value='';$('editorArea').value='';$('wordCount').textContent='0';$('saveIndicator').className='save-indicator';$('editorChapterBadge').style.display='none';updateBreadcrumb();saveAppState()}loadChapters()})},true)}
 
@@ -1142,9 +1245,10 @@ function onContentChange(){
  scheduleSave();
  syncHighlights();
  // 
- if(settings.ai_auto_comment!==false&&!_autoCommentPending&&charCount>50){
+ var addedSinceAuto=charCount-_autoCommentLastLen;
+ if(settings.ai_auto_comment!==false&&!_autoCommentPending&&charCount>50&&addedSinceAuto>=500){
  if(_autoCommentTimer){clearTimeout(_autoCommentTimer);_autoCommentTimer=null;}
- var idleSec=parseInt(settings.ai_idle_seconds);if(isNaN(idleSec)||idleSec<1)idleSec=5;
+ var idleSec=parseInt(settings.ai_idle_seconds);if(isNaN(idleSec)||idleSec<1)idleSec=10;
  _autoCommentTimer=setTimeout(function(){
  _autoCommentTimer=null;
  if(!_autoCommentPending)triggerAutoComment();
@@ -1167,6 +1271,7 @@ function triggerAutoComment(){
  _autoCommentPending=false;
  if(s===200&&d.hasOwnProperty('comment')){
  addAIMessage(d.comment||'AI','ai');
+ _autoCommentLastLen=$('editorArea').value.length;
  // source.md 
  _sourceUpdatePending=true;
  }
@@ -1178,7 +1283,7 @@ function triggerSourceUpdate(){
  var text=$('editorArea').value;
  var title=$('chTitleInput').value||'';
  api('POST','/api/book/'+bookId+'/update-source',{text:text,chapter_title:title},function(d,s){
- if(s===200&&d.status==='started'){toast('...','success');}
+ if(s===200&&d.status==='started'){toast('背景更新已启动','success');}
  });
 }
 
@@ -1290,41 +1395,40 @@ function sendAI(){
  _doSendAI(text);
 }
 
-function completeChapter(){
- if(!bookId||!chapterId){toast('','warn');return}
+ function completeChapter(){
+ if(!bookId||!chapterId){toast('请先打开章节','warn');return}
  var btn=document.querySelector('.editor-top .ai-send');
  if(btn)btn.disabled=true;
-  toast('正在生成时间线...','success');
- api('POST','/api/book/'+bookId+'/chapter-complete',{id:chapterId},function(d,s){
+ toast('正在生成本章摘要...','success');
+ var text=$('editorArea').value;
+ api('POST','/api/book/'+bookId+'/chapter-complete',{id:chapterId,text:text},function(d,s){
  if(btn)btn.disabled=false;
  if(s!==200||!d.task_id){
- toast(d.error||'','error');
+ toast(d.error||'生成失败','error');
  return;
  }
- // 
  var tid=d.task_id;
  var pollTimer=setInterval(function(){
  api('GET','/api/book/'+bookId+'/task/status?task_id='+tid,undefined,function(st){
  if(!st||!st.status){clearInterval(pollTimer);return}
  if(st.status==='done'){
  clearInterval(pollTimer);
- toast('','success');
- // AI 
+ toast('本章摘要已生成','success');
  var summary=st.result||'';
  if(summary){
  var card=document.createElement('div');
  card.className='ai-readthrough-card';
- card.innerHTML='<div style="font-weight:700;margin-bottom:4px">&#10003; </div><div style="white-space:pre-wrap;max-height:200px;overflow-y:auto">'+esc(summary.slice(0,800))+(summary.length>800?'...':'')+'</div>';
+ card.innerHTML='<div style="font-weight:700;margin-bottom:4px">&#10003; 本章摘要</div><div style="white-space:pre-wrap;max-height:200px;overflow-y:auto">'+esc(summary.slice(0,800))+(summary.length>800?'...':'')+'</div>';
  $('aiMessages').appendChild(card);
  $('aiMessages').scrollTop=$('aiMessages').scrollHeight;
  }
  }else if(st.status==='error'){
  clearInterval(pollTimer);
- toast(': '+(st.error||''),'error');
+ toast(st.error||'生成失败','error');
  }
  });
- },800);
- setTimeout(function(){clearInterval(pollTimer);},300000);
+ },600);
+ setTimeout(function(){clearInterval(pollTimer);},180000);
  });
 }
 
@@ -1435,9 +1539,9 @@ function _streamGenerate(type,logEl,onDone){
  });
 }
 
-function generateTimeline(){
+ function generateTimeline(){
  if(!bookId)return;
- toast('...','success');
+ toast('正在生成时间线...','success');
  _streamGenerate('timeline',$('tlLog'),function(fullText){
  loadTimeline();
     if(fullText){toast('时间线已生成','success');$('tlLog').textContent='时间线生成完成';}
@@ -1449,8 +1553,8 @@ function expandTimelineNode(nodeId){if(!bookId)return;api('POST','/api/book/'+bo
 
 function toggleTrash(){
  inTrash=!inTrash;var trashEl=$('trashList');var btn=$('trashToggleBtn');
- if(inTrash){btn.textContent='';btn.classList.add('open');api('GET','/api/book/'+bookId+'/trash',undefined,function(d){var chs=d.chapters||[];if(!chs.length){trashEl.innerHTML='<div class="trash-empty">回收站为空</div>'}else{var html='<div class="trash-header">已删除章节</div>';chs.forEach(function(ch){html+='<div class="trash-item"><span class="ti-title">'+esc(ch.title||'未命名')+'</span><button class="ti-restore" onclick="event.stopPropagation();restoreChapter(\''+esc(ch.id)+'\')">恢复</button></div>'});trashEl.innerHTML=html}trashEl.classList.add('open')})}
- else{btn.textContent='Trash';btn.classList.remove('open');trashEl.classList.remove('open')}
+ if(inTrash){btn.textContent='返回';btn.classList.add('open');api('GET','/api/book/'+bookId+'/trash',undefined,function(d){var chs=d.chapters||[];if(!chs.length){trashEl.innerHTML='<div class="trash-empty">回收站为空</div>'}else{var html='<div class="trash-header">已删除章节</div>';chs.forEach(function(ch){html+='<div class="trash-item"><span class="ti-title">'+esc(ch.title||'未命名')+'</span><button class="ti-restore" onclick="event.stopPropagation();restoreChapter(\''+esc(ch.id)+'\')">恢复</button></div>'});trashEl.innerHTML=html}trashEl.classList.add('open')})}
+ else{btn.textContent='回收站';btn.classList.remove('open');trashEl.classList.remove('open')}
 }
 
 function restoreChapter(id){api('POST','/api/book/'+bookId+'/restore',{id:id},function(){toggleTrash();toggleTrash()})}
@@ -1469,14 +1573,14 @@ function openSettings(){
   // 深拷贝，避免关闭弹窗后污染内存中的 settings
  providerPresets=raw.map(function(p){return{name:p.name||'',base_url:p.base_url||'',api_key:p.api_key||'',model:p.model||'',use_custom_json:!!p.use_custom_json,custom_json:p.custom_json||''}});
  if(!providerPresets.length){
- providerPresets=[
- {name:'LMStudio',base_url:'http://localhost:1234/v1',api_key:'',model:'',use_custom_json:false,custom_json:''},
- {name:'DeepSeek',base_url:'https://api.deepseek.com',api_key:'',model:'deepseek-v4-flash',use_custom_json:false,custom_json:''},
- {name:'MiniMax',base_url:'https://api.minimaxi.com/v1',api_key:'',model:'MiniMax-M2.5',use_custom_json:false,custom_json:''},
-      {name:'预设4',base_url:'',api_key:'',model:'',use_custom_json:false,custom_json:''},
- {name:'5',base_url:'',api_key:'',model:'',use_custom_json:false,custom_json:''},
- {name:' Llama.cpp',base_url:'http://127.0.0.1:8080/v1',api_key:'',model:'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M',use_custom_json:false,custom_json:''}
- ];
+  providerPresets=[
+  {name:'LMStudio',base_url:'http://localhost:1234/v1',api_key:'',model:'',use_custom_json:false,custom_json:''},
+  {name:'DeepSeek',base_url:'https://api.deepseek.com',api_key:'',model:'deepseek-v4-flash',use_custom_json:false,custom_json:''},
+  {name:'MiniMax',base_url:'https://api.minimaxi.com/v1',api_key:'',model:'MiniMax-M2.5',use_custom_json:false,custom_json:''},
+       {name:'预设4',base_url:'',api_key:'',model:'',use_custom_json:false,custom_json:''},
+  {name:'5',base_url:'',api_key:'',model:'',use_custom_json:false,custom_json:''},
+  {name:' Llama.cpp',base_url:'http://127.0.0.1:8080/v1',api_key:'',model:'',use_custom_json:false,custom_json:''}
+  ];
  }
  currentPresetIdx=settings.active_provider_idx||0;
  if(currentPresetIdx<0||currentPresetIdx>=providerPresets.length)currentPresetIdx=0;
@@ -1485,13 +1589,27 @@ function openSettings(){
  updateLocalLLMUI();
  refreshLocalLLMProgress();
  $('sTemp').value=settings.ai_temperature||0.7;
- console.log('openSettings: settings.model_context_length =', settings.model_context_length);
- $('sCtxLen').value=settings.model_context_length||0;
- $('sAutoC').value=String(settings.ai_auto_comment!==false);
- $('sIdle').value=settings.ai_idle_seconds||5;
- $('sZoom').value=parseFloat(settings.ui_scale)||1.0;
- openModal('settingsModal')
-}
+  var ctxEl=$('sCtxLen');if(ctxEl)ctxEl.value=settings.model_context_length||0;
+  $('sAutoC').value=String(settings.ai_auto_comment!==false);
+  var idleEl=$('sIdle');if(idleEl)idleEl.value=settings.ai_idle_seconds||10;
+  $('sZoom').value=parseFloat(settings.ui_scale)||1.0;
+  var scEl=$('sShortcut');if(scEl)scEl.value=settings.shortcut_focus_ai||'none';
+  var spEl=$('sSearchProvider');if(spEl)spEl.value=settings.search_provider||'duckduckgo';
+  var skEl=$('sSearchKey');if(skEl)skEl.value=settings.search_api_key||'';
+  // 获取检测到的本地模型名并更新显示
+  api('GET','/api/local-llm/detected-model',undefined,function(d,s){
+    var el=$('localDetectedModel');
+    var ds=$('downloadSection');
+    if(s===200&&d.model){
+      if(el)el.textContent=d.model;
+      if(ds)ds.style.display='none';
+    }else{
+      if(el)el.textContent='未检测到模型';
+      if(ds)ds.style.display='block';
+    }
+  });
+  openModal('settingsModal')
+ }
 
 function renderProviderSlider(){
  var slider=$('providerSlider');
@@ -1573,8 +1691,8 @@ function refreshLocalLLMProgress(){
  if(!dot||!txt||!tbtn)return;
  if(!isLocalPreset()){
  dot.className='local-llm-dot';
- txt.textContent='';
- tbtn.textContent='';
+ txt.textContent='未启用，内置llama.cpp只能使用cpu推理，速度较慢';
+ tbtn.textContent='启动本地模型';
  tbtn.disabled=false;
  _showLocalProgress(false,0,'');
  return;
@@ -1587,8 +1705,8 @@ function refreshLocalLLMProgress(){
  var err=d.error||'';
  if(running||status==='ready'){
  dot.className='local-llm-dot on';
- txt.textContent='';
- tbtn.textContent='';
+ txt.textContent='运行中';
+ tbtn.textContent='停止本地模型';
  tbtn.disabled=false;
  _showLocalProgress(false,100,'');
  if(status==='ready'&&_localLLMPollTimer){clearInterval(_localLLMPollTimer);_localLLMPollTimer=null;}
@@ -1603,16 +1721,16 @@ function refreshLocalLLMProgress(){
  _showLocalProgress(true,prog,' '+prog+'%'+(err?' · '+err:''));
  }else if(status==='error'){
  dot.className='local-llm-dot off';
- txt.textContent='';
- tbtn.textContent='';
+ txt.textContent='错误';
+ tbtn.textContent='启动本地模型';
  tbtn.disabled=false;
  _showLocalProgress(false,0,'');
  if(_localLLMPollTimer){clearInterval(_localLLMPollTimer);_localLLMPollTimer=null;}
- toast(': '+(err||''),'error');
+ toast('本地模型错误: '+(err||''),'error');
  }else{
  dot.className='local-llm-dot off';
- txt.textContent='';
- tbtn.textContent='';
+ txt.textContent='已停止';
+ tbtn.textContent='启动本地模型';
  tbtn.disabled=false;
  _showLocalProgress(false,0,'');
  if(_localLLMPollTimer){clearInterval(_localLLMPollTimer);_localLLMPollTimer=null;}
@@ -1621,10 +1739,132 @@ function refreshLocalLLMProgress(){
  });
 }
 
+var _dlPollTimer=null,_dlLogLines=[],_dlLastSource='';
+function _dlAddLog(msg){
+ var now=new Date();
+ var t=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0')+':'+now.getSeconds().toString().padStart(2,'0');
+ _dlLogLines.push('['+t+'] '+msg);
+ var el=$('dlModalLog');
+ if(el)el.textContent=_dlLogLines.join('\n');
+ if(el)el.scrollTop=el.scrollHeight;
+}
+function _updateDlModal(pct,speed,status,currentBytes,totalBytes){
+ var bar=$('dlModalBar'),pctEl=$('dlModalPct'),sp=$('dlModalSpeed'),sz=$('dlModalSize'),st=$('dlModalStatus');
+ if(bar)bar.style.width=Math.min(pct||0,100)+'%';
+ if(pctEl)pctEl.textContent=Math.round(pct||0)+'%';
+ if(sp)sp.textContent=speed||'--';
+ if(sz){
+  var cb=currentBytes||0,tb=totalBytes||0;
+  sz.textContent=(tb>0?formatSize(cb)+' / '+formatSize(tb):cb>0?formatSize(cb)+' / ...':'-- / --');
+ }
+ if(st)st.textContent=status||'';
+}
+function _showDownloadProgress(show,pct,text){}
+
+function downloadModel(preset){
+ var names={'gemma-4-e2b':'Gemma 4 E2B (1.5GB)','qwen3.5-9b':'Qwen 3.5 9B (6GB)'};
+ var name=names[preset]||preset;
+ $('dlModalTitle').textContent='下载模型: '+name;
+ _dlLogLines=[];
+ _dlAddLog('准备下载: '+name);
+ _updateDlModal(0,'','准备中...',0,0);
+ $('dlModalCancelBtn').style.display='';
+ $('dlModalCloseBtn').style.display='none';
+ $('downloadModal').classList.add('open');
+ $('downloadBadge').classList.remove('open');
+ api('POST','/api/local-llm/download',{preset:preset},function(d,s){
+  if(s===200&&d.ok){
+   _dlLastSource='';
+   _dlAddLog('下载任务已启动，正在连接服务器...');
+   _pollDownloadProgress();
+  }else{
+   _dlAddLog('错误: '+(d.error||'下载启动失败'));
+   $('dlModalCancelBtn').style.display='none';
+   $('dlModalCloseBtn').style.display='';
+   toast(d.error||'下载启动失败','error');
+  }
+ });
+}
+
+function cancelDownload(){
+ api('POST','/api/local-llm/download-cancel',{},function(d,s){
+  if(_dlPollTimer){clearInterval(_dlPollTimer);_dlPollTimer=null;}
+  _dlAddLog('已取消下载');
+  $('dlModalCancelBtn').style.display='none';
+  $('dlModalCloseBtn').style.display='';
+  toast('已取消下载','info');
+ });
+}
+
+function closeDownloadModal(){
+ $('downloadModal').classList.remove('open');
+ $('downloadBadge').classList.remove('open');
+}
+
+function minimizeDownloadPanel(){
+ $('downloadModal').classList.remove('open');
+ $('downloadBadge').classList.add('open');
+}
+
+function restoreDownloadPanel(){
+ $('downloadBadge').classList.remove('open');
+ $('downloadModal').classList.add('open');
+}
+
+function _pollDownloadProgress(){
+ if(_dlPollTimer)clearInterval(_dlPollTimer);
+ _dlPollTimer=setInterval(function(){
+  api('GET','/api/local-llm/download-progress',undefined,function(d,s){
+   if(s!==200)return;
+   var status=d.status||'idle';
+   var prog=d.progress||0;
+   var err=d.error||'';
+   var speed=d.speed||'';
+   var cb=d.current_bytes||0;
+   var tb=d.total_bytes||0;
+   var src=d.source||'';
+   if(src && src!==_dlLastSource){
+    _dlLastSource=src;
+    _dlAddLog('下载源: '+src+(src==='HF-Mirror'?' (备用)':''));
+   }
+   if(status==='downloading'){
+    var info='下载中 '+prog+'%';
+    if(speed)info+=' · '+speed;
+    _updateDlModal(prog,speed,info,cb,tb);
+   }else if(status==='completed'){
+    if(_dlPollTimer){clearInterval(_dlPollTimer);_dlPollTimer=null;}
+    _updateDlModal(100,'','下载完成',tb,tb);
+    _dlAddLog('下载完成！模型已保存到本地。');
+    var sp=$('downloadModal').querySelector('.dl-fp-spinner svg');
+    if(sp)sp.style.animationPlayState='paused';
+    $('dlModalCancelBtn').style.display='none';
+    $('dlModalCloseBtn').style.display='';
+    toast('模型下载完成！','success');
+    api('GET','/api/local-llm/detected-model',undefined,function(d2,s2){
+     if(s2===200&&d2.model){
+      var el=$('localDetectedModel');
+      if(el)el.textContent=d2.model;
+      var ds=$('downloadSection');
+      if(ds)ds.style.display='none';
+     }
+    });
+   }else if(status==='error'){
+    if(_dlPollTimer){clearInterval(_dlPollTimer);_dlPollTimer=null;}
+    _dlAddLog('错误: '+(err||'未知错误'));
+    var sp2=$('downloadModal').querySelector('.dl-fp-spinner svg');
+    if(sp2)sp2.style.animationPlayState='paused';
+    $('dlModalCancelBtn').style.display='none';
+    $('dlModalCloseBtn').style.display='';
+    toast('下载失败: '+(err||''),'error');
+   }
+  });
+ },800);
+}
+
 function toggleLocalLLM(){
  var tbtn=$('localToggleBtn');
  if(!tbtn||tbtn.disabled)return;
- var starting=tbtn.textContent.indexOf('')>=0;
+ var starting=tbtn.textContent.indexOf('启动')>=0;
  if(starting){
  tbtn.disabled=true;
  window._localReadyToasted=false;
@@ -1648,8 +1888,9 @@ function toggleLocalLLM(){
  _pollLocalLLMProgress();
  }else{
  tbtn.disabled=false;
- toast(d.error||'','error');
+ window._localReadyToasted=false;
  refreshLocalLLMProgress();
+ if(s===200&&d.ok){toast('本地模型已停止','success');}else{toast(d.error||'停止失败','error');}
  }
  });
  }else{
@@ -1658,7 +1899,7 @@ function toggleLocalLLM(){
  tbtn.disabled=false;
  window._localReadyToasted=false;
  refreshLocalLLMProgress();
- if(s===200&&d.ok){toast('','success');}else{toast(d.error||'','error');}
+ if(s===200&&d.ok){toast('本地模型已停止','success');}else{toast(d.error||'停止失败','error');}
  });
  }
 }
@@ -1672,44 +1913,50 @@ function switchProviderPreset(idx){
  loadPresetToForm(currentPresetIdx);
 }
 
-function loadPresetToForm(idx){
- var p=providerPresets[idx];
- if(!p)return;
- if(isLocalPreset()){
- // 
- p.base_url='http://127.0.0.1:8080/v1';
- p.model='NVIDIA-Nemotron-3-Nano-4B-Q4_K_M';
- }else{
- $('sUrl').value=p.base_url||'';
- $('sKey').value=p.api_key||'';
- if(p.model){
- $('sModel').innerHTML='<option value="'+esc(p.model)+'">'+esc(p.model)+'</option>';
- }else{
-    $('sModel').innerHTML='<option value="">选择模型</option>';
+ function loadPresetToForm(idx){
+  var p=providerPresets[idx];
+  if(!p)return;
+  if(isLocalPreset()){
+  // 本地模型：清空远程模型的表单字段，避免混淆
+  p.base_url='http://127.0.0.1:8080/v1';
+  $('sUrl').value='http://127.0.0.1:8080/v1';
+  $('sKey').value='';
+  $('sModel').innerHTML='<option value="">本地模型自动检测</option>';
+  $('sUseCustomJson').checked=false;
+  $('sCustomJson').value='';
+  toggleCustomJson();
+  // model 由后端自动同步检测到的第一个 gguf，不做强制覆盖
+  }else{
+  $('sUrl').value=p.base_url||'';
+  $('sKey').value=p.api_key||'';
+  if(p.model){
+  $('sModel').innerHTML='<option value="'+esc(p.model)+'">'+esc(p.model)+'</option>';
+  }else{
+     $('sModel').innerHTML='<option value="">选择模型</option>';
+  }
+  $('sUseCustomJson').checked=!!p.use_custom_json;
+  $('sCustomJson').value=p.custom_json||'';
+  toggleCustomJson();
+  }
  }
- $('sUseCustomJson').checked=!!p.use_custom_json;
- $('sCustomJson').value=p.custom_json||'';
- toggleCustomJson();
- }
-}
 
 function saveFormToPreset(idx){
- var p=providerPresets[idx];
- if(!p)return;
- if(isLocalPreset()){
- p.base_url='http://127.0.0.1:8080/v1';
- p.api_key='';
- p.model='NVIDIA-Nemotron-3-Nano-4B-Q4_K_M';
- p.use_custom_json=false;
- p.custom_json='';
- }else{
- p.base_url=$('sUrl').value;
- p.api_key=$('sKey').value;
- p.model=$('sModel').value;
- p.use_custom_json=$('sUseCustomJson').checked;
- p.custom_json=$('sCustomJson').value;
+  var p=providerPresets[idx];
+  if(!p)return;
+  if(isLocalPreset()){
+  p.base_url='http://127.0.0.1:8080/v1';
+  p.api_key='';
+  // model 由后端自动同步检测到的第一个 gguf，不做强制覆盖
+  p.use_custom_json=false;
+  p.custom_json='';
+  }else{
+  p.base_url=$('sUrl').value;
+  p.api_key=$('sKey').value;
+  p.model=$('sModel').value;
+  p.use_custom_json=$('sUseCustomJson').checked;
+  p.custom_json=$('sCustomJson').value;
+  }
  }
-}
 
 function toggleCustomJson(){
  var wrap=$('sCustomJsonWrap');
@@ -1735,11 +1982,14 @@ function saveSettings(){
  provider_presets:providerPresets,
  active_provider_idx:currentPresetIdx,
  ai_auto_comment:$('sAutoC').value==='true',
- ai_idle_seconds:parseInt($('sIdle').value)||5,
- ai_temperature:parseFloat($('sTemp').value)||0.7,
- model_context_length:parseInt($('sCtxLen').value)||0,
- ui_scale:parseFloat($('sZoom').value)||1.0
- };
+  ai_idle_seconds:parseInt($('sIdle')?$('sIdle').value:'10')||10,
+  ai_temperature:parseFloat($('sTemp').value)||0.7,
+   model_context_length:parseInt($('sCtxLen')?$('sCtxLen').value:'0')||0,
+    ui_scale:parseFloat($('sZoom').value)||1.0,
+    shortcut_focus_ai:$('sShortcut')?$('sShortcut').value:'none',
+    search_provider:$('sSearchProvider')?$('sSearchProvider').value:'duckduckgo',
+    search_api_key:$('sSearchKey')?$('sSearchKey').value:''
+   };
   // 同时保存当前激活 preset 的字段到顶层，确保向后兼容
  var active=providerPresets[currentPresetIdx];
  if(active){
@@ -1772,46 +2022,67 @@ function saveSettings(){
  if(s===200){
  settings=r;providerPresets=r.provider_presets||providerPresets;currentPresetIdx=r.active_provider_idx||0;applySettings();
  refreshLocalLLMProgress();
- toast('','success');
+ toast('设置已保存','success');
  }
  })
 }
 
-function fetchModels(){var btn=$('fetchBtn');btn.innerHTML='<span class="sp"></span>';btn.disabled=true;api('POST','/api/fetch-models',{base_url:$('sUrl').value,api_key:$('sKey').value},function(d,s){btn.disabled=false;btn.textContent='获取';if(s===200&&d.models){$('sModel').innerHTML='<option value="">选择模型</option>'+d.models.map(function(m){return'<option value="'+esc(m)+'">'+esc(m)+'</option>'}).join('');saveFormToPreset(currentPresetIdx);}})}
+ function fetchModels(){var btn=$('fetchBtn');btn.innerHTML='<span class="sp"></span>获取中';btn.disabled=true;api('POST','/api/fetch-models',{base_url:$('sUrl').value,api_key:$('sKey').value},function(d,s){btn.disabled=false;btn.textContent='获取';if(s===200&&d.models){$('sModel').innerHTML='<option value="">选择模型</option>'+d.models.map(function(m){return'<option value="'+esc(m)+'">'+esc(m)+'</option>'}).join('');saveFormToPreset(currentPresetIdx);}})}
 
 function openModal(id){$(id).classList.add('open')}function closeModal(id){$(id).classList.remove('open')}
 function toggleBookMenu(bid,btn){var dd=document.getElementById('bmenu_'+bid);var wasOpen=dd.classList.contains('show');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});if(!wasOpen)dd.classList.add('show')}
-function _fallbackDownload(blob,fn){var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=fn;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(url);a.remove()},1000)}
-function _downloadBlob(blob,fn){if(typeof showSaveFilePicker==='function'){try{showSaveFilePicker({suggestedName:fn}).then(function(handle){return handle.createWritable()}).then(function(writable){return writable.write(blob).then(function(){writable.close()})}).catch(function(err){if(err.name!=='AbortError')_fallbackDownload(blob,fn)})}catch(e){_fallbackDownload(blob,fn)}}else{_fallbackDownload(blob,fn)}}
-function doExportBook(bid,f){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});var ext={md:'md',txt:'txt',zip:'zip'}[f]||f;var x=new XMLHttpRequest();x.open('GET','/api/book/'+bid+'/export?format='+f,true);x.responseType='blob';x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var m=disp.match(/filename\*?=['"]?([^;'"]+)/i);var fn=m?decodeURIComponent(m[1].replace(/UTF-8''/i,'')):'book.'+ext;_downloadBlob(blob,fn)}else{toast('','error')}};x.onerror=function(){toast('','error')};x.send()}
+var _pendingExportBlob=null,_pendingExportFn='';
+function formatSize(b){if(b<1024)return b+'B';if(b<1024*1024)return Math.round(b/1024)+'KB';return Math.round(b/(1024*1024)*10)/10+'MB'}
+function openExportModal(title){$('exportTitle').textContent=title||'导出书本';$('exportProgressFill').style.width='0%';$('exportProgressText').textContent='准备中...';$('exportLog').textContent='';$('exportSaveBtn').style.display='none';$('exportCloseBtn').style.display='';openModal('exportModal')}
+function setExportProgress(pct,text){$('exportProgressFill').style.width=pct+'%';$('exportProgressText').textContent=text||''}
+function addExportLog(msg){var el=$('exportLog');var t=new Date().toLocaleTimeString('zh-CN',{hour12:false});el.textContent+='['+t+'] '+msg+'\n';el.scrollTop=el.scrollHeight}
+function showExportSaveBtn(){$('exportSaveBtn').style.display='';$('exportCloseBtn').style.display=''}
+function doExportSaveNow(){if(_pendingExportBlob&&_pendingExportFn){if(typeof showSaveFilePicker==='function'){try{showSaveFilePicker({suggestedName:_pendingExportFn}).then(function(handle){return handle.createWritable()}).then(function(writable){return writable.write(_pendingExportBlob).then(function(){writable.close();addExportLog('文件已保存到选择的位置');toast('保存成功','success')})}).catch(function(err){if(err.name!=='AbortError'){_fallbackDownload(_pendingExportBlob,_pendingExportFn);addExportLog('选择器失败，已回退到默认下载')}})}catch(e){_fallbackDownload(_pendingExportBlob,_pendingExportFn)}}else{_fallbackDownload(_pendingExportBlob,_pendingExportFn)}}}
+function _fallbackDownload(blob,fn){try{var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=fn;a.style.display='none';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(url);if(a.parentNode)a.parentNode.removeChild(a)},1000)}catch(e){console.error('Fallback download error:',e);toast('下载触发失败，请尝试右键保存','error')}}
+function _downloadBlob(blob,fn){_pendingExportBlob=blob;_pendingExportFn=fn;_fallbackDownload(blob,fn)}
+function _runExport(bid,f,ext,formatName,isPost,payload){openExportModal('导出 '+formatName);addExportLog('开始导出，格式: '+formatName);var x=new XMLHttpRequest();var url=(isPost?'/api/book/'+bid+'/export-epub':'/api/book/'+bid+'/export?format='+f);addExportLog('请求地址: '+url);x.open(isPost?'POST':'GET',url,true);x.responseType='blob';if(isPost){x.setRequestHeader('Content-Type','application/json')}x.onprogress=function(e){if(e.lengthComputable){var pct=Math.round(e.loaded/e.total*100);setExportProgress(pct,'下载中... '+pct+'%');if(pct%10===0||pct>=99){addExportLog('下载进度 '+pct+'%')}}else{addExportLog('已接收 '+formatSize(e.loaded))}};x.onload=function(){addExportLog('收到响应，状态: '+x.status);if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn){var m2=disp.match(/filename="([^"]+)"/i);if(m2)fn=m2[1]}if(!fn){var m3=disp.match(/filename=([^;\s]+)/i);if(m3)fn=m3[1].trim()}if(!fn)fn='book.'+ext;setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');addExportLog('正在触发下载...');_downloadBlob(blob,fn);addExportLog('下载已触发，请检查浏览器下载栏');toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('服务器错误: '+(d.error||d.message||'未知错误'))}catch(e){addExportLog('服务器返回 HTTP '+x.status)}};r.readAsText(x.response);toast('导出失败','error');showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');addExportLog('网络请求失败，请检查: 1)服务器是否运行 2)网络连接');toast('导出失败','error');showExportSaveBtn()};x.ontimeout=function(){setExportProgress(0,'超时');addExportLog('请求超时');toast('导出失败','error');showExportSaveBtn()};addExportLog('正在发送请求...');try{x.send(isPost?JSON.stringify(payload):null)}catch(e){addExportLog('send()异常: '+e.message);setExportProgress(0,'请求异常');showExportSaveBtn()}}
+function doExportBook(bid,f){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});var ext={md:'md',txt:'txt',zip:'zip'}[f]||f;var formatName={md:'Markdown',txt:'TXT',zip:'ZIP'}[f]||f.toUpperCase();_runExport(bid,f,ext,formatName,false,null)}
 var _epubExportBid=null;
 function openEpubExport(bid,title){_epubExportBid=bid;$('epubTitle').value=title||'';$('epubAuthor').value='';$('epubDesc').value='';$('epubCoverImg').style.display='none';$('epubCoverImg').src='';$('epubCoverPlaceholder').style.display='';openModal('epubExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
 function onEpubCoverChange(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){$('epubCoverImg').src=ev.target.result;$('epubCoverImg').style.display='block';$('epubCoverPlaceholder').style.display='none'};r.readAsDataURL(f)}
-function doExportEpub(){var bid=_epubExportBid;if(!bid)return;var title=$('epubTitle').value.trim()||'';var author=$('epubAuthor').value.trim();var desc=$('epubDesc').value.trim();var cover=$('epubCoverImg').src||'';if(cover&&cover.indexOf('data:image')!==0)cover='';var payload={title:title,author:author,description:desc,cover_base64:cover};closeModal('epubExportModal');$('loadingOverlay').classList.add('show');var x=new XMLHttpRequest();x.open('POST','/api/book/'+bid+'/export-epub',true);x.responseType='blob';x.onload=function(){$('loadingOverlay').classList.remove('show');if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var m=disp.match(/filename\*?=['"]?([^;'"]+)/i);var fn=m?decodeURIComponent(m[1].replace(/UTF-8''/i,'')):'book.epub';_downloadBlob(blob,fn)}else{var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);toast(d.error||'','error')}catch(e){toast('','error')}};r.readAsText(x.response)}};x.onerror=function(){$('loadingOverlay').classList.remove('show');toast('','error')};x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(payload))}
+function doExportEpub(){var bid=_epubExportBid;if(!bid)return;var title=$('epubTitle').value.trim()||'';var author=$('epubAuthor').value.trim();var desc=$('epubDesc').value.trim();var cover=$('epubCoverImg').src||'';if(cover&&cover.indexOf('data:image')!==0)cover='';var payload={title:title,author:author,description:desc,cover_base64:cover};closeModal('epubExportModal');_runExport(bid,'epub','epub','EPUB',true,payload)}
 function openImportNew(){openModal('importModal')}
 function openCreateBookModal(){openModal('createBookModal')}
 function doCreateBookFromModal(){closeModal('createBookModal');createBook()}
 function openImport(){openImportNew()}
-function doExport(f){var bid=bookId;if(!bid){toast('请先打开一本书','warn');return}var ext={md:'md',txt:'txt',zip:'zip'}[f]||f;var x=new XMLHttpRequest();x.open('GET','/api/book/'+bid+'/export?format='+f,true);x.responseType='blob';x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var m=disp.match(/filename\*?=['"]?([^;'"]+)/i);var fn=m?decodeURIComponent(m[1].replace(/UTF-8''/i,'')):'book.'+ext;_downloadBlob(blob,fn)}else{toast('','error')}};x.onerror=function(){toast('','error')};x.send()}
+function doExport(f){var bid=bookId;if(!bid){toast('请先打开一本书','warn');return}var ext={md:'md',txt:'txt',zip:'zip'}[f]||f;var formatName={md:'Markdown',txt:'TXT',zip:'ZIP'}[f]||f.toUpperCase();_runExport(bid,f,ext,formatName,false,null)}
 function doLogout(){clearAppState();api('POST','/api/auth/logout',undefined,function(){location.href='/login'})}
 
 function setupImport(){var drop=$('impDrop'),file=$('impFile');drop.ondragover=function(e){e.preventDefault();drop.style.borderColor='var(--accent)'};drop.ondragleave=function(){drop.style.borderColor=''};drop.ondrop=function(e){e.preventDefault();drop.style.borderColor='';if(e.dataTransfer.files.length)doImport(e.dataTransfer.files[0])};file.onchange=function(){if(file.files.length)doImport(file.files[0])}}
 
 function setImportProgress(pct,text){$('impProgressFill').style.width=pct+'%';$('impProgressText').textContent=text}
 function doImport(file){
- if(file.size>100*1024*1024){$('impSt').textContent=' 100MB，请拆分成 smaller 文件或压缩后重试';$('impSt').style.color='var(--danger)';return}
+ if(file.size>100*1024*1024){$('impSt').textContent='文件超过 100MB，请拆分成 smaller 文件或压缩后重试';$('impSt').style.color='var(--danger)';return}
  $('impDrop').style.display='none';
  $('impProgressWrap').style.display='';
  $('impSt').textContent='';$('impSt').style.color='';
-  setImportProgress(0,'读取文件中...');
+ setImportProgress(0,'读取文件中...');
  var startTime=Date.now();
  var reader=new FileReader();
  reader.onprogress=function(e){if(e.lengthComputable){var pct=Math.round(e.loaded/e.total*25);setImportProgress(pct,'读取文件 ('+Math.round(e.loaded/1024)+'KB / '+Math.round(e.total/1024)+'KB)...')}};
- reader.onerror=function(){$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='已导入 '+d.imported+' ';
+ reader.onerror=function(){$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='读取文件失败';$('impSt').style.color='var(--danger)'};
+ reader.onload=function(){
+ setImportProgress(30,'编码中...');
+ var b64=reader.result.split(',')[1];
+ var sentKB=Math.round(b64.length/1024);
+ setImportProgress(35,'上传 '+sentKB+'KB 到服务器，大文件请耐心等待...');
+ var elapsed=function(){return Math.round((Date.now()-startTime)/1000)};
+ var progressTimer=setInterval(function(){var sec=elapsed();if(sec>10){setImportProgress(40+Math.min(sec,50),'服务器正在解析中，已耗时 '+sec+' 秒...')}},1000);
+ api('POST','/api/import-book',{filename:file.name,data:b64},function(d,s){
+ clearInterval(progressTimer);
+ if(s===0){setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='连接超时，文件可能过大或网络不稳定，建议刷新重试';$('impSt').style.color='var(--danger)';return}
+ if(s===200&&d.imported){
+ setImportProgress(100,'导入完成');
+ $('impSt').textContent='已导入 '+d.imported+' 章';
  cachedBooks=null;if(d.book_id){currentBookTitle=d.title;openBook(d.book_id)}
-        setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
+ setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
  }else{
- setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'');$('impSt').style.color='var(--danger)'}
+ setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'}
  });
  };
  reader.readAsDataURL(file);
@@ -1835,7 +2106,7 @@ function startPrediction(){
   if(!bookId){toast('请先打开一本书','warn');return}
  if(predicting)return;
  predicting=true;
- toast('...','success');
+ toast('正在生成预言...','success');
  _streamGenerate('prediction',$('predLog'),function(fullText){
  predicting=false;
  if(fullText){
@@ -1843,8 +2114,8 @@ function startPrediction(){
  html+=_mdToHtml(fullText);
  html+='</div>';
  $('predictionResultBody').innerHTML=html;
-      $('predLog').textContent='预言生成完成';
- toast('','success');
+       $('predLog').textContent='预言生成完成';
+ toast('预言生成完成','success');
  }else{
       $('predictionResultBody').innerHTML='<div style="text-align:center;padding:40px 20px"><div style="font-size:28px;margin-bottom:12px">&#128302;</div><h3 style="font-size:15px;color:var(--t1);margin-bottom:8px">生成失败</h3><p style="font-size:12px;color:var(--t2);max-width:420px;margin:0 auto 20px;line-height:1.6">生成失败，请重试</p></div>';
       toast('预言生成失败','error');
@@ -1958,8 +2229,8 @@ function setupBottomPanelDrag(){
 
 
 
-function openReadthrough(){
- if(!bookId){toast('','warn');return}
+ function openReadthrough(){
+ if(!bookId){toast('请先打开一本书','warn');return}
  if(bottomPanelOpen && currentBottomTab==='readthrough'){
  closeBottomPanel();
  return;
@@ -1996,8 +2267,8 @@ function loadSourceToRT(){
  }
  });
 }
-function startRT(){
- if(!bookId){toast('','warn');return}
+ function startRT(){
+ if(!bookId){toast('请先打开一本书','warn');return}
  if(rtLastStatus==='running'){
  stopRT();
  return;
@@ -2010,11 +2281,11 @@ function startRT(){
  api('POST','/api/book/'+bookId+'/readthrough/start',{},function(d,s){
     if(s!==200){toast(d.error||'启动失败','error');}
  });
- $('rtStartBtn').textContent='';$('rtStream').textContent='';pollRTStatus();
+ $('rtStartBtn').textContent='通读中...';$('rtStream').textContent='';pollRTStatus();
 }
-function stopRT(){
+ function stopRT(){
  api('POST','/api/book/'+bookId+'/readthrough/stop',{},function(d){
- toast('...','warn');
+ toast('正在停止通读...','warn');
  });
 }
 function clearRT(){
@@ -2027,8 +2298,8 @@ function clearRT(){
  $('rtProgress').style.width='0%';$('rtPhase').textContent='...';
  $('rtChapters').textContent='0/0 ';
  $('rtStartBtn').style.display='';
- $('rtStartBtn').textContent='';
- toast('','success');
+  $('rtStartBtn').textContent='开始通读';
+  toast('通读笔记已清空','success');
  rtLastStatus='idle';
  rtLastDoneChapters=0;
  // 
@@ -2064,38 +2335,38 @@ function updateRTUI(d,s){
  }
  }else if(st==='done'){
  clearInterval(rtPollTimer);rtPollTimer=null;
- $('rtStartBtn').style.display='';$('rtStartBtn').textContent='';
-    $('rtPhase').textContent='完成';toast('通读完成！','success');
+ $('rtStartBtn').style.display='';$('rtStartBtn').textContent='重新通读';
+ $('rtPhase').textContent='完成';toast('通读完成！','success');
  rtLastDoneChapters=doneCh;
  loadSourceToRT();
  }else if(st==='idle'){
  clearInterval(rtPollTimer);rtPollTimer=null;
  if(d.has_source || $('rtSource').value.trim()!==''){
- $('rtStartBtn').textContent='';
+ $('rtStartBtn').textContent='重新通读';
  }else{
- $('rtStartBtn').textContent='';
+ $('rtStartBtn').textContent='开始通读';
  }
  rtLastDoneChapters=doneCh;
  loadSourceToRT();
  }else if(st==='error'){
  clearInterval(rtPollTimer);rtPollTimer=null;
- $('rtStartBtn').style.display='';$('rtStartBtn').textContent='';
- toast(d.error||'','error');
+ $('rtStartBtn').style.display='';$('rtStartBtn').textContent='开始通读';
+ toast(d.error||'通读失败','error');
  rtLastDoneChapters=doneCh;
  loadSourceToRT();
  }
 }
 
-function generateOutlineFromSource(){
- if(!bookId){toast('','warn');return}
- toast('...','success');
+ function generateOutlineFromSource(){
+ if(!bookId){toast('请先打开一本书','warn');return}
+ toast('正在生成大纲...','success');
  _streamGenerate('outline',$('outlineLog'),function(fullText){
  if(fullText){
       toast('大纲已保存到 outline.md','success');
       $('outlineLog').textContent='大纲生成完成';
  loadOutlineSource();
  }else{
- toast('','error');
+ toast('大纲生成失败','error');
  $('outlineLog').textContent='';
  }
  });
@@ -2188,6 +2459,40 @@ function startRTFromChat(){
  startRT();
  });
 }
+
+var _editorCursorPos=null;
+document.addEventListener('keydown',function(e){
+  var sc=settings.shortcut_focus_ai||'none';
+  if(sc==='none')return;
+  var target=e.target;
+  var isInput=target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA');
+  var modalOpen=document.querySelector('.modal-bg.open,.confirm-bg.open,.prompt-bg.open');
+  if(modalOpen)return;
+  var match=false;
+  if(sc==='capslock'&&e.key==='CapsLock')match=true;
+  else if(sc==='alt'&&e.key==='Alt'&&!e.ctrlKey&&!e.shiftKey&&!e.metaKey)match=true;
+  else if(sc==='minus'&&e.key==='-'&&!isInput)match=true;
+  else if(sc==='backslash'&&e.key==='\\'&&!isInput)match=true;
+  if(match){
+    e.preventDefault();
+    var aiInput=$('aiInput');
+    var editor=$('editorArea');
+    if(!aiInput)return;
+    if(target===aiInput){
+      if(editor){
+        editor.focus();
+        if(_editorCursorPos!==null){
+          try{editor.setSelectionRange(_editorCursorPos,_editorCursorPos);}catch(ex){}
+        }
+      }
+    }else{
+      if(target===editor&&editor){
+        _editorCursorPos=editor.selectionStart;
+      }
+      aiInput.focus();
+    }
+  }
+});
 
 checkAuth();
 </script>

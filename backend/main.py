@@ -54,15 +54,11 @@ def _find_data_dir():
     if env:
         return env
     usrdata = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'usrdata'))
-    if os.path.isdir(usrdata):
-        return usrdata
-    parent_data = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'data'))
-    if os.path.isdir(parent_data):
-        return parent_data
     os.makedirs(usrdata, exist_ok=True)
     return usrdata
 
 DATA_DIR = _find_data_dir()
+PORT = 20000 if os.environ.get('DATA_DIR') else 10000
 BOOKS_DIR = os.path.join(DATA_DIR, 'books')
 LOG_DIR = os.path.join(DATA_DIR, 'logs')
 MESSAGES_DIR = os.path.join(DATA_DIR, 'messages')
@@ -79,7 +75,7 @@ DEFAULT_PROVIDER_PRESETS = [
     {'name': 'MiniMax', 'base_url': 'https://api.minimaxi.com/v1', 'api_key': '', 'model': 'MiniMax-M2.5', 'use_custom_json': False, 'custom_json': ''},
     {'name': '预设4', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
     {'name': '预设5', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
-    {'name': '本地 Llama.cpp', 'base_url': 'http://127.0.0.1:8080/v1', 'api_key': '', 'model': 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M', 'use_custom_json': False, 'custom_json': ''},
+    {'name': '本地 Llama.cpp', 'base_url': 'http://127.0.0.1:8080/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
 ]
 
 DEFAULT_SETTINGS = {
@@ -91,6 +87,9 @@ DEFAULT_SETTINGS = {
     'provider_presets': [],
     'active_provider_idx': 0,
     'model_context_length': 0,
+    'shortcut_focus_ai': 'none',
+    'search_api_key': '',
+    'search_provider': 'duckduckgo',
 }
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
@@ -109,6 +108,66 @@ def ensure_dirs():
 
 
 ensure_dirs()
+
+
+def _import_builtin_books():
+    builtin_dir = os.environ.get('BUILTIN_BOOKS_DIR', '')
+    if not builtin_dir or not os.path.isdir(builtin_dir):
+        return
+    # Clean up old builtin books from previous versions to avoid duplicates
+    data_dir = os.environ.get('DATA_DIR', os.path.join(SCRIPT_DIR, 'data'))
+    if os.path.isdir(data_dir):
+        for entry in os.listdir(data_dir):
+            if entry.startswith('builtin_') and entry != 'builtin_LUCA_Legend':
+                old_bd = os.path.join(data_dir, entry)
+                if os.path.isdir(old_bd):
+                    try:
+                        import shutil
+                        shutil.rmtree(old_bd)
+                        log_action('BUILTIN_CLEAN', f'Removed old builtin book: {entry}')
+                    except Exception as e:
+                        log_action('BUILTIN_CLEAN_ERR', f'{entry}: {str(e)[:200]}')
+    for fn in sorted(os.listdir(builtin_dir)):
+        ext = os.path.splitext(fn)[1].lower()
+        if ext not in IMPORT_PARSERS:
+            continue
+        filepath = os.path.join(builtin_dir, fn)
+        if not os.path.isfile(filepath):
+            continue
+        bid = 'builtin_' + re.sub(r'[^\w]', '_', os.path.splitext(fn)[0][:30])
+        bd = get_book_dir(bid)
+        if os.path.exists(bd):
+            continue
+        try:
+            with open(filepath, 'rb') as f:
+                raw = f.read()
+            parser = IMPORT_PARSERS[ext]
+            result = parser(raw, fn)
+            if len(result) == 3:
+                chapters, book_title, err = result
+            else:
+                chapters, err = result
+                book_title = ''
+            if err or not chapters:
+                continue
+            ch_dir = os.path.join(bd, 'chapters')
+            os.makedirs(ch_dir, exist_ok=True)
+            os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+            order = []
+            for i, ch in enumerate(chapters):
+                cid = 'ch_' + re.sub(r'[^\w]', '_', ch.get('title', 'untitled')[:30]) + '_' + str(int(time.time() * 1000)) + str(i)
+                if not is_valid_id(cid):
+                    cid = 'ch_' + str(int(time.time() * 1000)) + str(i)
+                ch_data = {'id': cid, 'title': ch.get('title', '未命名')[:200], 'content': ch.get('content', ''), 'updated': time.time()}
+                save_json(os.path.join(ch_dir, f"{cid}.json"), ch_data)
+                order.append(cid)
+            title = book_title or os.path.splitext(fn)[0]
+            meta = {'id': bid, 'title': title, 'created': time.time(), 'updated': time.time(), 'chapter_order': order, 'current_chapter_id': order[0] if order else ''}
+            save_json(os.path.join(bd, 'meta.json'), meta)
+            save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+            log_action('BUILTIN_IMPORT', f'{bid}: {len(chapters)} chapters from {fn}')
+        except Exception as e:
+            log_action('BUILTIN_IMPORT_ERR', f'{fn}: {str(e)[:200]}')
 
 
 def get_salt():
@@ -233,8 +292,17 @@ def get_settings():
         # 迁移：确保本地 Llama.cpp 预设存在
         has_local = any('llama.cpp' in (p.get('name') or '').lower() for p in presets)
         if not has_local:
-            presets.append({'name': '本地 Llama.cpp', 'base_url': 'http://127.0.0.1:8080/v1', 'api_key': '', 'model': 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M', 'use_custom_json': False, 'custom_json': ''})
+            presets.append({'name': '本地 Llama.cpp', 'base_url': 'http://127.0.0.1:8080/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''})
             changed = True
+    # 自动同步本地 Llama.cpp 预设的 model 为检测到的第一个 gguf
+    detected_model_path = _detect_local_model()
+    detected_model_name = os.path.splitext(os.path.basename(detected_model_path))[0] if detected_model_path else ''
+    for p in presets:
+        if 'llama.cpp' in (p.get('name') or '').lower():
+            if detected_model_name and p.get('model') != detected_model_name:
+                p['model'] = detected_model_name
+                changed = True
+            break
     # 确保 active_provider_idx 有效
     idx = s.get('active_provider_idx', 0)
     if idx < 0 or idx >= len(presets):
@@ -447,10 +515,17 @@ def parse_txt(text, filename):
 def parse_md(text, filename):
     chapters = []
     lines = text.split('\n')
+    # Extract book title from first heading if available
+    book_title = ''
+    for line in lines[:50]:
+        line_stripped = line.strip()
+        if line_stripped.startswith('# ') and not line_stripped.startswith('## '):
+            book_title = line_stripped.lstrip('#').strip()
+            break
     has_chapters = any(_MD_CHAPTER_RE.match(l) for l in lines[:5000])
     if not has_chapters or len(lines) < 10:
-        return [{'title': filename.replace('.md', ''), 'content': text.strip()}]
-    current_title = filename.replace('.md', '')
+        return [{'title': book_title or filename.replace('.md', ''), 'content': text.strip()}], book_title
+    current_title = book_title or filename.replace('.md', '')
     current_lines = []
     for line in lines:
         if _MD_CHAPTER_RE.match(line):
@@ -462,7 +537,7 @@ def parse_md(text, filename):
             current_lines.append(line)
     if current_lines:
         chapters.append({'title': current_title, 'content': '\n'.join(current_lines).strip()})
-    return chapters
+    return chapters, book_title
 
 
 def parse_docx_bytes(raw, filename):
@@ -562,6 +637,133 @@ def _strip_tags(html):
         if line:
             cleaned.append(line)
     return '\n\n'.join(cleaned)
+
+def _fetch_url_content(url, max_chars=8000):
+    """抓取网页并提取纯文本"""
+    try:
+        if not url.startswith(('http://', 'https://')):
+            return 'URL格式不支持，只支持http/https'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read()
+            charset = 'utf-8'
+            ct = resp.headers.get('Content-Type', '')
+            m = re.search(r'charset=([^\s;]+)', ct, re.I)
+            if m:
+                charset = m.group(1).strip().strip('"').strip("'")
+            try:
+                html = raw.decode(charset, errors='ignore')
+            except:
+                html = raw.decode('utf-8', errors='ignore')
+            text = _strip_tags(html)
+            if len(text) > max_chars:
+                text = text[:max_chars] + '\n\n[内容已截断，后续省略]'
+            return text
+    except Exception as e:
+        return f'抓取失败: {str(e)[:200]}'
+
+def _search_web(query, max_results=5):
+    """搜索网页，返回 {title, link, snippet} 列表。
+    优先使用用户在设置中配置的搜索 API（Brave Search），否则回退到 DuckDuckGo Lite。"""
+    settings = get_settings()
+    api_key = settings.get('search_api_key', '').strip()
+    provider = settings.get('search_provider', 'duckduckgo')
+
+    # 1) 如果配置了 Brave Search API Key，优先使用
+    if api_key and provider == 'brave':
+        try:
+            q = urllib.parse.quote(query)
+            url = f'https://api.search.brave.com/res/v1/web/search?q={q}&count={max_results}&text_decorations=0'
+            req = urllib.request.Request(url, headers={
+                'X-Subscription-Token': api_key,
+                'Accept': 'application/json',
+            })
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode('utf-8', errors='ignore'))
+                results = []
+                for r in data.get('web', {}).get('results', [])[:max_results]:
+                    results.append({
+                        'title': r.get('title', ''),
+                        'link': r.get('url', ''),
+                        'snippet': r.get('description', '')
+                    })
+                if results:
+                    return results
+        except Exception as e:
+            log_action('SEARCH_BRAVE_ERROR', str(e)[:200])
+            # fallthrough to DuckDuckGo
+
+    # 2) 回退到 DuckDuckGo Lite
+    try:
+        q = urllib.parse.quote(query)
+        url = f'https://lite.duckduckgo.com/lite/?q={q}'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode('utf-8', errors='ignore')
+            results = []
+            # 模式 A：DuckDuckGo Lite 经典结构
+            link_matches = re.findall(
+                r'<a rel="nofollow" href="([^"]+)" class=\'result-link\'>(.*?)</a>',
+                html, re.S
+            )
+            snippets = re.findall(
+                r'<td class=\'result-snippet\'>\s*(.*?)\s*</td>',
+                html, re.S
+            )
+            # 模式 B：如果 Lite 结构变了，尝试更通用的匹配
+            if not link_matches:
+                link_matches = re.findall(
+                    r'<a[^>]+class=["\']result-link["\'][^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+                    html, re.S
+                ) or re.findall(
+                    r'<a[^>]+href=["\']([^"\']+)["\'][^>]*class=["\']result-link["\'][^>]*>(.*?)</a>',
+                    html, re.S
+                )
+            if not snippets:
+                snippets = re.findall(
+                    r'<td[^>]+class=["\']result-snippet["\'][^>]*>(.*?)</td>',
+                    html, re.S
+                )
+            for i, (href, title_html) in enumerate(link_matches):
+                if i >= max_results:
+                    break
+                title = re.sub(r'<[^>]+>', '', title_html).strip()
+                real_url = ''
+                if 'uddg=' in href:
+                    m = re.search(r'uddg=([^&]+)', href)
+                    if m:
+                        real_url = urllib.parse.unquote(m.group(1))
+                elif href.startswith('http'):
+                    real_url = href
+                else:
+                    real_url = 'https:' + href if href.startswith('//') else href
+                snippet = ''
+                if i < len(snippets):
+                    snippet = re.sub(r'<[^>]+>', '', snippets[i]).strip()
+                results.append({'title': title, 'link': real_url, 'snippet': snippet})
+            if results:
+                return results
+            # 模式 C：如果 Lite 完全没结果，尝试解析 HTML 版 DuckDuckGo 的简化结果
+            fallback_links = re.findall(
+                r'<a[^>]+href=["\']([^"\']+)["\'][^>]*class=["\']result__a["\'][^>]*>(.*?)</a>',
+                html, re.S
+            )
+            fallback_snippets = re.findall(
+                r'<a[^>]+class=["\']result__snippet["\'][^>]*>(.*?)</a>',
+                html, re.S
+            )
+            for i, (href, title_html) in enumerate(fallback_links):
+                if i >= max_results:
+                    break
+                title = re.sub(r'<[^>]+>', '', title_html).strip()
+                real_url = href if href.startswith('http') else ''
+                snippet = ''
+                if i < len(fallback_snippets):
+                    snippet = re.sub(r'<[^>]+>', '', fallback_snippets[i]).strip()
+                results.append({'title': title, 'link': real_url, 'snippet': snippet})
+            return results
+    except Exception as e:
+        return [{'title': '搜索失败', 'link': '', 'snippet': str(e)[:200]}]
 
 def _extract_title(html):
     m = _H1_RE.search(html)
@@ -752,11 +954,13 @@ def parse_epub_bytes(raw, filename):
 
 IMPORT_PARSERS = {
     '.txt': lambda raw, fn: (parse_txt(raw.decode('utf-8', errors='ignore'), fn), None),
-    '.md': lambda raw, fn: (parse_md(raw.decode('utf-8', errors='ignore'), fn), None),
+    '.md': lambda raw, fn: parse_md(raw.decode('utf-8', errors='ignore'), fn) + (None,),
     '.docx': parse_docx_bytes,
     '.pdf': parse_pdf_bytes,
     '.epub': parse_epub_bytes,
 }
+
+_import_builtin_books()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -912,6 +1116,7 @@ class Handler(BaseHTTPRequestHandler):
             self.json_resp(200, {'chapters': chapters}); return
 
         if path.startswith('/api/book/') and '/export' in path:
+            log_action('EXPORT_REQUEST', f'path={path} query={dict(qs)}')
             parts = path.split('/')
             bid = parts[3] if len(parts) > 3 else ''
             fmt = qs.get('format', ['zip'])[0]
@@ -932,37 +1137,56 @@ class Handler(BaseHTTPRequestHandler):
             order = meta.get('chapter_order', [])
             ordered = [all_chapters.pop(cid) for cid in order if cid in all_chapters]
             ordered.extend(all_chapters.values())
-            if fmt == 'md':
-                text = f"# {meta.get('title', '')}\n\n"
-                for ch in ordered:
-                    text += f"## {ch.get('title', '')}\n\n{ch.get('content', '')}\n\n---\n\n"
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/markdown; charset=utf-8')
-                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{quote(safe_title + '.md')}")
-                self.send_cors(); self.end_headers()
-                self.wfile.write(text.encode('utf-8'))
-            elif fmt == 'txt':
-                text = f"{meta.get('title', '')}\n\n"
-                for ch in ordered:
-                    text += f"{ch.get('title', '')}\n\n{ch.get('content', '')}\n\n"
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/plain; charset=utf-8')
-                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{quote(safe_title + '.txt')}")
-                self.send_cors(); self.end_headers()
-                self.wfile.write(text.encode('utf-8'))
-            else:
-                buf = io.BytesIO()
-                with zipfile.ZipFile(buf, 'w') as zf:
+            log_action('EXPORT_BUILD', f'book={bid} fmt={fmt} chapters={len(ordered)}')
+            try:
+                if fmt == 'md':
+                    text = f"# {meta.get('title', '')}\n\n"
                     for ch in ordered:
-                        cid = ch.get('id', 'unknown')
-                        fn = f"{cid}.json"
-                        zf.writestr(fn, json.dumps(ch, ensure_ascii=False, indent=2))
-                buf.seek(0)
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/zip')
-                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{quote(safe_title + '.zip')}")
-                self.send_cors(); self.end_headers()
-                self.wfile.write(buf.getvalue())
+                        text += f"## {ch.get('title', '')}\n\n{ch.get('content', '')}\n\n---\n\n"
+                    body = text.encode('utf-8')
+                    utf8_fn = quote(safe_title + '.md', safe='')
+                    log_action('EXPORT_SEND_MD', f'size={len(body)} fn={utf8_fn}')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/markdown; charset=utf-8')
+                    self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Connection', 'close')
+                    self.send_cors(); self.end_headers()
+                    self.wfile.write(body)
+                elif fmt == 'txt':
+                    text = f"{meta.get('title', '')}\n\n"
+                    for ch in ordered:
+                        text += f"{ch.get('title', '')}\n\n{ch.get('content', '')}\n\n"
+                    body = text.encode('utf-8')
+                    utf8_fn = quote(safe_title + '.txt', safe='')
+                    log_action('EXPORT_SEND_TXT', f'size={len(body)} fn={utf8_fn}')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                    self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Connection', 'close')
+                    self.send_cors(); self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    buf = io.BytesIO()
+                    with zipfile.ZipFile(buf, 'w') as zf:
+                        for ch in ordered:
+                            cid = ch.get('id', 'unknown')
+                            fn = f"{cid}.json"
+                            zf.writestr(fn, json.dumps(ch, ensure_ascii=False, indent=2))
+                    body = buf.getvalue()
+                    utf8_fn = quote(safe_title + '.zip', safe='')
+                    log_action('EXPORT_SEND_ZIP', f'size={len(body)} fn={utf8_fn}')
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/zip')
+                    self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Connection', 'close')
+                    self.send_cors(); self.end_headers()
+                    self.wfile.write(body)
+            except Exception as e:
+                log_action('EXPORT_ERROR', f'book={bid} fmt={fmt} err={str(e)[:200]}')
+                self.json_resp(500, {'error': f'导出失败: {str(e)[:100]}'}); return
             return
 
         if path == '/api/settings':
@@ -977,6 +1201,21 @@ class Handler(BaseHTTPRequestHandler):
             with _LOCAL_LLM_LOCK:
                 st = dict(_LOCAL_LLM_STATE)
             st['running'] = _local_llm_status()
+            self.json_resp(200, st); return
+
+        if path == '/api/local-llm/detected-model':
+            detected = _detect_local_model()
+            model_name = ''
+            if detected:
+                model_name = os.path.splitext(os.path.basename(detected))[0]
+            self.json_resp(200, {'model': model_name, 'path': detected or ''}); return
+
+        if path == '/api/local-llm/preset-models':
+            self.json_resp(200, {'models': _PRESET_MODELS}); return
+
+        if path == '/api/local-llm/download-progress':
+            with _DOWNLOAD_LOCK:
+                st = dict(_DOWNLOAD_STATE)
             self.json_resp(200, st); return
 
         if path == '/api/active-connections':
@@ -1268,6 +1507,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'status': 'ok'}); return
 
             if action == 'export-epub':
+                log_action('EXPORT_EPUB_REQUEST', f'book={bid}')
                 if not HAS_EPUB:
                     self.json_resp(500, {'error': '缺少 ebooklib 依赖，无法导出 EPUB'}); return
                 meta = get_book_meta(bid) or {}
@@ -1349,12 +1589,15 @@ class Handler(BaseHTTPRequestHandler):
 
                 buf = io.BytesIO()
                 epub_mod.write_epub(buf, book, {'epub3_pages': False})
-                buf.seek(0)
+                body = buf.getvalue()
+                utf8_fn = quote(safe_title + '.epub', safe='')
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/epub+zip')
-                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{quote(safe_title + '.epub')}")
+                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Connection', 'close')
                 self.send_cors(); self.end_headers()
-                self.wfile.write(buf.getvalue())
+                self.wfile.write(body)
                 return
 
             if action == 'comment':
@@ -1368,7 +1611,7 @@ class Handler(BaseHTTPRequestHandler):
                     # 自动建议：同步快速返回，不占用 chat 任务槽位
                     set_conn_meta('auto_comment', '自动建议', bid)
                     try:
-                        mt = settings.get('ai_max_tokens', 512)
+                        mt = None
                         tp = settings.get('ai_temperature', 0.7)
                         source_text = get_source(bid)
                         bd_auto = get_book_dir(bid)
@@ -1384,7 +1627,16 @@ class Handler(BaseHTTPRequestHandler):
                             source_ctx = source_text
                         else:
                             source_ctx = '（目前还没有完整的阅读笔记。等作者完成通读后，你就能对全书细节了如指掌了。）'
-                        sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。用户有时可能会记不清一些故事的细节设定，这种时候就需要你提醒他。如果没啥问题，你就可以当作消遣一样一边读一边发散思维。这本小说大概是这样的：
+                        sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
+
+【输出风格】
+1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
+2. 每次回复控制在200字以内。把话说清楚，但不要铺陈背景、不要解释动机、不要加开场白和结束语。
+3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
+4. 如果没啥大问题，简单带过即可，不要强行找话凑字数。
+5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
+
+这本小说大概是这样的：
 
 {source_ctx}
 
@@ -1394,7 +1646,7 @@ class Handler(BaseHTTPRequestHandler):
 【现有正文】
 {text}
 
-用户此时停下了，需要休息一下，你可以趁这个时间看一下他未完成的最新章节，并试探性地提出一点你的见解，注意，万一这里面有什么和以往内容冲突的地方，你是唯一可以提醒他的人！"""
+用户此时停下了，你可以趁这个时间看一下他未完成的最新章节，试探性地提出一点你的见解。注意，万一这里面有什么和以往内容冲突的地方，你是唯一可以提醒他的人！"""
                         msgs = [{'role': 'system', 'content': sys_msg}]
                         msgs.append({'role': 'user', 'content': '请看一下这章，然后告诉我你的想法。'})
                         result, err = call_ai(settings, msgs, mt, tp, timeout=60)
@@ -1420,7 +1672,7 @@ class Handler(BaseHTTPRequestHandler):
                 def do_chat_task(task_id, book_id, user_text, cfg_settings, history_list):
                     set_conn_meta('chat', 'AI对话', book_id)
                     try:
-                        mt = cfg_settings.get('ai_max_tokens', 512)
+                        mt = None
                         tp = cfg_settings.get('ai_temperature', 0.7)
                         source_text = get_source(book_id)
                         if source_text and len(source_text) > 100:
@@ -1448,11 +1700,22 @@ class Handler(BaseHTTPRequestHandler):
 
 你还有一个"本章写完"工具（隐藏功能）。如果你判断作者已经明确表示这一章写完了（例如说"写好了""这章结束了""本章完结""写完了"等），你可以调用本章写完工具，让系统为这一章执行通读摘要。
 - 调用格式：[COMPLETE_CHAPTER]{{"chapter_id":"当前章ID"}}[/COMPLETE_CHAPTER]
-- 注意：只有作者明确表示本章已完成时才调用，不要频繁调用。"""
+- 注意：只有作者明确表示本章已完成时才调用，不要频繁调用。
+
+"""
 
                         is_first_round = not history_list
                         if is_first_round:
-                            sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。用户有时可能会记不清一些故事的细节设定，这种时候就需要你提醒他。如果没啥问题，你就可以当作消遣一样一边读一边发散思维。这本小说大概是这样的：
+                            sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
+
+【输出风格】
+1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
+2. 每次回复控制在300字以内。把话说清楚，但不要铺陈背景、不要解释动机、不要加开场白和结束语。
+3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
+4. 如果用户的问题简单，回答也要简单，禁止强行找话凑字数。
+5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
+
+这本小说大概是这样的：
 
 {source_ctx}
 
@@ -1466,7 +1729,16 @@ class Handler(BaseHTTPRequestHandler):
 
 {annotate_tool}"""
                         else:
-                            sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。用户有时可能会记不清一些故事的细节设定，这种时候就需要你提醒他。如果没啥问题，你就可以当作消遣一样一边读一边发散思维。这本小说大概是这样的：
+                            sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
+
+【输出风格】
+1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
+2. 每次回复控制在300字以内。把话说清楚，但不要铺陈背景、不要解释动机、不要加开场白和结束语。
+3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
+4. 如果用户的问题简单，回答也要简单，禁止强行找话凑字数。
+5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
+
+这本小说大概是这样的：
 
 {source_ctx}
 
@@ -1502,6 +1774,20 @@ class Handler(BaseHTTPRequestHandler):
                                 _replace_pending_chat_msg(book_id, task_id, '[错误: ' + err + ']')
                                 bg_task_done(task_id, err)
                             return
+
+                        # 去重：如果正文以思考过程开头，截掉重复部分
+                        reasoning_text = ''.join(reasoning_acc)
+                        if reasoning_text and full_text.strip().startswith(reasoning_text.strip()):
+                            full_text = full_text[len(reasoning_text):].strip()
+                        # 如果去重后正文为空，说明 AI 只输出了思考过程
+                        if not full_text and reasoning_text:
+                            # 如果思考过程明显只是内部计划，不要直接把内部独白展示给用户
+                            if re.search(r'^(用户让我|我需要调用|我应该调用|让我来查|我需要搜索|我需要查询|系统会帮我|我来调用)', reasoning_text.strip()):
+                                full_text = '（我整理了一下思路，但还没得出完整结论，请换个说法再试。）'
+                            else:
+                                full_text = reasoning_text
+                            reasoning_text = ''
+                            reasoning_acc.clear()
 
                         result = re.sub(r'[#*`~]', '', full_text)
 
@@ -1584,6 +1870,9 @@ class Handler(BaseHTTPRequestHandler):
                         result = re.sub(r'\[ANNOTATE_ADD\].*?\[/ANNOTATE_ADD\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[ANNOTATE_REMOVE\].*?\[/ANNOTATE_REMOVE\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[COMPLETE_CHAPTER\].*?\[/COMPLETE_CHAPTER\]', '', result, flags=re.S).strip()
+                        # 清理已废弃的工具标记（后端不再执行这些工具，但 AI 可能仍输出）
+                        result = re.sub(r'\[FETCH_URL\].*?\[/FETCH_URL\]', '', result, flags=re.S).strip()
+                        result = re.sub(r'\[SEARCH\].*?\[/SEARCH\]', '', result, flags=re.S).strip()
 
                         _replace_pending_chat_msg(book_id, task_id, result, ''.join(reasoning_acc))
                         bg_task_update(task_id, result=result, reasoning=''.join(reasoning_acc), progress=100, needs_readthrough=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered)
@@ -1855,7 +2144,8 @@ class Handler(BaseHTTPRequestHandler):
                 if existing and existing.get('status') == 'running':
                     self.json_resp(400, {'error': '已有本章通读任务在进行中'}); return
                 tid = bg_task_start('chapter-complete', bid, f'本章通读')
-                threading.Thread(target=_do_chapter_complete, args=(tid, bid, cid, settings), daemon=True).start()
+                text = data.get('text', None)
+                threading.Thread(target=_do_chapter_complete, args=(tid, bid, cid, settings, text), daemon=True).start()
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'reader-prediction':
@@ -2120,7 +2410,7 @@ class Handler(BaseHTTPRequestHandler):
                 def do_update_source(task_id, book_id, chapter_text, ch_title, cfg_settings):
                     set_conn_meta('source-update', '更新全书笔记', book_id)
                     try:
-                        mt = cfg_settings.get('ai_max_tokens', 2048)
+                        mt = None
                         tp = cfg_settings.get('ai_temperature', 0.3)
                         source_text = get_source(book_id) or ''
                         if source_text and len(source_text) > 100:
@@ -2315,6 +2605,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/local-llm/stop':
             ok, err = _stop_local_llm()
             self.json_resp(200, {'ok': ok, 'error': err}); return
+
+        if path == '/api/local-llm/download':
+            preset_key = (data or {}).get('preset', 'gemma-4-e2b')
+            global _DOWNLOAD_THREAD, _DOWNLOAD_STOP_FLAG
+            with _DOWNLOAD_LOCK:
+                if _DOWNLOAD_STATE.get('status') in ('downloading',):
+                    self.json_resp(200, {'ok': False, 'error': '已有下载任务进行中'}); return
+            _DOWNLOAD_STOP_FLAG = False
+            _DOWNLOAD_THREAD = threading.Thread(target=_download_model_task, args=(preset_key,), daemon=True)
+            _DOWNLOAD_THREAD.start()
+            self.json_resp(200, {'ok': True}); return
+
+        if path == '/api/local-llm/download-cancel':
+            _DOWNLOAD_STOP_FLAG = True
+            _download_set(status='idle', progress=0)
+            self.json_resp(200, {'ok': True}); return
 
         if path.startswith('/api/book/') and path.endswith('/messages'):
             parts = path.split('/')
@@ -2858,11 +3164,163 @@ def get_ai_providers():
 AI_PROVIDERS_FILE = os.path.join(DATA_DIR, 'ai_providers.json')
 
 # ===== 本地 Llama.cpp 服务器控制 =====
-_LOCAL_LLM_DIR = os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'local_llm'))
-_LOCAL_LLM_MODEL = os.path.join(_LOCAL_LLM_DIR, 'models', 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf')
+_LOCAL_LLM_DIR = os.environ.get('LOCAL_LLM_DIR') or os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'local_llm'))
+os.makedirs(os.path.join(_LOCAL_LLM_DIR, 'models'), exist_ok=True)
 _LOCAL_LLM_LOCK = threading.Lock()
 _LOCAL_LLM_PROC = None
 _LOCAL_LLM_STATE = {'status': 'idle', 'progress': 0, 'error': '', 'updated': 0}
+
+# ===== 模型下载管理 =====
+_DOWNLOAD_LOCK = threading.Lock()
+_DOWNLOAD_STATE = {'status': 'idle', 'progress': 0, 'error': '', 'updated': 0, 'current_bytes': 0, 'total_bytes': 0, 'speed': '', 'source': ''}
+_DOWNLOAD_THREAD = None
+_DOWNLOAD_STOP_FLAG = False
+
+# 预设模型配置（ModelScope）
+_PRESET_MODELS = {
+    'gemma-4-e2b': {
+        'name': 'Gemma 4 E2B Instruct',
+        'repo': 'unsloth/gemma-4-e2b-it-GGUF',
+        'file': 'gemma-4-E2B-it-Q4_K_M.gguf',
+        'size_gb': 1.5,
+        'desc': 'Google Gemma 4 E2B，1.5GB，128K上下文，适合入门'
+    },
+    'qwen3.5-9b': {
+        'name': 'Qwen 3.5 9B Instruct',
+        'repo': 'unsloth/Qwen3.5-9B-GGUF',
+        'file': 'Qwen3.5-9B-Q4_K_M.gguf',
+        'size_gb': 6.0,
+        'desc': '阿里 Qwen3.5 9B，6GB，中文能力强'
+    }
+}
+
+def _download_set(status=None, progress=None, error=None, current_bytes=None, total_bytes=None, speed=None, source=None):
+    with _DOWNLOAD_LOCK:
+        if status is not None: _DOWNLOAD_STATE['status'] = status
+        if progress is not None: _DOWNLOAD_STATE['progress'] = progress
+        if error is not None: _DOWNLOAD_STATE['error'] = error
+        if current_bytes is not None: _DOWNLOAD_STATE['current_bytes'] = current_bytes
+        if total_bytes is not None: _DOWNLOAD_STATE['total_bytes'] = total_bytes
+        if speed is not None: _DOWNLOAD_STATE['speed'] = speed
+        if source is not None: _DOWNLOAD_STATE['source'] = source
+        _DOWNLOAD_STATE['updated'] = time.time()
+
+def _format_speed(bytes_per_sec):
+    if bytes_per_sec >= 1024 * 1024:
+        return f'{bytes_per_sec / (1024 * 1024):.1f} MB/s'
+    elif bytes_per_sec >= 1024:
+        return f'{bytes_per_sec / 1024:.1f} KB/s'
+    else:
+        return f'{bytes_per_sec:.0f} B/s'
+
+def _download_model_task(preset_key):
+    """后台线程：下载模型（ModelScope 优先，失败回退 HF-Mirror）"""
+    global _DOWNLOAD_STOP_FLAG
+    preset = _PRESET_MODELS.get(preset_key)
+    if not preset:
+        _download_set(status='error', error=f'未知模型预设: {preset_key}')
+        return
+
+    models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+    os.makedirs(models_dir, exist_ok=True)
+    dest_path = os.path.join(models_dir, preset['file'])
+
+    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 100 * 1024 * 1024:
+        _download_set(status='completed', progress=100)
+        return
+
+    _download_set(status='downloading', progress=0, current_bytes=0, total_bytes=0, speed='')
+    _DOWNLOAD_STOP_FLAG = False
+
+    sources = [
+        ('ModelScope', f"https://www.modelscope.cn/models/{preset['repo']}/resolve/master/{preset['file']}"),
+        ('HF-Mirror',  f"https://hf-mirror.com/{preset['repo']}/resolve/main/{preset['file']}"),
+    ]
+
+    last_error = None
+    for src_name, url in sources:
+        if _DOWNLOAD_STOP_FLAG:
+            break
+        _download_set(progress=5, speed=f'连接 {src_name}...', source=src_name)
+        try:
+            _download_with_url(url, dest_path)
+            return
+        except Exception as e:
+            last_error = e
+            tmp_path = dest_path + '.tmp'
+            if os.path.exists(tmp_path):
+                try: os.remove(tmp_path)
+                except Exception: pass
+            if _DOWNLOAD_STOP_FLAG:
+                break
+
+    if _DOWNLOAD_STOP_FLAG:
+        _download_set(status='idle', progress=0)
+        return
+
+    err_msg = str(last_error)[:200] if last_error else '所有下载源均不可用'
+    _download_set(status='error', error=err_msg)
+    try:
+        if os.path.exists(dest_path + '.tmp'):
+            os.remove(dest_path + '.tmp')
+    except Exception:
+        pass
+
+
+def _download_with_url(url, dest_path, total_size=0):
+    """使用 urllib 从 URL 下载文件，支持进度汇报"""
+    global _DOWNLOAD_STOP_FLAG
+    req = urllib.request.Request(url, method='GET')
+    req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        if total_size == 0:
+            total_size = int(resp.headers.get('Content-Length', 0))
+            _download_set(total_bytes=total_size)
+        downloaded = 0
+        chunk_size = 65536
+        start_time = time.time()
+        last_report = start_time
+
+        with open(dest_path + '.tmp', 'wb') as f:
+            while True:
+                if _DOWNLOAD_STOP_FLAG:
+                    _download_set(status='idle', progress=0)
+                    return
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                now = time.time()
+                elapsed = now - start_time
+                if elapsed > 0 and now - last_report >= 0.5:
+                    speed = downloaded / elapsed
+                    progress = int(downloaded * 100 / total_size) if total_size > 0 else 0
+                    _download_set(status='downloading', progress=min(progress, 99),
+                                current_bytes=downloaded, total_bytes=total_size,
+                                speed=_format_speed(speed))
+                    last_report = now
+
+    # 下载完成，重命名
+    if os.path.exists(dest_path):
+        os.remove(dest_path)
+    os.rename(dest_path + '.tmp', dest_path)
+    _download_set(status='completed', progress=100, current_bytes=downloaded,
+                total_bytes=total_size, speed='')
+
+
+def _detect_local_model():
+    """自动检测 local_llm/models/ 目录下第一个 .gguf 模型文件"""
+    models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+    if not os.path.isdir(models_dir):
+        return None
+    ggufs = sorted([f for f in os.listdir(models_dir) if f.lower().endswith('.gguf')])
+    if not ggufs:
+        return None
+    return os.path.join(models_dir, ggufs[0])
+
+
+_LOCAL_LLM_MODEL = _detect_local_model() or os.path.join(_LOCAL_LLM_DIR, 'models', 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf')
 
 def _local_llm_status():
     try:
@@ -2938,12 +3396,16 @@ def _monitor_local_llm(proc):
         _local_llm_set(status='error', progress=0, error=str(e))
 
 def _start_local_llm():
-    global _LOCAL_LLM_PROC
+    global _LOCAL_LLM_PROC, _LOCAL_LLM_MODEL
     exe = os.path.join(_LOCAL_LLM_DIR, 'llama-server.exe')
     if not os.path.exists(exe):
         return False, '找不到 llama-server.exe'
+    # 每次启动前重新检测模型
+    detected = _detect_local_model()
+    if detected:
+        _LOCAL_LLM_MODEL = detected
     if not os.path.exists(_LOCAL_LLM_MODEL):
-        return False, '找不到模型文件'
+        return False, '找不到模型文件（请把 .gguf 模型放到 local_llm/models/ 目录）'
     # 如果已经在运行，直接返回成功
     if _local_llm_status():
         _local_llm_set(status='ready', progress=100)
@@ -2965,7 +3427,8 @@ def _start_local_llm():
             '-np', '1',
             '--timeout', '300',
         ]
-        _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR, stdout=log_fp, stderr=subprocess.STDOUT)
+        _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR, stdout=log_fp, stderr=subprocess.STDOUT,
+                                           creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         threading.Thread(target=_monitor_local_llm, args=(_LOCAL_LLM_PROC,), daemon=True).start()
         return True, ''
     except Exception as e:
@@ -2976,7 +3439,8 @@ def _stop_local_llm():
     global _LOCAL_LLM_PROC
     try:
         subprocess.run(['taskkill', '/F', '/IM', 'llama-server.exe'],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
     except Exception:
         pass
     with _LOCAL_LLM_LOCK:
@@ -3042,6 +3506,7 @@ def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_
     full_text = ''          # 仅正文（用于持久化）
     reasoning_text = ''     # 仅思考（用于持久化）
     tid = threading.current_thread().ident
+    _streaming_tokens = False  # 是否已收到流式增量 token
     # 用于解析 <think>...</think> 标签的状态机
     _think_buf = ''
     _in_think = False
@@ -3069,6 +3534,11 @@ def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_
 
                             # 1) 正文 token
                             content_tk = _extract_text(delta.get('content')) or _extract_text(msg.get('content'))
+                            if content_tk and delta.get('content'):
+                                _streaming_tokens = True
+                            elif content_tk and not delta.get('content') and _streaming_tokens:
+                                # 已收到增量 token，跳过后续携带完整正文的汇总事件（防重复）
+                                content_tk = ''
                             # 2) 思考 token（原生 reasoning_content）
                             reasoning_tk = _extract_text(delta.get('reasoning_content')) or _extract_text(msg.get('reasoning_content'))
                             # 3) 兼容旧格式 text
@@ -3171,6 +3641,10 @@ def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_
                                         except: pass
                     except json.JSONDecodeError: pass
                 elif line.startswith('{'):
+                    # 非流式 fallback：如果已经收到过流式增量 token，跳过
+                    # （llama.cpp 有时在流结束后额外发送一行完整 JSON，会导致内容重复）
+                    if _streaming_tokens:
+                        continue
                     try:
                         ch = json.loads(line)
                         for c in ch.get('choices', []):
@@ -3297,10 +3771,17 @@ def call_ai_full(settings, messages, max_tokens, temperature, timeout=120):
             if reasoning is None: reasoning = ''
             # 从 <think> 标签中提取 reasoning（MiniMax / DeepSeek 等）
             if not reasoning and '<think>' in content:
-                think_match = re.search(r'<think>(.*?)</think>', content, re.S)
+                think_match = re.search(r'<think>(.*?)<\/think>', content, re.S)
                 if think_match:
                     reasoning = think_match.group(1)
-                    content = re.sub(r'<think>.*?</think>', '', content, flags=re.S).strip()
+                    content = re.sub(r'<think>.*?<\/think>', '', content, flags=re.S).strip()
+            # 去重：如果正文以思考过程开头，截掉重复部分
+            if reasoning and content.strip().startswith(reasoning.strip()):
+                content = content[len(reasoning):].strip()
+            # 如果去重后正文为空，把思考过程当正文
+            if not content and reasoning:
+                content = reasoning
+                reasoning = ''
             log_action('AI_RESULT', f'len={len(content)} reasoning={len(reasoning)}')
             return content, reasoning, None
         finally:
@@ -3647,28 +4128,56 @@ def _ai_outline(settings, source, config=None):
         {'role': 'user', 'content': prompt}
     ], mx, tmp, timeout=180)
 
-def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings):
+def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings, text=None):
     """后台线程：单章通读，生成章节摘要并增量更新 source.md"""
     set_conn_meta('chapter-complete', '本章通读', book_id)
+    log_action('CHAPTER_COMPLETE_START', f'book={book_id}, chapter={chapter_id}')
     try:
         bg_task_update(task_id, progress=5)
         cp = os.path.join(get_book_dir(book_id), 'chapters', f"{chapter_id}.json")
         if not os.path.exists(cp):
+            log_action('CHAPTER_COMPLETE_ERROR', '章节不存在')
             bg_task_done(task_id, '章节不存在')
             return
         with open(cp, 'r', encoding='utf-8') as f:
             ch = json.load(f)
         title = ch.get('title', '未命名章节')
-        content = ch.get('content', '')
+        # 优先使用前端传入的最新文本，否则读磁盘
+        if text is not None:
+            content = text
+        else:
+            content = ch.get('content', '')
         if not content.strip():
+            log_action('CHAPTER_COMPLETE_ERROR', '章节内容为空')
             bg_task_done(task_id, '章节内容为空')
             return
         bg_task_update(task_id, progress=10)
+        log_action('CHAPTER_COMPLETE_INFO', f'title={title}, content_len={len(content)}, model={cfg_settings.get("model","")}, base={cfg_settings.get("base_url","")}')
         # 构建前情索引
         current_source = get_source(book_id) or ''
+        # 先把本章旧记录从 source 中剔除，避免 AI 被自己的旧摘要诱导
+        chapter_id_marker = f'<!-- id:{chapter_id} -->'
+        if chapter_id_marker in current_source:
+            idx = current_source.find(chapter_id_marker)
+            line_start = current_source.rfind('\n\n### ', 0, idx)
+            if line_start != -1:
+                next_idx = current_source.find('\n\n### ', idx)
+                if next_idx == -1:
+                    current_source = current_source[:line_start]
+                else:
+                    current_source = current_source[:line_start] + current_source[next_idx:]
+        chapter_header = f"\n\n### {title}\n"
+        if chapter_header in current_source:
+            idx = current_source.find(chapter_header)
+            next_idx = current_source.find('\n\n### ', idx + len(chapter_header))
+            if next_idx == -1:
+                current_source = current_source[:idx]
+            else:
+                current_source = current_source[:idx] + current_source[next_idx:]
         prev_context = _extract_context_summary(current_source)
         # 调用 AI 生成单章摘要
         result, err = _ai_read_chapter(cfg_settings, title, content, prev_context, config=None, on_token=None, should_stop_fn=lambda: bg_task_should_stop(task_id))
+        log_action('CHAPTER_COMPLETE_AI_RESULT', f'err={err}, result_len={len(result) if result else 0}')
         if err:
             bg_task_done(task_id, err)
             return
@@ -3686,7 +4195,18 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings):
         source = get_source(book_id) or ''
         if not source.strip():
             source = '# 全书阅读笔记\n\n'
-        # 如果已有该章节的记录，先移除旧记录（简单按标题匹配）
+        # 先尝试按章节 ID 注释移除旧记录（最可靠）
+        chapter_id_marker = f'<!-- id:{chapter_id} -->'
+        if chapter_id_marker in source:
+            idx = source.find(chapter_id_marker)
+            line_start = source.rfind('\n\n### ', 0, idx)
+            if line_start != -1:
+                next_idx = source.find('\n\n### ', idx)
+                if next_idx == -1:
+                    source = source[:line_start]
+                else:
+                    source = source[:line_start] + source[next_idx:]
+        # 再尝试按标题移除旧记录（兼容旧格式）
         chapter_header = f"\n\n### {title}\n"
         if chapter_header in source:
             idx = source.find(chapter_header)
@@ -3695,7 +4215,8 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings):
                 source = source[:idx]
             else:
                 source = source[:idx] + source[next_idx:]
-        source += f"\n\n### {title}\n{result}"
+        # 追加新记录，带上 ID 注释方便以后按 ID 匹配
+        source += f"\n\n### {title} <!-- id:{chapter_id} -->\n{result}"
         save_source(book_id, source)
         # 更新 outline 中的 chapter_summaries
         outline = get_outline(book_id)
@@ -3706,7 +4227,9 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings):
         save_json(os.path.join(get_book_dir(book_id), 'outline.json'), outline)
         bg_task_update(task_id, result=result, progress=100)
         bg_task_done(task_id)
+        log_action('CHAPTER_COMPLETE_DONE', f'book={book_id}, chapter={chapter_id}')
     except Exception as e:
+        log_action('CHAPTER_COMPLETE_EXCEPTION', str(e))
         bg_task_done(task_id, str(e))
 
 
@@ -3960,8 +4483,8 @@ def do_readthrough(bid, settings, config=None):
 
 
 def run():
-    server = ThreadingHTTPServer(('', 20000), Handler)
-    print('Server running on port 20000')
+    server = ThreadingHTTPServer(('', PORT), Handler)
+    print(f'Server running on port {PORT}')
     server.serve_forever()
 
 
