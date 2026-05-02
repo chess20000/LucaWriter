@@ -4,12 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>LucaWriter</title>
+<link rel="icon" href="icon.ico">
 <style>
 :root{
  --bg:#111;--surface:#1a1a1a;--surface2:#222;--surface3:#2a2a2a;--surface4:#333;
  --t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;
-  --accent:#c9a96e;--accent2:#bca55d;--accent-dim:rgba(201,169,110,.12);
-  --danger:#c45c5c;--warn:#c9a96e;
+  --accent:#bca55d;--accent2:#bca55d;--accent-dim:rgba(188,165,93,.12);
+  --danger:#c45c5c;--warn:#bca55d;
  --border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);
  --r1:4px;--r2:6px;--r3:8px;--r4:12px;
  --font-mono:"SF Mono","Fira Code",Menlo,monospace;
@@ -27,7 +28,7 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 .app{display:flex;flex-direction:column;height:100vh;height:100dvh}
 
 .topbar{height:44px;display:flex;align-items:center;padding:0 14px;background:var(--surface);border-bottom:1px solid var(--border2);flex-shrink:0;gap:6px;z-index:10}
-.topbar-logo{width:24px;height:24px;background:var(--accent);border-radius:var(--r1);display:flex;align-items:center;justify-content:center;color:var(--bg);font-size:12px;font-weight:800;flex-shrink:0;margin-right:6px}
+.topbar-logo{width:24px;height:24px;border-radius:var(--r1);flex-shrink:0;margin-right:6px}
 .topbar-breadcrumb{display:flex;align-items:center;gap:4px;font-size:13px;overflow:hidden;flex:1;min-width:0}
 .topbar-breadcrumb .bc-book{color:var(--t2);cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;flex-shrink:0}
 .topbar-breadcrumb .bc-book:hover{color:var(--accent);background:var(--accent-dim)}
@@ -102,7 +103,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .book-cover{width:100%;aspect-ratio:3/4;border-radius:var(--r2);background:linear-gradient(135deg,var(--surface3) 0%,var(--surface4) 100%);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
 .book-cover::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 60%,rgba(0,0,0,.4) 100%)}
 .book-cover-letter{font-size:48px;font-weight:800;color:var(--accent);opacity:.3;line-height:1}
-.book-card-title{font-size:14px;font-weight:600;color:var(--t1);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.book-card-title{font-size:14px;font-weight:600;color:var(--t1);line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .book-card-meta{font-size:11px;color:var(--t3);display:flex;align-items:center;gap:6px}
 .book-card-del{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.5);border:none;color:var(--t3);width:24px;height:24px;border-radius:var(--r1);font-size:10px;cursor:pointer;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
 .book-card:hover .book-card-del{display:flex}
@@ -388,7 +389,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 @media(max-width:900px){.left-sidebar{width:180px}.right-sidebar{width:230px}}
 @media(max-width:768px){.main-row{display:none}.bottom-panel{display:none}}
 
-.pw-mask{-webkit-text-security:disc;text-security:disc;font-family:var(--font-mono)}
+.pw-mask{-webkit-text-security:disc;font-family:var(--font-mono)}
 
 .provider-slider{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding:2px}
 .provider-block{flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r2);padding:8px 6px;text-align:center;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:4px}
@@ -413,7 +414,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 <body>
 <div class="app">
  <div class="topbar">
- <div class="topbar-logo">L</div>
+ <div class="topbar-logo"><img src="icon.png" alt="LucaWriter" style="width:100%;height:100%;border-radius:inherit"></div>
  <div class="topbar-breadcrumb" id="breadcrumb">
  <span class="bc-book" id="bcBook" onclick="backToBooks()" style="display:none">Books</span>
  <span class="bc-sep" id="bcSep" style="display:none">/</span>
@@ -672,6 +673,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 <div id="stAppearance" style="display:none">
   <div class="mg"><label>界面缩放</label><input id="sZoom" type="number" min="0.5" max="2.0" step="0.1" value="1.0"></div>
   <div class="mg"><label>LUCA对话快捷键</label><select id="sShortcut"><option value="none">无</option><option value="capslock">CapsLock</option><option value="minus">- 键</option><option value="backslash">\ 键</option><option value="alt">Alt</option></select></div>
+  <div class="mg"><label>访问范围</label><select id="sAccessScope"><option value="127.0.0.1" selected>仅本机 (127.0.0.1)</option><option value="0.0.0.0">全部 (0.0.0.0)</option></select></div>
   <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">可使用 Ctrl + +/- 或 Ctrl + 0 快速调整缩放。</p>
 </div>
 <div class="ma">
@@ -683,8 +685,8 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 <div class="modal-bg" id="importModal">
 <div class="modal">
 <h2>导入书本</h2>
-<p style="font-size:12px;color:var(--t2);margin-bottom:10px">支持 TXT / MD / DOCX / PDF / EPUB</p>
- <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub"></div>
+<p style="font-size:12px;color:var(--t2);margin-bottom:10px">支持 TXT / MD / DOCX / PDF / EPUB / LucaWrite</p>
+ <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.lucawrite"></div>
  <div class="imp-progress-wrap" id="impProgressWrap" style="display:none">
  <div class="imp-progress-bar"><div class="imp-progress-fill" id="impProgressFill"></div></div>
     <div class="imp-progress-text" id="impProgressText">准备中...</div>
@@ -746,6 +748,38 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 </div>
 </div></div>
 
+<div class="modal-bg" id="lucawriteExportModal">
+<div class="modal">
+<h2>导出 LucaWrite</h2>
+<p style="font-size:12px;color:var(--t2);margin-bottom:12px">LucaWrite 格式包含完整书本数据（章节、大纲、AI 对话、标注、笔记等），可无损还原。</p>
+<div class="mg">
+<label>加密密码 <span style="font-weight:normal;color:var(--t3)">(留空则不加密)</span></label>
+  <input id="lwExportPassword" type="password" placeholder="可选，设置密码以加密文件">
+</div>
+<div class="mg">
+<label>确认密码</label>
+  <input id="lwExportPasswordConfirm" type="password" placeholder="再次输入密码">
+</div>
+<div class="ma">
+  <button class="prompt-ok" onclick="doExportLucawrite()">导出</button>
+  <button class="prompt-cancel" onclick="closeModal('lucawriteExportModal')">取消</button>
+</div>
+</div></div>
+
+<div class="modal-bg" id="lucawriteImportPasswordModal">
+<div class="modal">
+<h2>输入密码</h2>
+<p style="font-size:12px;color:var(--t2);margin-bottom:12px">该 .lucawrite 文件已加密，请输入密码以解密导入。</p>
+<div class="mg">
+<label>密码</label>
+  <input id="lwImportPassword" type="password" placeholder="输入加密密码">
+</div>
+<div class="ma">
+  <button class="prompt-ok" onclick="doImportLucawriteWithPassword()">解密并导入</button>
+  <button class="prompt-cancel" onclick="closeModal('lucawriteImportPasswordModal');openImportNew()">取消</button>
+</div>
+</div></div>
+
 <div class="dl-float-panel" id="downloadModal">
 <div class="dl-fp-head">
 <div class="dl-fp-spinner"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linecap="round"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 2a10 10 0 0 1 10 10" stroke-opacity=".3"/></svg></div>
@@ -804,13 +838,13 @@ var _connPollTimer=null;
 var _prevConnIds=new Set();
 var _connTypeMap={
   chat:{label:'聊',color:'#5a9fd4',name:'AI对话'},
-  readthrough:{label:'读',color:'#c9a96e',name:'通读全书'},
+  readthrough:{label:'读',color:'#bca55d',name:'通读全书'},
   timeline:{label:'时',color:'#8b7fd9',name:'生成时间线'},
   outline:{label:'纲',color:'#5fb878',name:'生成大纲'},
   prediction:{label:'预',color:'#d46b6b',name:'生成预言'},
   auto_comment:{label:'自',color:'#9e9e9e',name:'自动建议'},
   memory:{label:'忆',color:'#9e9e9e',name:'记忆更新'},
-  'chapter-complete':{label:'章',color:'#c9a96e',name:'本章通读'},
+  'chapter-complete':{label:'章',color:'#bca55d',name:'本章通读'},
   unknown:{label:'?',color:'var(--t3)',name:'未知'}
 };
 
@@ -1004,7 +1038,7 @@ function _renderBookShelfCards(books){
  books.forEach(function(b){
  var card=document.createElement('div');card.className='book-card';
  var firstLetter=(b.title||'B').charAt(0).toUpperCase();
- card.innerHTML='<div class="book-cover"><span class="book-cover-letter">'+esc(firstLetter)+'</span></div><div class="book-card-title">'+esc(b.title||'未命名')+'</div><div class="book-card-meta"><span>'+(b.chapter_count||0)+' 章</span><span>&#8226;</span><span>'+_formatDate(b.updated)+'</span></div><button class="book-card-menu" onclick="event.stopPropagation();toggleBookMenu(\''+esc(b.id)+'\',this)">&#8943;</button><div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'"><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button class="danger-item" onclick="event.stopPropagation();delBook(\''+esc(b.id)+'\')">删除书本</button></div>';
+ card.innerHTML='<div class="book-cover"><span class="book-cover-letter">'+esc(firstLetter)+'</span></div><div class="book-card-title">'+esc(b.title||'未命名')+'</div><div class="book-card-meta"><span>'+(b.chapter_count||0)+' 章</span><span>&#8226;</span><span>'+_formatDate(b.updated)+'</span></div><button class="book-card-menu" onclick="event.stopPropagation();toggleBookMenu(\''+esc(b.id)+'\',this)">&#8943;</button><div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'"><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button onclick="event.stopPropagation();openLucawriteExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 LucaWrite</button><button class="danger-item" onclick="event.stopPropagation();delBook(\''+esc(b.id)+'\')">删除书本</button></div>';
  card.onclick=function(){currentBookTitle=b.title;openBook(b.id)};
  grid.appendChild(card);
  });
@@ -1367,7 +1401,7 @@ function renderAIMessages(){
  if(m.type==='ai' && m.needs_readthrough){
  var card=document.createElement('div');
  card.className='ai-readthrough-card';
- card.innerHTML='<div>AI 建议通读全书</div><div class="rt-warning">预计消耗 token</div><button class="rt-btn" onclick="startRTFromChat()">开始通读</button>';
+ card.innerHTML='<div>AI 建议通读全书</div><div class="rt-warning">可能会消耗很多token哦</div><button class="rt-btn" onclick="startRTFromChat()">开始通读</button>';
  c.appendChild(card);
  }
  if(m.type==='ai' && (m._streaming||m._pending)){
@@ -1586,7 +1620,6 @@ function openSettings(){
  if(currentPresetIdx<0||currentPresetIdx>=providerPresets.length)currentPresetIdx=0;
  renderProviderSlider();
  loadPresetToForm(currentPresetIdx);
- updateLocalLLMUI();
  refreshLocalLLMProgress();
  $('sTemp').value=settings.ai_temperature||0.7;
   var ctxEl=$('sCtxLen');if(ctxEl)ctxEl.value=settings.model_context_length||0;
@@ -1596,6 +1629,7 @@ function openSettings(){
   var scEl=$('sShortcut');if(scEl)scEl.value=settings.shortcut_focus_ai||'none';
   var spEl=$('sSearchProvider');if(spEl)spEl.value=settings.search_provider||'duckduckgo';
   var skEl=$('sSearchKey');if(skEl)skEl.value=settings.search_api_key||'';
+  var aspEl=$('sAccessScope');if(aspEl)aspEl.value=settings.access_scope||'127.0.0.1';
   // 获取检测到的本地模型名并更新显示
   api('GET','/api/local-llm/detected-model',undefined,function(d,s){
     var el=$('localDetectedModel');
@@ -1645,16 +1679,6 @@ function isLocalPreset(){
  return p && p.name && p.name.indexOf(' Llama.cpp')>=0;
 }
 
-function updateLocalLLMUI(){
- var remote=$('remoteApiForm');
- if(!remote)return;
- if(isLocalPreset()){
- remote.style.display='none';
- }else{
- remote.style.display='block';
- }
-}
-
 function _showLocalProgress(show, pct, text){
  var wrap=$('localProgressWrap');
  var bar=$('localProgressBar');
@@ -1663,17 +1687,6 @@ function _showLocalProgress(show, pct, text){
  wrap.style.display=show?'block':'none';
  bar.style.width=(pct||0)+'%';
  txt.textContent=text||'';
-}
-
-function switchProviderPreset(idx){
- if(idx===currentPresetIdx)return;
- saveFormToPreset(currentPresetIdx);
- currentPresetIdx=idx;
- renderProviderSlider();
- loadPresetToForm(currentPresetIdx);
- updateLocalLLMUI();
- // “”
- refreshLocalLLMProgress();
 }
 
 var _localLLMPollTimer=null;
@@ -1880,7 +1893,6 @@ function toggleLocalLLM(){
  currentPresetIdx=localIdx;
  renderProviderSlider();
  loadPresetToForm(currentPresetIdx);
- updateLocalLLMUI();
  }
  }
  api('POST','/api/local-llm/start',{},function(d,s){
@@ -1906,11 +1918,12 @@ function toggleLocalLLM(){
 
 function switchProviderPreset(idx){
  if(idx===currentPresetIdx)return;
- // 
+ //
  saveFormToPreset(currentPresetIdx);
  currentPresetIdx=idx;
  renderProviderSlider();
  loadPresetToForm(currentPresetIdx);
+ refreshLocalLLMProgress();
 }
 
  function loadPresetToForm(idx){
@@ -1978,6 +1991,8 @@ function switchSTab(btn,id){btn.parentElement.querySelectorAll('.tab-b').forEach
 
 function saveSettings(){
  saveFormToPreset(currentPresetIdx);
+ var oldScope=settings.access_scope||'127.0.0.1';
+ var newScope=$('sAccessScope')?$('sAccessScope').value:'127.0.0.1';
  var d={
  provider_presets:providerPresets,
  active_provider_idx:currentPresetIdx,
@@ -1988,7 +2003,8 @@ function saveSettings(){
     ui_scale:parseFloat($('sZoom').value)||1.0,
     shortcut_focus_ai:$('sShortcut')?$('sShortcut').value:'none',
     search_provider:$('sSearchProvider')?$('sSearchProvider').value:'duckduckgo',
-    search_api_key:$('sSearchKey')?$('sSearchKey').value:''
+    search_api_key:$('sSearchKey')?$('sSearchKey').value:'',
+    access_scope:newScope
    };
   // 同时保存当前激活 preset 的字段到顶层，确保向后兼容
  var active=providerPresets[currentPresetIdx];
@@ -2023,6 +2039,17 @@ function saveSettings(){
  settings=r;providerPresets=r.provider_presets||providerPresets;currentPresetIdx=r.active_provider_idx||0;applySettings();
  refreshLocalLLMProgress();
  toast('设置已保存','success');
+ if(oldScope!==newScope){
+  closeModal('settingsModal');
+  setTimeout(function(){
+   if(confirm('访问范围已更改，需要重启服务端才能生效。\n\n是否立即重启？')){
+    api('POST','/api/restart-server',{},function(){
+     toast('正在重启服务端...','info');
+     setTimeout(function(){location.reload();},2000);
+    });
+   }
+  },500);
+ }
  }
  })
 }
@@ -2046,7 +2073,12 @@ var _epubExportBid=null;
 function openEpubExport(bid,title){_epubExportBid=bid;$('epubTitle').value=title||'';$('epubAuthor').value='';$('epubDesc').value='';$('epubCoverImg').style.display='none';$('epubCoverImg').src='';$('epubCoverPlaceholder').style.display='';openModal('epubExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
 function onEpubCoverChange(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){$('epubCoverImg').src=ev.target.result;$('epubCoverImg').style.display='block';$('epubCoverPlaceholder').style.display='none'};r.readAsDataURL(f)}
 function doExportEpub(){var bid=_epubExportBid;if(!bid)return;var title=$('epubTitle').value.trim()||'';var author=$('epubAuthor').value.trim();var desc=$('epubDesc').value.trim();var cover=$('epubCoverImg').src||'';if(cover&&cover.indexOf('data:image')!==0)cover='';var payload={title:title,author:author,description:desc,cover_base64:cover};closeModal('epubExportModal');_runExport(bid,'epub','epub','EPUB',true,payload)}
-function openImportNew(){openModal('importModal')}
+var _lwExportBid=null;
+function openLucawriteExport(bid,title){_lwExportBid=bid;$('lwExportPassword').value='';$('lwExportPasswordConfirm').value='';openModal('lucawriteExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
+function doExportLucawrite(){var bid=_lwExportBid;if(!bid)return;var pw=$('lwExportPassword').value;var pw2=$('lwExportPasswordConfirm').value;if(pw&&pw!==pw2){toast('两次密码输入不一致','warn');return}closeModal('lucawriteExportModal');openExportModal('导出 LucaWrite');addExportLog('开始导出 LucaWrite 格式...');var x=new XMLHttpRequest();var url='/api/book/'+bid+'/export-lucawrite';x.open('POST',url,true);x.responseType='blob';x.setRequestHeader('Content-Type','application/json');x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn){var m2=disp.match(/filename="([^"]+)"/i);if(m2)fn=m2[1]}if(!fn)fn='book.lucawrite';setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');addExportLog(pw?'文件已加密':'文件未加密');_downloadBlob(blob,fn);addExportLog('下载已触发');toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'导出失败','error')}catch(e){addExportLog('HTTP '+x.status)}};r.readAsText(x.response);showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');toast('导出失败','error');showExportSaveBtn()};addExportLog('正在发送请求...');x.send(JSON.stringify({password:pw}))}
+var _lwImportB64=null;
+function doImportLucawriteWithPassword(){var pw=$('lwImportPassword').value;if(!pw){toast('请输入密码','warn');return}closeModal('lucawriteImportPasswordModal');setImportProgress(50,'解密导入中...');api('POST','/api/books/import-lucawrite',{data:_lwImportB64,password:pw},function(d,s){_lwImportB64=null;if(s===200&&d.need_password){openModal('lucawriteImportPasswordModal');return}if(s===200&&d.book_id){setImportProgress(100,'导入完成');$('impSt').textContent='已导入 '+(d.imported||0)+' 章';cachedBooks=null;currentBookTitle=d.title;openBook(d.book_id);setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200)}else{setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'}})}
+function openImportNew(){_lwImportB64=null;$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';openModal('importModal')}
 function openCreateBookModal(){openModal('createBookModal')}
 function doCreateBookFromModal(){closeModal('createBookModal');createBook()}
 function openImport(){openImportNew()}
@@ -2069,6 +2101,28 @@ function doImport(file){
  reader.onload=function(){
  setImportProgress(30,'编码中...');
  var b64=reader.result.split(',')[1];
+ var isLW=file.name.toLowerCase().endsWith('.lucawrite');
+ if(isLW){
+  setImportProgress(35,'检测 LucaWrite 格式...');
+  _lwImportB64=b64;
+  api('POST','/api/books/import-lucawrite',{data:b64,password:''},function(d,s){
+  if(s===200&&d.need_password){
+   $('lwImportPassword').value='';
+   openModal('lucawriteImportPasswordModal');
+   return;
+  }
+  if(s===200&&d.book_id){
+   _lwImportB64=null;
+   setImportProgress(100,'导入完成');
+   $('impSt').textContent='已导入 '+(d.imported||0)+' 章';
+   cachedBooks=null;currentBookTitle=d.title;openBook(d.book_id);
+   setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
+  }else{
+   _lwImportB64=null;
+   setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'}
+  });
+  return;
+ }
  var sentKB=Math.round(b64.length/1024);
  setImportProgress(35,'上传 '+sentKB+'KB 到服务器，大文件请耐心等待...');
  var elapsed=function(){return Math.round((Date.now()-startTime)/1000)};
@@ -2454,7 +2508,7 @@ function syncHighlights(){
 
 function startRTFromChat(){
  if(!bookId)return;
- showConfirm('',' AI token',function(){
+ showConfirm('','确认开始通读吗？',function(){
  switchBottomTab('readthrough');
  startRT();
  });

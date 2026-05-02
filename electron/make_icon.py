@@ -9,7 +9,7 @@ for size in sizes:
     draw = ImageDraw.Draw(img)
 
     r = max(2, size // 8)
-    draw.rounded_rectangle([0, 0, size-1, size-1], radius=r, fill='#c9a96e')
+    draw.rounded_rectangle([0, 0, size-1, size-1], radius=r, fill='#bca55d')
 
     font_size = int(size * 0.6)
     try:

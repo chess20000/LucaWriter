@@ -6,6 +6,7 @@ const http = require('http');
 
 let pyProc = null;
 let mainWindow = null;
+let isKilling = false;
 const PORT = 20000;
 
 function getUserDataPath() {
@@ -74,18 +75,60 @@ function startBackend() {
   return true;
 }
 
-function killBackend() {
-  if (pyProc) {
-    try {
-      if (process.platform === 'win32') {
-        spawn('taskkill', ['/PID', String(pyProc.pid), '/T', '/F']);
-      } else {
-        pyProc.kill('SIGTERM');
-      }
-    } catch (e) {
-      console.error('Error killing backend:', e);
+async function killBackend() {
+  if (isKilling) {
+    console.log('Backend is already being killed, skipping duplicate call');
+    return;
+  }
+
+  if (!pyProc) {
+    console.log('No backend process to kill');
+    return;
+  }
+
+  isKilling = true;
+  const pid = pyProc.pid;
+  let killPromise;
+
+  try {
+    if (process.platform === 'win32') {
+      killPromise = new Promise((resolve, reject) => {
+        const taskkill = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          stdio: 'ignore'
+        });
+
+        taskkill.on('close', (code) => {
+          if (code === 0 || code === 128) {
+            console.log(`Backend process ${pid} terminated successfully`);
+            resolve();
+          } else {
+            console.warn(`Taskkill exited with code ${code}, process may still be running`);
+            resolve();
+          }
+        });
+
+        taskkill.on('error', (err) => {
+          console.error('Taskkill error:', err);
+          resolve();
+        });
+      });
+    } else {
+      pyProc.kill('SIGTERM');
+      killPromise = Promise.resolve();
     }
+
+    await Promise.race([
+      killPromise,
+      new Promise(resolve => setTimeout(resolve, 3000))
+    ]);
+
+  } catch (e) {
+    console.error('Error killing backend:', e);
+  } finally {
     pyProc = null;
+    setTimeout(() => {
+      isKilling = false;
+    }, 1000);
   }
 }
 
@@ -214,11 +257,20 @@ if (!gotTheLock) {
   });
 
   app.on('window-all-closed', function() {
-    killBackend();
-    app.quit();
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
   });
 
-  app.on('before-quit', function() {
-    killBackend();
+  app.on('before-quit', async function(event) {
+    event.preventDefault();
+
+    try {
+      await killBackend();
+    } catch (err) {
+      console.error('Error during backend cleanup:', err);
+    } finally {
+      app.exit(0);
+    }
   });
 }

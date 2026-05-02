@@ -4,8 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>LucaWriter</title>
+<link rel="icon" href="icon.ico">
 <style>
-:root{--bg:#111;--surface:#1a1a1a;--surface2:#222;--t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;--accent:#c9a96e;--on-accent:#111;--danger:#c45c5c;--border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);--r1:4px;--r4:0px}
+:root{--bg:#111;--surface:#1a1a1a;--surface2:#222;--t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;--accent:#bca55d;--on-accent:#111;--danger:#c45c5c;--border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);--r1:4px;--r4:0px}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
 .login-titlebar{display:none;height:44px;background:var(--surface);border-bottom:1px solid var(--border2);flex-shrink:0;-webkit-app-region:drag;align-items:center;padding:0 14px;justify-content:flex-end}
@@ -19,7 +20,8 @@ body.electron .login-titlebar{display:flex}
 .wrap{width:100%;max-width:380px;padding:20px}
 .card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);padding:40px 32px}
 .brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:32px}
-.brand-icon{width:40px;height:40px;background:var(--accent);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--on-accent);font-size:18px;font-weight:800}
+.brand-icon{width:40px;height:40px;flex-shrink:0}
+.brand-icon img{width:100%;height:100%;border-radius:6px}
 .brand h1{font-size:22px;font-weight:700;letter-spacing:-.5px}
 .fg{margin-bottom:16px}
 .fg label{display:block;font-size:9px;font-weight:700;color:var(--t2);margin-bottom:4px;letter-spacing:.5px;text-transform:uppercase}
@@ -32,6 +34,9 @@ body.electron .login-titlebar{display:flex}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 .err{color:var(--danger);font-size:12px;margin-top:10px;text-align:center;display:none}
 .setup-mode .brand h1::after{content:' — Setup';font-size:12px;font-weight:400;color:var(--t2);margin-left:6px}
+.remember-toggle{display:block;text-align:center;margin:8px auto;padding:6px 12px;width:fit-content;border:1.5px solid var(--t3);border-radius:var(--r1);cursor:pointer;user-select:none;font-size:13px;color:var(--t3);background:transparent;transition:background .15s,border-color .15s,color .15s;outline:none}
+.remember-toggle:focus-visible{box-shadow:0 0 0 2px var(--accent)}
+.remember-toggle.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 </style>
 </head>
 <body>
@@ -45,11 +50,12 @@ body.electron .login-titlebar{display:flex}
 <div class="login-body">
 <div class="wrap">
 <div class="card" id="mainCard">
-  <div class="brand"><div class="brand-icon">L</div><h1>LucaWriter</h1></div>
+  <div class="brand"><div class="brand-icon"><img src="icon.png" alt="LucaWriter"></div><h1>LucaWriter</h1></div>
   <form id="authForm">
     <div class="fg"><label>Username</label><input type="text" id="username" required placeholder="Username" autocomplete="username"></div>
     <div class="fg"><label>Password</label><input type="password" id="password" required placeholder="Password (min 4)" autocomplete="current-password"><div class="hint" id="pwHint"></div></div>
     <div class="fg" id="pw2Group" style="display:none"><label>Confirm</label><input type="password" id="password2" placeholder="Re-enter password" autocomplete="new-password"></div>
+    <div class="remember-toggle" id="rememberToggle" tabindex="0" role="checkbox" aria-checked="false" onclick="toggleRemember()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleRemember()}">记住登录</div>
     <button type="submit" class="btn" id="submitBtn">Login</button>
     <p class="err" id="errMsg"></p>
   </form>
@@ -59,6 +65,8 @@ body.electron .login-titlebar{display:flex}
 <script>
 if(window.electronAPI)document.body.classList.add('electron');
 var isSetup=false;
+var rememberActive=false;
+function toggleRemember(){rememberActive=!rememberActive;var el=$('rememberToggle');el.classList.toggle('active',rememberActive);el.setAttribute('aria-checked',rememberActive)}
 function api(m,p,d,cb){var x=new XMLHttpRequest();x.onload=function(){try{cb(JSON.parse(this.responseText),this.status)}catch(e){cb({error:'err'},this.status)}};x.onerror=function(){cb({error:'err'},0)};x.open(m,p);x.setRequestHeader('Cache-Control','no-cache');x.setRequestHeader('Pragma','no-cache');if(d!==undefined){x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(d))}else x.send()}
 
 api('GET','/api/auth/status',undefined,function(d){if(!d.has_users){isSetup=true;$('mainCard').classList.add('setup-mode');$('submitBtn').textContent='Create Account';$('username').placeholder='Set username';$('password').placeholder='Set password (min 4)';$('pwHint').textContent='Create your admin account';$('pw2Group').style.display='block';return}if(d.logged_in){location.href='/';return}});
@@ -68,8 +76,8 @@ function $(id){return document.getElementById(id)}
 $('authForm').addEventListener('submit',function(e){
   e.preventDefault();var u=$('username').value.trim(),p=$('password').value,p2=$('password2').value;
   if(!u||!p){showErr('Fill in username and password');return}
-  if(isSetup){if(p.length<4){showErr('Min 4 characters');return}if(p!==p2){showErr('Passwords do not match');return}$('submitBtn').disabled=true;api('POST','/api/auth/setup',{username:u,password:p},function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Failed')})}
-  else{$('submitBtn').disabled=true;api('POST','/api/auth/login',{username:u,password:p},function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Login failed')})}
+  if(isSetup){if(p.length<4){showErr('Min 4 characters');return}if(p!==p2){showErr('Passwords do not match');return}$('submitBtn').disabled=true;api('POST','/api/auth/setup',{username:u,password:p,remember:rememberActive},function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Failed')})}
+  else{$('submitBtn').disabled=true;api('POST','/api/auth/login',{username:u,password:p,remember:rememberActive},function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Login failed')})}
 });
 
 function showErr(t){var e=$('errMsg');e.textContent=t;e.style.display='block'}

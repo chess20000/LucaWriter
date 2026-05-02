@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import hashlib
@@ -38,6 +39,20 @@ try:
     HAS_EPUB = True
 except ImportError:
     HAS_EPUB = False
+
+try:
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives import padding as _sym_padding
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.primitives import hashes as _crypto_hashes
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
+
+LW_MAGIC = b'LW1'
+LW_SALT_LEN = 16
+LW_IV_LEN = 16
+LW_PBKDF2_ITERS = 100000
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -90,6 +105,7 @@ DEFAULT_SETTINGS = {
     'shortcut_focus_ai': 'none',
     'search_api_key': '',
     'search_provider': 'duckduckgo',
+    'access_scope': '127.0.0.1',
 }
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
@@ -100,6 +116,178 @@ DEFAULT_OUTLINE = {
         'key_events': [], 'rules': [], 'updated': 0,
     },
 }
+
+
+def _lw_derive_key(password, salt):
+    if HAS_CRYPTO:
+        kdf = PBKDF2HMAC(
+            algorithm=_crypto_hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=LW_PBKDF2_ITERS,
+        )
+        return kdf.derive(password.encode('utf-8'))
+    else:
+        return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, LW_PBKDF2_ITERS, dklen=32)
+
+
+def _lw_encrypt(data, password):
+    salt = os.urandom(LW_SALT_LEN)
+    key = _lw_derive_key(password, salt)
+    if HAS_CRYPTO:
+        iv = os.urandom(LW_IV_LEN)
+        padder = _sym_padding.PKCS7(128).padder()
+        padded = padder.update(data) + padder.finalize()
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        encryptor = cipher.encryptor()
+        ct = encryptor.update(padded) + encryptor.finalize()
+        hmac_val = hashlib.sha256(key + iv + ct).digest()[:16]
+        return LW_MAGIC + salt + iv + hmac_val + ct
+    else:
+        iv = os.urandom(LW_IV_LEN)
+        keystream_seed = hashlib.sha256(key + iv).digest()
+        ct = bytearray()
+        for i in range(len(data)):
+            ki = i % 32
+            if ki == 0:
+                keystream_seed = hashlib.sha256(key + keystream_seed).digest()
+            ct.append(data[i] ^ keystream_seed[ki])
+        hmac_val = hashlib.sha256(key + iv + bytes(ct)).digest()[:16]
+        return LW_MAGIC + salt + iv + hmac_val + bytes(ct)
+
+
+def _lw_decrypt(raw, password):
+    if len(raw) < 3 + LW_SALT_LEN + LW_IV_LEN + 16:
+        raise ValueError('文件格式无效')
+    if raw[:3] != LW_MAGIC:
+        raise ValueError('不是加密的 .lucawrite 文件')
+    off = 3
+    salt = raw[off:off + LW_SALT_LEN]; off += LW_SALT_LEN
+    iv = raw[off:off + LW_IV_LEN]; off += LW_IV_LEN
+    hmac_val = raw[off:off + 16]; off += 16
+    ct = raw[off:]
+    key = _lw_derive_key(password, salt)
+    expected_hmac = hashlib.sha256(key + iv + ct).digest()[:16]
+    if hmac_val != expected_hmac:
+        raise ValueError('密码错误或文件已损坏')
+    if HAS_CRYPTO:
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        decryptor = cipher.decryptor()
+        padded = decryptor.update(ct) + decryptor.finalize()
+        unpadder = _sym_padding.PKCS7(128).unpadder()
+        return unpadder.update(padded) + unpadder.finalize()
+    else:
+        keystream_seed = hashlib.sha256(key + iv).digest()
+        pt = bytearray()
+        for i in range(len(ct)):
+            ki = i % 32
+            if ki == 0:
+                keystream_seed = hashlib.sha256(key + keystream_seed).digest()
+            pt.append(ct[i] ^ keystream_seed[ki])
+        return bytes(pt)
+
+
+def _lw_is_encrypted(raw):
+    return len(raw) >= 3 and raw[:3] == LW_MAGIC
+
+
+def _build_lucawrite_zip(bid):
+    bd = get_book_dir(bid)
+    if not os.path.isdir(bd):
+        raise FileNotFoundError(f'书本目录不存在: {bid}')
+    meta = get_book_meta(bid) or {}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        manifest = {
+            'format_version': 1,
+            'format_name': 'lucawrite',
+            'app_name': 'LucaWriter',
+            'exported_at': time.time(),
+            'book': {
+                'id': meta.get('id', bid),
+                'title': meta.get('title', ''),
+                'author': '',
+                'description': '',
+                'created': meta.get('created', 0),
+                'updated': meta.get('updated', 0),
+            },
+            'encrypted': False,
+        }
+        if os.path.exists(os.path.join(bd, 'cover')):
+            manifest['book']['cover_file'] = 'cover'
+        zf.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
+        for root, dirs, files in os.walk(bd):
+            for fn in files:
+                if fn.startswith('.') or fn.endswith('.tmp'):
+                    continue
+                fp = os.path.join(root, fn)
+                arcname = os.path.relpath(fp, bd).replace('\\', '/')
+                try:
+                    with open(fp, 'rb') as f:
+                        zf.writestr(arcname, f.read())
+                except Exception:
+                    continue
+    return buf.getvalue()
+
+
+def _import_lucawrite_zip(raw, password=None):
+    if _lw_is_encrypted(raw):
+        if not password:
+            raise ValueError('该文件已加密，请输入密码')
+        raw = _lw_decrypt(raw, password)
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw), 'r')
+    except zipfile.BadZipFile:
+        raise ValueError('无效的 .lucawrite 文件（无法解压）')
+    try:
+        manifest_str = zf.read('manifest.json').decode('utf-8')
+        manifest = json.loads(manifest_str)
+    except Exception:
+        raise ValueError('无效的 .lucawrite 文件（缺少 manifest.json）')
+    if manifest.get('format_name') != 'lucawrite':
+        raise ValueError('不是有效的 .lucawrite 文件')
+    bid = 'book_' + str(int(time.time() * 1000))
+    bd = get_book_dir(bid)
+    os.makedirs(bd, exist_ok=True)
+    for info in zf.infolist():
+        if info.filename == 'manifest.json':
+            continue
+        if info.is_dir():
+            os.makedirs(os.path.join(bd, info.filename), exist_ok=True)
+            continue
+        safe_name = info.filename.replace('\\', '/')
+        if safe_name.startswith('/') or '..' in safe_name.split('/'):
+            continue
+        fp = os.path.join(bd, safe_name)
+        if not os.path.realpath(fp).startswith(os.path.realpath(bd)):
+            continue
+        os.makedirs(os.path.dirname(fp), exist_ok=True)
+        try:
+            with open(fp, 'wb') as f:
+                f.write(zf.read(info.filename))
+        except Exception:
+            continue
+    meta = get_book_meta(bid) or {}
+    book_info = manifest.get('book', {})
+    if book_info.get('author'):
+        meta['author'] = book_info['author']
+    if book_info.get('description'):
+        meta['description'] = book_info['description']
+    meta['id'] = bid
+    if not meta.get('title'):
+        meta['title'] = book_info.get('title', '导入的书本')
+    save_json(os.path.join(bd, 'meta.json'), meta)
+    cover_file = book_info.get('cover_file', '')
+    if cover_file and os.path.exists(os.path.join(bd, cover_file)):
+        try:
+            with open(os.path.join(bd, cover_file), 'rb') as f:
+                cover_data = f.read()
+            with open(os.path.join(bd, 'cover'), 'wb') as f:
+                f.write(cover_data)
+        except Exception:
+            pass
+    zf.close()
+    return bid, meta, manifest
 
 
 def ensure_dirs():
@@ -181,6 +369,40 @@ def get_salt():
 
 
 _salt = get_salt()
+
+_ENCRYPT_KEY_FILE = os.path.join(DATA_DIR, '.enckey')
+
+
+def _get_encrypt_key():
+    if os.path.exists(_ENCRYPT_KEY_FILE):
+        with open(_ENCRYPT_KEY_FILE, 'rb') as f:
+            return f.read()
+    key = os.urandom(32)
+    with open(_ENCRYPT_KEY_FILE, 'wb') as f:
+        f.write(key)
+    return key
+
+
+_encrypt_key = _get_encrypt_key()
+
+
+def _encrypt_str(plaintext):
+    if not plaintext:
+        return ''
+    data = plaintext.encode('utf-8')
+    result = bytes([data[i] ^ _encrypt_key[i % len(_encrypt_key)] for i in range(len(data))])
+    return 'ENC:' + base64.b64encode(result).decode()
+
+
+def _decrypt_str(ciphertext):
+    if not ciphertext or not ciphertext.startswith('ENC:'):
+        return ciphertext
+    try:
+        data = base64.b64decode(ciphertext[4:])
+        result = bytes([data[i] ^ _encrypt_key[i % len(_encrypt_key)] for i in range(len(data))])
+        return result.decode('utf-8')
+    except Exception:
+        return ciphertext
 
 
 def hash_password(pw):
@@ -309,6 +531,17 @@ def get_settings():
         idx = 0
         s['active_provider_idx'] = idx
         changed = True
+    if changed: save_json(SETTINGS_FILE, s)
+    # 解密所有预设的 api_key
+    for p in presets:
+        if p.get('api_key'):
+            p['api_key'] = _decrypt_str(p['api_key'])
+    # 解密顶层 api_key
+    if s.get('api_key'):
+        s['api_key'] = _decrypt_str(s['api_key'])
+    # 解密 search_api_key
+    if s.get('search_api_key'):
+        s['search_api_key'] = _decrypt_str(s['search_api_key'])
     # 将当前激活 preset 的字段提升到顶层，保持向后兼容
     active = presets[idx]
     if active.get('use_custom_json') and active.get('custom_json'):
@@ -330,7 +563,6 @@ def get_settings():
         s['base_url'] = active.get('base_url', '')
         s['api_key'] = active.get('api_key', '')
         s['model'] = active.get('model', '')
-    if changed: save_json(SETTINGS_FILE, s)
     return s
 
 
@@ -445,11 +677,14 @@ def get_cookie_token(headers):
     return cookie['session'].value if 'session' in cookie else None
 
 
-def make_session(username):
+def make_session(username, remember=False):
     token = secrets.token_hex(32)
     sessions = load_json(SESSIONS_FILE, list)
     sessions = [s for s in sessions if s.get('expires', 0) > time.time()]
-    sessions.append({'token': token, 'user': username, 'expires': time.time() + 86400 * 30})
+    if remember:
+        sessions.append({'token': token, 'user': username, 'expires': time.time() + 86400 * 90})
+    else:
+        sessions.append({'token': token, 'user': username, 'expires': time.time() + 86400})
     save_json(SESSIONS_FILE, sessions)
     return token
 
@@ -1004,6 +1239,19 @@ class Handler(BaseHTTPRequestHandler):
         if not has_users(): return True
         return validate_session(get_cookie_token(self.headers))
 
+    def _check_access(self):
+        scope = '127.0.0.1'
+        try:
+            s = load_json(SETTINGS_FILE)
+            scope = s.get('access_scope', '127.0.0.1')
+        except Exception:
+            pass
+        if scope == '127.0.0.1':
+            if self.client_address[0] != '127.0.0.1':
+                self.json_resp(403, {'error': '仅限本机访问'})
+                return False
+        return True
+
     def serve_file(self, name):
         for p in [os.path.join(FRONTEND_DIR, name), f'/app/{name}', f'./{name}']:
             try:
@@ -1015,6 +1263,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200); self.send_cors(); self.end_headers()
 
     def do_GET(self):
+        if not self._check_access(): return
         path = urlparse(self.path).path
 
         if path in ('/', '/index.html'):
@@ -1315,9 +1564,26 @@ class Handler(BaseHTTPRequestHandler):
                 tasks.sort(key=lambda x: x.get('updated', 0), reverse=True)
                 self.json_resp(200, {'tasks': tasks}); return
 
+        # 静态文件（图片、SVG 等）
+        if path.endswith(('.png', '.svg', '.ico', '.jpg', '.jpeg', '.gif', '.webp')):
+            fp = os.path.join(FRONTEND_DIR, os.path.basename(path))
+            if os.path.isfile(fp):
+                ext_map = {'.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp'}
+                ct = ext_map.get(os.path.splitext(fp)[1].lower(), 'application/octet-stream')
+                with open(fp, 'rb') as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', ct)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'public, max-age=3600')
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
         self.json_resp(404, {'error': 'Not found'})
 
     def do_POST(self):
+        if not self._check_access(): return
         path = urlparse(self.path).path
         data = self.read_json()
         if data is None: self.json_resp(413, {'error': 'Too large'}); return
@@ -1329,21 +1595,25 @@ class Handler(BaseHTTPRequestHandler):
             if has_users(): self.json_resp(403, {'error': '已有用户'}); return
             u = data.get('username', '').strip()
             p = data.get('password', '')
+            remember = data.get('remember', False)
             if not u or len(p) < 4: self.json_resp(400, {'error': '用户名不能为空，密码至少4位'}); return
             save_json(USERS_FILE, {u: {'password': hash_password(p), 'created': time.time()}})
-            token = make_session(u)
+            token = make_session(u, remember=remember)
             log_action('SETUP', u)
-            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax'}); return
+            max_age = 7776000 if remember else 86400
+            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'}); return
 
         if path == '/api/auth/login':
             u = data.get('username', '').strip()
             p = data.get('password', '')
+            remember = data.get('remember', False)
             users = load_json(USERS_FILE)
             if u not in users or users[u]['password'] != hash_password(p):
                 self.json_resp(401, {'error': '用户名或密码错误'}); return
-            token = make_session(u)
+            token = make_session(u, remember=remember)
             log_action('LOGIN', u)
-            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax'}); return
+            max_age = 7776000 if remember else 86400
+            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'}); return
 
         if path == '/api/auth/logout':
             t = get_cookie_token(self.headers)
@@ -1408,6 +1678,41 @@ class Handler(BaseHTTPRequestHandler):
             save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
             log_action('IMPORT', f'{bid}: {len(chapters)} chapters from {filename}')
             self.json_resp(200, {'book': meta, 'imported': len(chapters)}); return
+
+        if path == '/api/books/import-lucawrite':
+            file_b64 = data.get('data', '')
+            password = data.get('password', '')
+            if not file_b64:
+                self.json_resp(400, {'error': '缺少文件'}); return
+            try:
+                raw = base64.b64decode(file_b64)
+            except Exception:
+                self.json_resp(400, {'error': '文件数据无效'}); return
+            if _lw_is_encrypted(raw) and not password:
+                self.json_resp(200, {'need_password': True}); return
+            try:
+                bid, meta, manifest = _import_lucawrite_zip(raw, password if password else None)
+            except ValueError as e:
+                self.json_resp(400, {'error': str(e)}); return
+            except Exception as e:
+                self.json_resp(500, {'error': f'导入失败: {str(e)[:100]}'}); return
+            log_action('IMPORT_LUCAWRITE', bid)
+            ch_dir = os.path.join(get_book_dir(bid), 'chapters')
+            ch_count = 0
+            if os.path.isdir(ch_dir):
+                ch_count = len([f for f in os.listdir(ch_dir) if f.endswith('.json')])
+            self.json_resp(200, {'book_id': bid, 'title': meta.get('title', ''), 'imported': ch_count, 'need_password': False}); return
+
+        if path == '/api/books/check-lucawrite':
+            file_b64 = data.get('data', '')
+            if not file_b64:
+                self.json_resp(400, {'error': '缺少文件'}); return
+            try:
+                raw = base64.b64decode(file_b64)
+            except Exception:
+                self.json_resp(400, {'error': '文件数据无效'}); return
+            encrypted = _lw_is_encrypted(raw)
+            self.json_resp(200, {'encrypted': encrypted}); return
 
         if path == '/api/books/rename':
             bid = data.get('book_id', '')
@@ -1505,6 +1810,35 @@ class Handler(BaseHTTPRequestHandler):
                             save_json(os.path.join(bd, 'meta.json'), meta)
                     except: pass
                 self.json_resp(200, {'status': 'ok'}); return
+
+            if action == 'export-lucawrite':
+                log_action('EXPORT_LUCAWRITE_REQUEST', f'book={bid}')
+                password = data.get('password', '')
+                try:
+                    zip_bytes = _build_lucawrite_zip(bid)
+                except Exception as e:
+                    self.json_resp(500, {'error': f'打包失败: {str(e)[:100]}'}); return
+                if password:
+                    if not HAS_CRYPTO:
+                        self.json_resp(400, {'error': '加密需要 cryptography 库，请执行 pip install cryptography 后重启'}); return
+                    try:
+                        output = _lw_encrypt(zip_bytes, password)
+                    except Exception as e:
+                        self.json_resp(500, {'error': f'加密失败: {str(e)[:100]}'}); return
+                else:
+                    output = zip_bytes
+                meta = get_book_meta(bid) or {}
+                safe_title = re.sub(r'[^\w\u4e00-\u9fff.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
+                utf8_fn = quote(safe_title + '.lucawrite', safe='')
+                log_action('EXPORT_LUCAWRITE', f'book={bid} encrypted={bool(password)} size={len(output)}')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/x-lucawrite')
+                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
+                self.send_header('Content-Length', str(len(output)))
+                self.send_header('Connection', 'close')
+                self.send_cors(); self.end_headers()
+                self.wfile.write(output)
+                return
 
             if action == 'export-epub':
                 log_action('EXPORT_EPUB_REQUEST', f'book={bid}')
@@ -1629,12 +1963,15 @@ class Handler(BaseHTTPRequestHandler):
                             source_ctx = '（目前还没有完整的阅读笔记。等作者完成通读后，你就能对全书细节了如指掌了。）'
                         sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
 
+【重要】你已经在系统里看到了用户当前正在写的章节正文（见下方「现有正文」），不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
+
 【输出风格】
 1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
 2. 每次回复控制在200字以内。把话说清楚，但不要铺陈背景、不要解释动机、不要加开场白和结束语。
 3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
 4. 如果没啥大问题，简单带过即可，不要强行找话凑字数。
 5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
+6. 禁止让用户"发稿子""把文章发过来""把你的文字贴过来"之类的话——你已经看到了。
 
 这本小说大概是这样的：
 
@@ -1702,11 +2039,18 @@ class Handler(BaseHTTPRequestHandler):
 - 调用格式：[COMPLETE_CHAPTER]{{"chapter_id":"当前章ID"}}[/COMPLETE_CHAPTER]
 - 注意：只有作者明确表示本章已完成时才调用，不要频繁调用。
 
+你还有一个"建议通读"工具。当你发现无法准确回答用户问题（例如用户问及前文伏笔、复杂人物关系、全书设定一致性等），而你又缺少全书阅读笔记时，可以主动向用户建议运行通读。调用后系统会在聊天区为用户展示一张快捷卡片，用户可一键启动通读。
+- 调用格式：[SUGGEST_READTHROUGH][/SUGGEST_READTHROUGH]
+- 适用场景：用户问的问题明显超出当前掌握范围、你不得不回复"我不确定/不了解/还没看过"等内容时。
+- 注意：不要滥用，仅在确实需要通读笔记才能回答时调用。每次对话最多调用一次。
+
 """
 
                         is_first_round = not history_list
                         if is_first_round:
                             sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
+
+【重要】你已经在系统里看到了用户当前正在写的章节正文（见下方「现有正文」），不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
 
 【输出风格】
 1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
@@ -1714,6 +2058,7 @@ class Handler(BaseHTTPRequestHandler):
 3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
 4. 如果用户的问题简单，回答也要简单，禁止强行找话凑字数。
 5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
+6. 禁止让用户"发稿子""把文章发过来""把你的文字贴过来"之类的话——你已经看到了。
 
 这本小说大概是这样的：
 
@@ -1731,12 +2076,15 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
 
+【重要】你已经在系统里看到了用户当前正在写的章节正文，不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
+
 【输出风格】
 1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
 2. 每次回复控制在300字以内。把话说清楚，但不要铺陈背景、不要解释动机、不要加开场白和结束语。
 3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
 4. 如果用户的问题简单，回答也要简单，禁止强行找话凑字数。
 5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
+6. 禁止让用户"发稿子""把文章发过来""把你的文字贴过来"之类的话——你已经看到了。
 
 这本小说大概是这样的：
 
@@ -1792,7 +2140,11 @@ class Handler(BaseHTTPRequestHandler):
                         result = re.sub(r'[#*`~]', '', full_text)
 
                         needs_rt = False
-                        if not source_text or len(source_text) <= 100:
+                        # 优先检测 AI 主动调用的 [SUGGEST_READTHROUGH] 工具
+                        if re.search(r'\[SUGGEST_READTHROUGH\]', result):
+                            needs_rt = True
+                        # 兜底：AI 未使用工具但回复中提及需要通读（且 source.md 缺失或极短）
+                        if not needs_rt and (not source_text or len(source_text) <= 100):
                             indicators = ['还没读过', '还没看过', '尚未通读', '没有读过', '不了解全书', '不清楚全书', '需要通读', '我还没看过这本书', '尚未阅读', '没有阅读']
                             if any(ind in result for ind in indicators):
                                 needs_rt = True
@@ -1870,6 +2222,7 @@ class Handler(BaseHTTPRequestHandler):
                         result = re.sub(r'\[ANNOTATE_ADD\].*?\[/ANNOTATE_ADD\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[ANNOTATE_REMOVE\].*?\[/ANNOTATE_REMOVE\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[COMPLETE_CHAPTER\].*?\[/COMPLETE_CHAPTER\]', '', result, flags=re.S).strip()
+                        result = re.sub(r'\[SUGGEST_READTHROUGH\].*?\[/SUGGEST_READTHROUGH\]', '', result, flags=re.S).strip()
                         # 清理已废弃的工具标记（后端不再执行这些工具，但 AI 可能仍输出）
                         result = re.sub(r'\[FETCH_URL\].*?\[/FETCH_URL\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[SEARCH\].*?\[/SEARCH\]', '', result, flags=re.S).strip()
@@ -2589,7 +2942,18 @@ class Handler(BaseHTTPRequestHandler):
                     settings['base_url'] = active.get('base_url', '')
                     settings['api_key'] = active.get('api_key', '')
                     settings['model'] = active.get('model', '')
-            save_json(SETTINGS_FILE, settings)
+            # 加密所有 API Key 后再存储
+            save_settings = dict(settings)
+            save_presets = list(save_settings.get('provider_presets', []))
+            for p in save_presets:
+                if p.get('api_key'):
+                    p['api_key'] = _encrypt_str(p['api_key'])
+            save_settings['provider_presets'] = save_presets
+            if save_settings.get('api_key'):
+                save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
+            if save_settings.get('search_api_key'):
+                save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
+            save_json(SETTINGS_FILE, save_settings)
             log_action('SETTINGS_SAVE_OK', f"saved model_context_length={settings.get('model_context_length')}")
             # 如果当前激活预设不是本地 Llama.cpp，自动关闭本地服务器
             active_preset = (settings.get('provider_presets') or [{}])[settings.get('active_provider_idx', 0)]
@@ -2654,7 +3018,17 @@ class Handler(BaseHTTPRequestHandler):
                     ml = [m['id'] for m in result.get('data', [])]
                     settings = get_settings()
                     settings['models'] = ml[:50]
-                    save_json(SETTINGS_FILE, settings)
+                    save_settings = dict(settings)
+                    save_presets = list(save_settings.get('provider_presets', []))
+                    for p in save_presets:
+                        if p.get('api_key'):
+                            p['api_key'] = _encrypt_str(p['api_key'])
+                    save_settings['provider_presets'] = save_presets
+                    if save_settings.get('api_key'):
+                        save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
+                    if save_settings.get('search_api_key'):
+                        save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
+                    save_json(SETTINGS_FILE, save_settings)
                     self.json_resp(200, {'models': ml[:50]})
             except Exception as e:
                 err = str(e)[:200]
@@ -2911,9 +3285,16 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=do_generate_task, args=(tid, bid, gen_type, settings), daemon=True).start()
             self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
-        self.json_resp(404, {'error': 'Not found'})
+        if path == '/api/restart-server':
+            self.json_resp(200, {'status': 'restarting'})
+            def _restart():
+                time.sleep(0.5)
+                subprocess.Popen([sys.executable] + sys.argv, creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+                os._exit(0)
+            threading.Thread(target=_restart, daemon=True).start()
+            return
 
-# ===== 通用后台任务系统（保留内部状态以支持轮询，但不再用于前端显示）=====
+        self.json_resp(404, {'error': 'Not found'})
 _bg_lock = threading.Lock()
 _bg_tasks = {}
 _bg_task_counter = 0
@@ -3836,16 +4217,45 @@ def _extract_context_summary(source_text):
             summary.append('  ' + e)
     return '\n'.join(summary)
 
+def _is_content_empty(content):
+    """检测章节正文是否为无法构成故事的占位/元数据文本。
+    返回 True 表示该章节没有实质性叙事内容，应跳过。"""
+    if not content or not content.strip():
+        return True
+    stripped = content.strip()
+    # 去除所有 markdown 标题行和常见的元数据标记行
+    non_heading = re.sub(r'^#+\s*.+$', '', stripped, flags=re.MULTILINE).strip()
+    non_heading = re.sub(r'^(章节名|正文|标题|内容|简介)[-：:]\s*.*$', '', non_heading, flags=re.MULTILINE).strip()
+    if not non_heading:
+        return True
+    # 正文不足 10 个有意义字符，无法构成叙事（拦截"待补充""暂无"等占位文本）
+    if len(non_heading) < 10:
+        return True
+    return False
+
+
 def _ai_read_chapter(settings, title, content, prev_context, config=None, on_token=None, should_stop_fn=None):
     cfg = config or {}
     mx = cfg.get('max_tokens', None)
     tmp = cfg.get('temperature', 0.5)
+    # 预检测：无实质正文的章节直接跳过，不浪费 API 调用
+    if _is_content_empty(content):
+        skip_result = f'## 剧情摘要\n[本章无实质正文，跳过]\n\n## 资料记录\n[无]\n'
+        return skip_result, None
     ctx = f'【前情索引（只供参考，不要输出）】\n{prev_context}\n\n' if prev_context else ''
     prompt = f"""{ctx}=== 本章：{title} ===
 
 {content}
 
 【任务】以资料整理员身份，用中文客观记录本章内容。
+
+【重要：跳过规则】在开始梳理之前，请先判断本章的正文是否有实质性叙事内容：
+- 如果正文只有章节标题、占位符、软件说明、元数据标记等非叙事文本（如正文仅为"#第一章"而无后续段落），则本章无内容，请直接输出以下跳过格式（不要做任何分析）：
+  ## 剧情摘要
+  [本章无实质正文，跳过]
+  ## 资料记录
+  [无]
+- 只有确认正文中存在至少一段连续的叙事内容时，才继续下面的六步梳理并输出正式摘要。
 
 【强制思考步骤】在输出任何内容之前，你必须先在脑中完成以下梳理（不要输出这些思考过程）：
 1. 角色梳理：本章有哪些角色出场？每个人分别做了什么、说了什么、处于什么状态？
@@ -3866,6 +4276,7 @@ def _ai_read_chapter(settings, title, content, prev_context, config=None, on_tok
 - 禁止把原文内容直接搬过来充当摘要
 - 禁止流水账式罗列每一个细节
 - 禁止因为本章"看起来平淡"就跳过或极度简化——即使本章只是铺垫，也必须记录人物动向和情节推进
+- 严禁凭空编造任何内容。只记录原文中实际存在的情节、人物和设定，不得添加原文中不存在的任何元素
 
 【强制格式】你只能且必须输出以下两个部分，顺序固定：
 
@@ -3884,9 +4295,9 @@ def _ai_read_chapter(settings, title, content, prev_context, config=None, on_tok
 - 新设定：世界规则、势力、物品等首次出现的设定
 - 具体数值：等级、数量、时间等精确数字
 
-【再次强调】每一章都必须有完整输出，不允许跳过任何一章。除上述两个 ## 标题及其内容外，不要输出任何其他文字。"""
+【再次强调】除上述两个 ## 标题及其内容外，不要输出任何其他文字。"""
     return call_ai_stream(settings, [
-        {'role': 'system', 'content': '你是格式严格的资料整理员。你的输出必须且只能包含两个部分：## 剧情摘要（用你自己的语言完整复述本章所有情节，禁止遗漏任何有用细节，禁止复制原文）和 ## 资料记录（markdown列表形式的人物、事件、设定、数值）。在处理每一章时，你必须先在脑中完成六步梳理（角色、事件、对话、场景、设定、关联），确认无遗漏后再输出。禁止开场白、结束语、评价、推测。禁止输出规定格式以外的任何内容。绝不允许跳过任何一章。'},
+        {'role': 'system', 'content': '你是格式严格的资料整理员。你的输出必须且只能包含两个部分：## 剧情摘要（用你自己的语言完整复述本章所有情节，禁止遗漏任何有用细节，禁止复制原文）和 ## 资料记录（markdown列表形式的人物、事件、设定、数值）。在处理每一章时，你必须先在脑中完成六步梳理（角色、事件、对话、场景、设定、关联），确认无遗漏后再输出。如果章节正文只有标题/占位符而无叙事内容，直接输出跳过标记：[本章无实质正文，跳过]。禁止开场白、结束语、评价、推测。禁止输出规定格式以外的任何内容。严禁凭空编造原文中不存在的情节、人物、设定或数值。'},
         {'role': 'user', 'content': prompt}
     ], mx, tmp, timeout=300, on_token=on_token, should_stop_fn=should_stop_fn)
 
@@ -3914,6 +4325,14 @@ def _ai_read_chapters_batch(settings, chapters, prev_context, config=None, on_to
 
 【任务】以资料整理员身份，用中文客观记录每一章内容。
 
+【重要：跳过规则】在开始梳理之前，请先逐一判断每一章的正文是否有实质性叙事内容：
+- 如果某章正文只有章节标题、占位符、软件说明、元数据标记等非叙事文本（如正文仅为"#第一章"而无后续段落），则该章无内容，请直接输出以下跳过格式（不要做任何分析）：
+  ## {{章节标题}} 剧情摘要
+  [本章无实质正文，跳过]
+  ## {{章节标题}} 资料记录
+  [无]
+- 只有确认正文中存在至少一段连续的叙事内容时，才为该章执行六步梳理并输出正式摘要。
+
 【强制思考步骤】在输出任何内容之前，你必须先在脑中为每一章分别完成以下梳理（不要输出这些思考过程）：
 1. 角色梳理：本章有哪些角色出场？每个人分别做了什么、说了什么、处于什么状态？
 2. 事件梳理：本章发生了哪些关键事件？起因、经过、结果分别是什么？有没有冲突、转折或意外？
@@ -3929,8 +4348,8 @@ def _ai_read_chapters_batch(settings, chapters, prev_context, config=None, on_to
 - 禁止评价、推测、感想、总结性评论
 - 禁止复制原文的任何句子、段落或片段，必须100%用自己的语言重新叙述
 - 禁止把不同章节的内容混为一谈，每一章的输出必须完全独立
-- 禁止跳过任何一章
 - 禁止把剧情摘要写成 bullet list，必须是连贯叙述段落
+- 严禁凭空编造任何内容。只记录原文中实际存在的情节、人物和设定，不得添加原文中不存在的任何元素
 
 【强制格式】对每一章，你只能且必须输出以下两个部分，顺序固定。章节与章节之间用一行空行分隔：
 
@@ -3949,10 +4368,10 @@ def _ai_read_chapters_batch(settings, chapters, prev_context, config=None, on_to
 - 新设定：世界规则、势力、物品等首次出现的设定
 - 具体数值：等级、数量、时间等精确数字
 
-【再次强调】必须严格按照上述格式输出，每一章都必须有完整输出，不允许跳过任何一章。除规定的标题及其内容外，不要输出任何其他文字。"""
+【再次强调】必须严格按照上述格式输出，每一章都必须有对应的输出（有内容的输出摘要，无内容的输出跳过标记）。除规定的标题及其内容外，不要输出任何其他文字。"""
 
     return call_ai_stream(settings, [
-        {'role': 'system', 'content': '你是格式严格的资料整理员。你的输出必须且只能包含每一章的两个部分：## {章节标题} 剧情摘要（用自己的语言完整复述，禁止遗漏细节，禁止复制原文）和 ## {章节标题} 资料记录（markdown列表形式的人物、事件、设定、数值）。你必须为每一章分别独立输出，章节之间用空行分隔。在处理每一章时，你必须先在脑中完成六步梳理（角色、事件、对话、场景、设定、关联），确认无遗漏后再输出。禁止开场白、结束语、评价、推测。禁止输出规定格式以外的任何内容。绝不允许跳过任何一章。'},
+        {'role': 'system', 'content': '你是格式严格的资料整理员。你的输出必须且只能包含每一章的两个部分：## {章节标题} 剧情摘要（用自己的语言完整复述，禁止遗漏细节，禁止复制原文）和 ## {章节标题} 资料记录（markdown列表形式的人物、事件、设定、数值）。你必须为每一章分别独立输出，章节之间用空行分隔。在处理每一章时，你必须先在脑中完成六步梳理（角色、事件、对话、场景、设定、关联），确认无遗漏后再输出。如果某章正文只有标题/占位符而无叙事内容，直接输出跳过标记：[本章无实质正文，跳过]。禁止开场白、结束语、评价、推测。禁止输出规定格式以外的任何内容。严禁凭空编造原文中不存在的情节、人物、设定或数值。'},
         {'role': 'user', 'content': prompt}
     ], mx, tmp, timeout=300, on_token=on_token, should_stop_fn=should_stop_fn)
 
@@ -4147,9 +4566,9 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings, text=None):
             content = text
         else:
             content = ch.get('content', '')
-        if not content.strip():
-            log_action('CHAPTER_COMPLETE_ERROR', '章节内容为空')
-            bg_task_done(task_id, '章节内容为空')
+        if _is_content_empty(content):
+            log_action('CHAPTER_COMPLETE_SKIP', '章节无实质正文，跳过')
+            bg_task_done(task_id, '章节无实质正文，跳过')
             return
         bg_task_update(task_id, progress=10)
         log_action('CHAPTER_COMPLETE_INFO', f'title={title}, content_len={len(content)}, model={cfg_settings.get("model","")}, base={cfg_settings.get("base_url","")}')
@@ -4296,6 +4715,22 @@ def do_readthrough(bid, settings, config=None):
                 _rebuild_log(bid, '用户停止，已保存进度')
                 _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
                 return
+
+            # 预检测：无实质正文的章节直接跳过，不调用 AI
+            ch = pending[i]
+            if _is_content_empty(ch['content']):
+                _rebuild_log(bid, f'跳过空章节: {ch["title"]}')
+                skip_result = f'## 剧情摘要\n[本章无实质正文，跳过]\n\n## 资料记录\n[无]\n'
+                notes.append(skip_result)
+                current_source += f'\n\n### {ch["title"]}\n{skip_result}'
+                done.add(ch['id'])
+                done_count += 1
+                save_source(bid, current_source)
+                pct = 5 + int(done_count / total * 70)
+                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source)
+                save_json(cp_file, {'notes': notes, 'done': list(done)})
+                i += 1
+                continue
 
             if use_batch:
                 # 构建本批次：尽可能多地压入完整章节，不超过 70% 预算
@@ -4483,8 +4918,16 @@ def do_readthrough(bid, settings, config=None):
 
 
 def run():
-    server = ThreadingHTTPServer(('', PORT), Handler)
-    print(f'Server running on port {PORT}')
+    bind_host = '127.0.0.1'
+    try:
+        s = load_json(SETTINGS_FILE)
+        scope = s.get('access_scope', '127.0.0.1')
+        if scope in ('127.0.0.1', '0.0.0.0'):
+            bind_host = scope
+    except Exception:
+        pass
+    server = ThreadingHTTPServer((bind_host, PORT), Handler)
+    print(f'Server running on http://{bind_host}:{PORT}')
     server.serve_forever()
 
 

@@ -4,11 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>LucaWriter - AI 辅助长篇小说写作</title>
+<link rel="icon" href="icon.ico">
 <style>
 :root{
   --bg:#0c0c0c;--surface:#141414;--surface2:#1a1a1a;--surface3:#222;--surface4:#2a2a2a;
   --t1:#f0ece6;--t2:#9a9590;--t3:#5a5550;
-  --accent:#c9a96e;--accent2:#bca55d;--accent-dim:rgba(201,169,110,.12);--accent-glow:rgba(201,169,110,.25);
+  --accent:#bca55d;--accent2:#bca55d;--accent-dim:rgba(188,165,93,.12);--accent-glow:rgba(188,165,93,.25);
   --border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);
   --r1:6px;--r2:10px;--r3:14px;--r4:20px;
   --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;
@@ -22,7 +23,8 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 .nav{position:fixed;top:0;left:0;right:0;z-index:100;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 40px;background:rgba(12,12,12,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);transition:all .3s}
 .nav.scrolled{background:rgba(12,12,12,.95);box-shadow:0 4px 30px rgba(0,0,0,.4)}
 .nav-brand{display:flex;align-items:center;gap:10px;text-decoration:none}
-.nav-brand .logo{width:32px;height:32px;background:var(--accent);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--bg);font-size:14px;font-weight:800}
+.nav-brand .logo{width:32px;height:32px;border-radius:8px;flex-shrink:0}
+.nav-brand .logo img{width:100%;height:100%;border-radius:inherit}
 .nav-brand span{font-size:16px;font-weight:700;color:var(--t1);letter-spacing:-.3px}
 .nav-links{display:flex;align-items:center;gap:28px}
 .nav-links a{color:var(--t2);text-decoration:none;font-size:14px;font-weight:500;transition:color .2s}
@@ -146,7 +148,7 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 
 <nav class="nav" id="navbar">
   <a href="#" class="nav-brand">
-    <div class="logo">L</div>
+    <div class="logo"><img src="icon.png" alt="LucaWriter"></div>
     <span>LucaWriter</span>
   </a>
   <div class="nav-links">

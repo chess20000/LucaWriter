@@ -1,5 +1,6 @@
 usrdata/
 local_llm/
+landing/
 release/
 *.log
 *.pyc
