@@ -12,9 +12,9 @@ images = []
 for size in sizes:
     images.append(img.resize((size, size), Image.LANCZOS))
 
-# 输出 .ico（多尺寸）
+# 输出 .ico（用 256x256 作底图，其余追加）
 ico_path = os.path.join(base_dir, 'icon.ico')
-images[0].save(ico_path, format='ICO', sizes=[(s, s) for s in sizes], append_images=images[1:])
+images[-1].save(ico_path, format='ICO', sizes=[(s, s) for s in sizes], append_images=images[:-1])
 print(f'ICO saved: {ico_path} ({os.path.getsize(ico_path)} bytes)')
 
 # 输出 .png（256x256）
