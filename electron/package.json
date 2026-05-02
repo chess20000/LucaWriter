@@ -17,7 +17,7 @@
   "build": {
     "appId": "com.lucawriter.app",
     "productName": "LucaWriter",
-    "copyright": "Copyright © 2025 LucaWriter",
+    "copyright": "Copyright © 2026 LucaWriter",
     "directories": {
       "output": "../release/v0.8.0"
     },
