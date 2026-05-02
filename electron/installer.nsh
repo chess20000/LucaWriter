@@ -6,6 +6,9 @@
 !macroend
 
 !macro customUnInstall
+  ${If} ${Silent}
+    Goto keepData
+  ${EndIf}
   MessageBox MB_YESNO|MB_ICONQUESTION "Do you want to completely remove all user data? $\n$\nThis will delete:$\n- All books and chapters$\n- User accounts and settings$\n- Downloaded AI models$\n- Application cache and logs$\n$\nClick YES to remove everything.$\nClick NO to keep user data." IDYES removeAll IDNO keepData
 
   removeAll:
