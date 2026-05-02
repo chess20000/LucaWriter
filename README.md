@@ -2,6 +2,8 @@
 
 [Windows安装包下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.7.0/LucaWriter-Setup-0.7.0.exe)
 
+项目主页：[lucawriter.pages.dev](https://lucawriter.pages.dev/)
+
 LucaWriter是一个ai辅助的小说写作专用软件，为每个想要写小说的人设计。\
 LucaWriter的设计哲学是：艺术作品应该全部由人类完成。\
 ai可以读取，给出建议，但不应对作品本身有任何的写入操作。\
