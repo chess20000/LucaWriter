@@ -167,7 +167,7 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
     <h1>安心写作，AI 帮你记住一切</h1>
     <p>LucaWriter 是面向长篇小说作者的 AI 辅助写作工具。专注解决「吃书」问题——让你大胆发挥想象力，不必瞻前顾后。</p>
     <div class="hero-btns">
-      <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.7.0/LucaWriter-Setup-0.7.0.exe" class="btn-primary">
+      <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.8.0/LucaWriter-Setup-0.8.0.exe" class="btn-primary">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         下载 Windows 安装包
       </a>
@@ -240,12 +240,12 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
       <div class="feature-card">
         <div class="feature-icon">&#128214;</div>
         <h3>AI 通读全书</h3>
-        <p>逐章阅读并生成摘要，提取人物、事件与伏笔，自动合并为 <code>source.md</code> 全书笔记和 <code>outline.md</code> 故事大纲。写完一章可触发增量通读，或让 AI 自动识别。</p>
+        <p>逐章阅读并生成摘要，提取人物、事件与伏笔，自动合并为 <code>source.md</code> 全书笔记和 <code>outline.md</code> 故事大纲。写完一章可触发增量通读，或让 AI 自动识别。支持批量模式，多章合并一次调用，节省 API 次数。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#129504;</div>
         <h3>记忆与大纲</h3>
-        <p>AI 自动维护世界观、人物、时间线与关键事件，根据最新内容增量更新，防止长篇连载设定崩塌。</p>
+        <p>AI 自动维护世界观、人物、时间线与关键事件，根据最新内容增量更新，防止长篇连载设定崩塌。AI 发现无法准确回答时会主动建议运行通读。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#128065;</div>
@@ -255,17 +255,27 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
       <div class="feature-card">
         <div class="feature-icon">&#128278;</div>
         <h3>即时反馈与标注</h3>
-        <p>写作时 AI 实时分析并给出建议——不是替你写，而是帮你审视。支持在正文中添加多色荧光笔批注。</p>
+        <p>写作时 AI 实时分析并给出建议——不是替你写，而是帮你审视。支持在正文中添加多色荧光笔批注。支持推理模型的思维链展示，AI 的思考过程清晰可见。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#128218;</div>
         <h3>书籍管理</h3>
-        <p>书架视图管理多本书，支持改书名、导出、删除。每本书独立保存章节、大纲和对话记录。</p>
+        <p>书架视图管理多本书，支持改书名、导出、删除。每本书独立保存章节、大纲和对话记录。首次使用自动导入内置教程书本，快速上手。</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">&#128230;</div>
         <h3>多格式导入导出</h3>
-        <p>导入支持 EPUB / TXT / MD / DOCX / PDF，自动识别章节标题拆分。导出支持 Markdown / TXT / ZIP / EPUB 电子书。</p>
+        <p>导入支持 EPUB / TXT / MD / DOCX / PDF，自动识别章节标题拆分。导出支持 Markdown / TXT / ZIP / EPUB（可设置书名、作者、简介和封面）/ .lucawrite 加密完整备份。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128187;</div>
+        <h3>本地模型一键下载</h3>
+        <p>内置本地模型管理，支持一键下载 Gemma / Qwen 等模型，无需手动配置。搭配本地 Llama.cpp 预设，完全离线运行，数据不出电脑。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128272;</div>
+        <h3>加密备份与安全</h3>
+        <p>导出为 .lucawrite 格式时支持 AES-CBC 密码加密，完整保存章节、大纲、对话和标注。API Key 加密存储，访问范围可限制为本机或局域网。</p>
       </div>
     </div>
   </div>
@@ -332,9 +342,9 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
       <div class="deploy-card">
         <span class="tag">推荐</span>
         <h3>Windows 安装包</h3>
-        <p>一键安装，内置所有依赖。支持本地大模型完全离线运行。安装后桌面生成快捷方式。</p>
+        <p>一键安装，内置所有依赖。支持一键下载本地模型，完全离线运行。安装后桌面生成快捷方式。</p>
         <a href="#download" style="margin-top:auto">
-          <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.7.0/LucaWriter-Setup-0.7.0.exe" target="_blank" class="btn-primary" style="width:100%;justify-content:center;display:inline-flex;margin-top:10px">下载 v0.7.0</a>
+          <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.8.0/LucaWriter-Setup-0.8.0.exe" target="_blank" class="btn-primary" style="width:100%;justify-content:center;display:inline-flex;margin-top:10px">下载 v0.8.0</a>
         </a>
       </div>
       <div class="deploy-card">
@@ -369,9 +379,9 @@ docker run -p 20000:20000 \
     <div class="download-card">
       <h3>Windows 桌面版</h3>
       <p>安装完成后即可使用，无需额外配置。支持连接云端 API 或本地大模型。</p>
-      <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.7.0/LucaWriter-Setup-0.7.0.exe" target="_blank" class="download-btn">
+      <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.8.0/LucaWriter-Setup-0.8.0.exe" target="_blank" class="download-btn">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        下载 v0.7.0
+        下载 v0.8.0
       </a>
       <div class="download-meta">
         <span>

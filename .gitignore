@@ -22,3 +22,4 @@ electron/node_modules/
 .env
 
 _*.py
+demo/

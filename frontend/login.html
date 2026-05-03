@@ -43,7 +43,7 @@ body.electron .login-titlebar{display:flex}
 <div class="login-titlebar" id="loginTitlebar">
   <div class="win-controls">
     <button class="wc-min" onclick="electronAPI.minimize()" title="最小化"><svg viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5"/></svg></button>
-    <button class="wc-max" onclick="electronAPI.maximize()" title="最大化"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg></button>
+    <button class="wc-max" id="wcMax" onclick="electronAPI.maximize()" title="最大化"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg></button>
     <button class="wc-close" onclick="electronAPI.close()" title="关闭"><svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10"/><line x1="10" y1="0" x2="0" y2="10"/></svg></button>
   </div>
 </div>
@@ -64,6 +64,7 @@ body.electron .login-titlebar{display:flex}
 </div>
 <script>
 if(window.electronAPI)document.body.classList.add('electron');
+if(window.electronAPI&&window.electronAPI.onMaximizeChange){function _updateMaxBtn(m){var b=document.getElementById('wcMax');if(!b)return;if(m){b.title='还原';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="2.5" y="0.5" width="7" height="7"/><rect x="0.5" y="2.5" width="7" height="7"/></svg>'}else{b.title='最大化';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>'}}window.electronAPI.onMaximizeChange(function(m){_updateMaxBtn(m)});window.electronAPI.isMaximized().then(function(m){_updateMaxBtn(m)});var _tb=document.querySelector('.login-titlebar');if(_tb)_tb.addEventListener('dblclick',function(e){if(e.target.closest('.win-controls')||e.target.closest('button')||e.target.closest('input'))return;window.electronAPI.maximize()})}
 var isSetup=false;
 var rememberActive=false;
 function toggleRemember(){rememberActive=!rememberActive;var el=$('rememberToggle');el.classList.toggle('active',rememberActive);el.setAttribute('aria-checked',rememberActive)}

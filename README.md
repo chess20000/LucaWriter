@@ -1,6 +1,6 @@
 # LucaWriter
 
-[Windows安装包下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.7.0/LucaWriter-Setup-0.7.0.exe)
+[Windows安装包下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.8.0/LucaWriter-Setup-0.8.0.exe)
 
 项目主页：[lucawriter.fun](https://lucawriter.pages.dev/)
 

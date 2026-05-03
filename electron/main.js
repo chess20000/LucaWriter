@@ -171,6 +171,10 @@ ipcMain.on('window-close', function() {
   if (mainWindow) mainWindow.close();
 });
 
+ipcMain.handle('window-is-maximized', function() {
+  return mainWindow ? mainWindow.isMaximized() : false;
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -191,7 +195,15 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'loading.html'));
+  mainWindow.maximize();
   mainWindow.show();
+
+  mainWindow.on('maximize', function() {
+    mainWindow.webContents.send('maximize-change', true);
+  });
+  mainWindow.on('unmaximize', function() {
+    mainWindow.webContents.send('maximize-change', false);
+  });
 
   Menu.setApplicationMenu(null);
 
