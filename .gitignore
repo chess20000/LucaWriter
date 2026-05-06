@@ -20,6 +20,10 @@ electron/node_modules/
 .idea/
 .vscode/
 .env
+venv/
+env/
+.venv/
 
 _*.py
 demo/
+.gitignore

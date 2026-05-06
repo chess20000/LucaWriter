@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>LucaWriter - AI 辅助长篇小说写作</title>
+<title>LucaWriter - 长篇小说写作工具</title>
 <link rel="icon" href="icon.ico?v=4">
 <style>
 :root{
@@ -38,8 +38,6 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 .hero-bg::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 60% 40% at 80% 80%,var(--accent-dim),transparent 50%)}
 .hero-content{position:relative;z-index:1;max-width:680px;text-align:center}
 .hero-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;background:var(--accent-dim);border:1px solid var(--accent-glow);border-radius:100px;font-size:12px;color:var(--accent);font-weight:600;margin-bottom:24px;letter-spacing:.3px}
-.hero-badge .dot{width:6px;height:6px;background:var(--accent);border-radius:50%;animation:pulse 2s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .hero h1{font-family:var(--font-serif);font-size:52px;font-weight:700;line-height:1.15;letter-spacing:-1px;margin-bottom:20px;background:linear-gradient(180deg,var(--t1) 0%,var(--t2) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .hero p{font-size:18px;color:var(--t2);max-width:560px;margin:0 auto 36px;line-height:1.7}
 .hero-btns{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
@@ -152,7 +150,7 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
     <span>LucaWriter</span>
   </a>
   <div class="nav-links">
-    <a href="#reason">关于</a>
+    <a href="#about">关于</a>
     <a href="#features">功能</a>
     <a href="#deploy">部署</a>
     <a href="#download">下载</a>
@@ -163,9 +161,9 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 <section class="hero">
   <div class="hero-bg"></div>
   <div class="hero-content">
-    <div class="hero-badge"><span class="dot"></span> 开源 · 自托管 · 本地优先</div>
-    <h1>安心写作，AI 帮你记住一切</h1>
-    <p>LucaWriter 是面向长篇小说作者的 AI 辅助写作工具。专注解决「吃书」问题——让你大胆发挥想象力，不必瞻前顾后。</p>
+    <div class="hero-badge">开源 · 自托管 · 本地优先</div>
+    <h1>写长篇小说，不再怕忘事</h1>
+    <p>LucaWriter 是为长篇小说作者设计的写作工具。它帮你记住所有设定、人物和伏笔，让你专心讲故事，不用反复翻查前文。</p>
     <div class="hero-btns">
       <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe" class="btn-primary">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -193,12 +191,12 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
   </div>
 </section>
 
-<section class="section philosophy" id="reason">
+<section class="section philosophy" id="about">
   <div class="section-inner">
     <div class="philosophy-block">
       <div class="quote">艺术作品应该全部由人类完成。</div>
       <p>这是 LucaWriter 的核心理念。AI 可以阅读、分析、给出建议，但不应对作品本身有任何写入操作。</p>
-      <p>基于这个原则，LucaWriter 的所有 AI 功能都围绕「读」来展开——阅读你的故事，记住每一个设定、人物与伏笔，在你有需要时给出精准的反馈。</p>
+      <p>基于这个原则，LucaWriter 的所有 AI 功能都围绕「读」来展开——阅读你的故事，记住每一个设定、人物与伏笔，在你有需要时给出反馈。</p>
     </div>
   </div>
 </section>
@@ -233,47 +231,63 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
   <div class="section-inner">
     <div class="section-header">
       <div class="section-label">Features</div>
-      <h2 class="section-title">AI 功能全部围绕「读」</h2>
+      <h2 class="section-title">核心功能</h2>
       <p class="section-desc">LucaWriter 不会替你写，但它会让你写得更稳。</p>
     </div>
     <div class="features-grid">
       <div class="feature-card">
-        <div class="feature-icon">&#128214;</div>
-        <h3>AI 通读全书</h3>
-        <p>逐章阅读并生成摘要，提取人物、事件与伏笔，自动合并为 <code>source.md</code> 全书笔记和 <code>outline.md</code> 故事大纲。写完一章可触发增量通读，或让 AI 自动识别。支持批量模式，多章合并一次调用，节省 API 次数。</p>
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        </div>
+        <h3>通读全书</h3>
+        <p>逐章阅读并生成摘要，提取人物、事件与伏笔，自动合并为 source.md 全书笔记和 outline.md 故事大纲。写完一章可触发增量通读，或让 AI 自动识别。支持批量模式，多章合并一次调用，节省 API 次数。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#129504;</div>
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+        </div>
         <h3>记忆与大纲</h3>
         <p>AI 自动维护世界观、人物、时间线与关键事件，根据最新内容增量更新，防止长篇连载设定崩塌。AI 发现无法准确回答时会主动建议运行通读。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#128065;</div>
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+        </div>
         <h3>深度分析</h3>
         <p>基于全书笔记模拟资深读者长评并预测剧情走向；自动梳理故事内时间线，支持子时间线展开。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#128278;</div>
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+        </div>
         <h3>即时反馈与标注</h3>
         <p>写作时 AI 实时分析并给出建议——不是替你写，而是帮你审视。支持在正文中添加多色荧光笔批注。支持推理模型的思维链展示，AI 的思考过程清晰可见。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#128218;</div>
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        </div>
         <h3>书籍管理</h3>
         <p>书架视图管理多本书，支持改书名、导出、删除。每本书独立保存章节、大纲和对话记录。首次使用自动导入内置教程书本，快速上手。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#128230;</div>
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </div>
         <h3>多格式导入导出</h3>
         <p>导入支持 EPUB / TXT / MD / DOCX / PDF，自动识别章节标题拆分。导出支持 Markdown / TXT / ZIP / EPUB（可设置书名、作者、简介和封面）/ .lucawrite 加密完整备份。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#128187;</div>
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
         <h3>本地模型一键下载</h3>
         <p>内置本地模型管理，支持一键下载 Gemma / Qwen 等模型，无需手动配置。搭配本地 Llama.cpp 预设，完全离线运行，数据不出电脑。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#128272;</div>
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </div>
         <h3>加密备份与安全</h3>
         <p>导出为 .lucawrite 格式时支持 AES-CBC 密码加密，完整保存章节、大纲、对话和标注。API Key 加密存储，访问范围可限制为本机或局域网。</p>
       </div>
@@ -317,16 +331,15 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
     </div>
     <div class="model-grid">
       <div class="model-card">
-        <div class="tier recommended">&#9733; 推荐</div>
+        <div class="tier recommended">推荐</div>
         <h4>Qwen3.6 35B-A3B</h4>
         <div class="spec">MoE 架构 · 激活参数约 3.5B · 显存要求低 · 效果好</div>
       </div>
       <div class="model-card">
-        <div class="tier recommended">&#9733; 推荐</div>
+        <div class="tier recommended">推荐</div>
         <h4>Qwen3.6 27B</h4>
         <div class="spec">平衡之选 · 理解力强 · 能看懂伏笔和段子</div>
       </div>
-
     </div>
   </div>
 </section>
@@ -343,9 +356,7 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
         <span class="tag">推荐</span>
         <h3>Windows 安装包</h3>
         <p>一键安装，内置所有依赖。支持一键下载本地模型，完全离线运行。安装后桌面生成快捷方式。</p>
-        <a href="#download" style="margin-top:auto">
-          <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe" target="_blank" class="btn-primary" style="width:100%;justify-content:center;display:inline-flex;margin-top:10px">下载最新版</a>
-        </a>
+        <a href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe" target="_blank" class="btn-primary" style="width:100%;justify-content:center;display:inline-flex;margin-top:10px">下载最新版</a>
       </div>
       <div class="deploy-card">
         <span class="tag">源码</span>
@@ -406,7 +417,7 @@ docker run -p 20000:20000 \
     <a href="https://github.com/chess20000/lucawriter" target="_blank">GitHub</a>
     <a href="https://github.com/chess20000/lucawriter/releases" target="_blank">Releases</a>
   </div>
-  <div>&copy; 2026 LucaWriter. 自托管开源软件，Apache 2.0 协议。</div>
+  <div>2026 LucaWriter. 自托管开源软件，Apache 2.0 协议。</div>
 </footer>
 
 <script>

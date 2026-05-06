@@ -3,17 +3,25 @@ chcp 936 >nul 2>&1
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo   LucaWriter v0.8.0 Build Script
+echo   LucaWriter v1.0.0 Build Script
 echo ============================================
 echo.
 
 REM ---- Check Environment ----
-python --version >nul 2>&1
-if errorlevel 1 (
+set "PYTHON_EXE="
+if exist "%USERPROFILE%\.pyenv\pyenv-win\versions\3.12.9\python.exe" (
+    set "PYTHON_EXE=%USERPROFILE%\.pyenv\pyenv-win\versions\3.12.9\python.exe"
+)
+if "%PYTHON_EXE%"=="" (
+    python --version >nul 2>&1
+    if not errorlevel 1 set "PYTHON_EXE=python"
+)
+if "%PYTHON_EXE%"=="" (
     echo [ERROR] Python not found. Please install Python 3.8+
     pause
     exit /b 1
 )
+echo Python: %PYTHON_EXE%
 
 node --version >nul 2>&1
 if errorlevel 1 (
@@ -33,18 +41,19 @@ echo [1/8] Cleaning old build files...
 if exist "%DIST_BACKEND%" rmdir /s /q "%DIST_BACKEND%"
 if exist "%DIST_BUILTIN%" rmdir /s /q "%DIST_BUILTIN%"
 if exist "%BUILD_TEMP%" rmdir /s /q "%BUILD_TEMP%"
-if exist "%ROOT_DIR%release\v0.8.0" rmdir /s /q "%ROOT_DIR%release\v0.8.0"
+if exist "%ROOT_DIR%release\v1.0.0" rmdir /s /q "%ROOT_DIR%release\v1.0.0"
 echo Clean done.
 echo.
 
-echo [2/8] Installing Python dependencies...
-pip install -r "%ROOT_DIR%requirements.txt" --quiet
+echo [2/8] Cleaning pip cache and installing Python dependencies...
+%PYTHON_EXE% -m pip cache purge >nul 2>&1
+%PYTHON_EXE% -m pip install -r "%ROOT_DIR%requirements.txt" --quiet --no-cache-dir
 if errorlevel 1 (
     echo [ERROR] Failed to install Python dependencies
     pause
     exit /b 1
 )
-pip install pyinstaller Pillow --quiet
+%PYTHON_EXE% -m pip install pyinstaller Pillow --quiet --no-cache-dir
 if errorlevel 1 (
     echo [ERROR] Failed to install PyInstaller/Pillow
     pause
@@ -55,7 +64,7 @@ echo.
 
 echo [3/8] Generating app icon...
 cd /d "%ELECTRON_DIR%"
-python make_icon.py
+%PYTHON_EXE% make_icon.py
 if errorlevel 1 (
     echo [WARN] Icon generation failed, using default icon
 )
@@ -63,7 +72,7 @@ echo Icon done.
 echo.
 
 echo [4/8] Building backend with PyInstaller...
-pyinstaller --onedir --noconsole ^
+%PYTHON_EXE% -m PyInstaller --onedir --noconsole ^
     --name LucaWriterBackend ^
     --distpath "%DIST_BACKEND%" ^
     --workpath "%BUILD_TEMP%" ^
@@ -125,6 +134,6 @@ echo.
 
 echo ============================================
 echo   Build Success!
-echo   Output: release\v0.8.0\
+echo   Output: release\v1.0.0\
 echo ============================================
 pause

@@ -1,6 +1,6 @@
 {
   "name": "lucawriter",
-  "version": "0.8.0",
+  "version": "1.0.0",
   "description": "LucaWriter - AI写作搭档",
   "main": "main.js",
   "author": "LucaWriter",
@@ -19,13 +19,20 @@
     "productName": "LucaWriter",
     "copyright": "Copyright © 2026 LucaWriter",
     "directories": {
-      "output": "../release/v0.8.0"
+      "output": "../release/v1.0.0"
     },
     "files": [
       "main.js",
       "preload.js",
+      "browser-preload.js",
       "loading.html",
-      "package.json"
+      "browser.html",
+      "package.json",
+      "loading_icon.png",
+      "icon-loading.png",
+      "icon.png",
+      "icon.ico",
+      "tray-icon.png"
     ],
     "extraResources": [
       {

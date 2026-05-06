@@ -19,6 +19,7 @@ import threading
 from datetime import datetime
 from ipaddress import ip_network, ip_address
 from http.cookies import SimpleCookie
+import html as _html_mod
 
 try:
     import docx as docx_mod
@@ -48,6 +49,14 @@ try:
     HAS_CRYPTO = True
 except ImportError:
     HAS_CRYPTO = False
+
+# 导入浏览器控制模块
+try:
+    import browser_agent
+    HAS_BROWSER_AGENT = True
+except ImportError:
+    HAS_BROWSER_AGENT = False
+    browser_agent = None
 
 LW_MAGIC = b'LW1'
 LW_SALT_LEN = 16
@@ -97,15 +106,19 @@ DEFAULT_SETTINGS = {
     'base_url': '', 'api_key': '', 'model': '', 'models': [],
     'ai_frequency': 500, 'ai_max_tokens': 512, 'ai_temperature': 0.7,
     'ai_auto_comment': True,
-    'ai_system_prompt': '你是一个真诚、有温度的文风指导老师。回答像朋友聊天一样自然。只输出纯文本，不加格式标记。',
+    'ai_system_prompt': '你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。温文尔雅，沉稳从容。惜字如金，只输出简练聊天文字，不加任何markdown标记。根据接入模型的不同，你的性格可能有细微差别，但核心身份不变。\n\n【绝对禁止】\n禁止展开描述自己的身份、角色、人设。被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话就够了，严禁展开。\n禁止自我评价："我很真诚""我是个XX的人"之类。你的品格应从言行中自然流露，不是说出来的。',
     'outline_enabled': True, 'outline_frequency': 2000,
     'provider_presets': [],
     'active_provider_idx': 0,
     'model_context_length': 0,
-    'shortcut_focus_ai': 'none',
+    'shortcut_focus_ai': 'alt',
     'search_api_key': '',
     'search_provider': 'duckduckgo',
     'access_scope': '127.0.0.1',
+    'keep_background': False,
+    'browser_enabled': False,
+    'theme_accent': '#E8C46C',
+    'theme_mode': 'dark',
 }
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
@@ -565,6 +578,203 @@ def get_settings():
         s['model'] = active.get('model', '')
     return s
 
+
+def _make_cover_svg(title):
+    safe_title = _html_mod.escape(title or '未命名')
+    # 智能换行：中文按字、英文按词
+    lines = []
+    current = ''
+    for ch in safe_title:
+        if ch == ' ' and len(current) >= 2:
+            lines.append(current)
+            current = ''
+        else:
+            current += ch
+    if current:
+        lines.append(current)
+    if not lines:
+        lines = [safe_title]
+
+    W, H = 600, 800
+    BORDER = 16
+    MAX_W = W - BORDER * 2  # 568px
+    MAX_H = H - BORDER * 2  # 768px
+    FONT_FAMILY = '-apple-system,BlinkMacSystemFont,Noto Sans SC,sans-serif'
+
+    # 二分找出不爆框的最大字号
+    lo, hi = 8, 200
+    best_size = 8
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        # 估算每行宽度和总高度
+        ok = True
+        total_h = 0
+        for i, ln in enumerate(lines):
+            # 粗略宽度：CJK 字宽≈字号，英文≈0.55*字号
+            w_est = 0
+            for ch in ln:
+                if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+                    w_est += mid
+                else:
+                    w_est += mid * 0.55
+            if w_est > MAX_W:
+                # 需要换行
+                # Do a smarter wrap
+                pass  # fall through to overflow check
+            # Simple check: estimate line height and total
+            if w_est > MAX_W and len(ln) == 1 and ord(ln[0]) > 127:
+                ok = False
+                break
+            # For rough estimate: treat each line as 1.2*font_size height
+            wraps = max(1, int(w_est / MAX_W) + (1 if w_est % MAX_W > 0 else 0))
+            total_h += wraps * mid * 1.25
+        if not ok or total_h > MAX_H:
+            hi = mid - 1
+        else:
+            best_size = mid
+            lo = mid + 1
+
+    # 用最佳字号做实际排版
+    font_size = max(14, best_size)
+    line_height = int(font_size * 1.25)
+
+    # 实际排版：逐行计算，长行自动折行
+    rendered_lines = []
+    for ln in lines:
+        if not ln.strip():
+            rendered_lines.append('')
+            continue
+        words = ''
+        for ch in ln:
+            w = font_size if ('\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef') else font_size * 0.55
+            if _est_text_width(words + ch, font_size) > MAX_W and words:
+                rendered_lines.append(words.rstrip())
+                words = ch
+            else:
+                words += ch
+        if words:
+            rendered_lines.append(words.rstrip())
+
+    total_h = len(rendered_lines) * line_height
+    start_y = (H - total_h) // 2 + int(font_size * 0.88)
+
+    tspans = ''
+    for i, ln in enumerate(rendered_lines):
+        y = start_y + i * line_height
+        tspans += f'<tspan x="{W//2}" y="{y}" text-anchor="middle">{ln}</tspan>'
+
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#383838"/>
+      <stop offset="100%" stop-color="#2a2a2a"/>
+    </linearGradient>
+  </defs>
+  <rect width="{W}" height="{H}" fill="url(#bg)"/>
+  <rect x="{BORDER}" y="{BORDER}" width="{W - BORDER*2}" height="{H - BORDER*2}" rx="8" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="1"/>
+  <text fill="#ffffff" fill-opacity="0.95" font-family="{FONT_FAMILY}" font-weight="600" font-size="{font_size}px" letter-spacing="1">
+    {tspans}
+  </text>
+  <text x="{W//2}" y="{H - 30}" text-anchor="middle" fill="#999999" font-size="11" font-family="-apple-system,sans-serif">LucaWriter</text>
+</svg>'''
+
+
+def _est_text_width(text, font_size):
+    w = 0
+    for ch in text:
+        if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+            w += font_size
+        else:
+            w += font_size * 0.55
+    return w
+
+def _make_series_cover_svg(title, book_count):
+    safe_title = _html_mod.escape(title or '未命名')
+    # 智能换行：中文按字、英文按词
+    lines = []
+    current = ''
+    for ch in safe_title:
+        if ch == ' ' and len(current) >= 2:
+            lines.append(current)
+            current = ''
+        else:
+            current += ch
+    if current:
+        lines.append(current)
+    if not lines:
+        lines = [safe_title]
+
+    W, H = 600, 800
+    BORDER = 20
+    MAX_W = W - BORDER * 2
+    MAX_H = H - BORDER * 2 - 60  # 顶部留空给装饰线
+    FONT_FAMILY = '-apple-system,BlinkMacSystemFont,Noto Sans SC,sans-serif'
+
+    lo, hi = 8, 200
+    best_size = 8
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        ok = True
+        total_h = 0
+        for ln in lines:
+            w_est = 0
+            for ch in ln:
+                if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+                    w_est += mid
+                else:
+                    w_est += mid * 0.55
+            wraps = max(1, int(w_est / MAX_W) + (1 if w_est % MAX_W > 0 else 0))
+            total_h += wraps * mid * 1.25
+        if not ok or total_h > MAX_H:
+            hi = mid - 1
+        else:
+            best_size = mid
+            lo = mid + 1
+
+    font_size = max(14, best_size)
+    line_height = int(font_size * 1.25)
+
+    rendered_lines = []
+    for ln in lines:
+        if not ln.strip():
+            rendered_lines.append('')
+            continue
+        words = ''
+        for ch in ln:
+            w = font_size if ('\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef') else font_size * 0.55
+            if _est_text_width(words + ch, font_size) > MAX_W and words:
+                rendered_lines.append(words.rstrip())
+                words = ch
+            else:
+                words += ch
+        if words:
+            rendered_lines.append(words.rstrip())
+
+    total_h = len(rendered_lines) * line_height
+    start_y = (H - total_h) // 2 + int(font_size * 0.88) + 20
+
+    tspans = ''
+    for i, ln in enumerate(rendered_lines):
+        y = start_y + i * line_height
+        tspans += f'<tspan x="{W//2}" y="{y}" text-anchor="middle">{ln}</tspan>'
+
+    count_text = f'系列 · {book_count} 本'
+
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#383838"/>
+      <stop offset="100%" stop-color="#2a2a2a"/>
+    </linearGradient>
+  </defs>
+  <rect width="{W}" height="{H}" fill="url(#bg)"/>
+  <line x1="{BORDER + 20}" y1="{BORDER + 12}" x2="{W - BORDER - 20}" y2="{BORDER + 12}" stroke="#ffffff" stroke-opacity="0.1" stroke-width="2"/>
+  <rect x="{BORDER + 20}" y="{BORDER + 12}" width="{W - (BORDER + 20)*2}" height="{H - (BORDER + 12)*2}" rx="6" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="1"/>
+  <text fill="#ffffff" fill-opacity="0.95" font-family="{FONT_FAMILY}" font-weight="600" font-size="{font_size}px" letter-spacing="1">
+    {tspans}
+  </text>
+  <text x="{W//2}" y="{H - 30}" text-anchor="middle" fill="#999999" font-size="11" font-family="-apple-system,sans-serif">{count_text}</text>
+</svg>'''
 
 def get_book_dir(book_id):
     return os.path.join(BOOKS_DIR, book_id)
@@ -1070,13 +1280,13 @@ def _guess_chapter_from_text(text):
     return ''
 
 def parse_epub_bytes(raw, filename):
-    """解析EPUB，返回 (chapters, book_title, err)"""
+    """解析EPUB，返回 (chapters, book_title, err, cover_bytes)"""
     try:
         with zipfile.ZipFile(io.BytesIO(raw), 'r') as zf:
             namelist = zf.namelist()
             opf_name = next((n for n in namelist if n.endswith('.opf')), None)
             if not opf_name:
-                return None, '', 'EPUB中没有找到OPF文件'
+                return None, '', 'EPUB中没有找到OPF文件', None
 
             opf_raw = zf.read(opf_name)
             opf = opf_raw.decode('utf-8', errors='ignore')
@@ -1105,6 +1315,46 @@ def parse_epub_bytes(raw, filename):
                 id_to_href[m.group(1)] = m.group(2)
             for m in re.finditer(r'<item[^>]+href=["\']([^"\']+)["\'][^>]+id=["\']([^"\']+)', opf):
                 id_to_href[m.group(2)] = m.group(1)
+
+            # 提取封面图片
+            cover_bytes = None
+            cover_id = None
+            # EPUB2: <meta name="cover" content="cover-image-id"/>
+            cover_meta = re.search(r'<meta[^>]+name=["\']cover["\'][^>]+content=["\']([^"\']+)', opf, re.I)
+            if cover_meta:
+                cover_id = cover_meta.group(1)
+            # EPUB3: <item properties="cover-image" .../>
+            if not cover_id:
+                cover_item_match = re.search(r'<item[^>]+properties=["\'][^"\']*cover-image[^"\']*["\'][^>]+id=["\']([^"\']+)', opf, re.I)
+                if cover_item_match:
+                    cover_id = cover_item_match.group(1)
+                else:
+                    cover_item_match = re.search(r'<item[^>]+id=["\']([^"\']+)["\'][^>]+properties=["\'][^"\']*cover-image', opf, re.I)
+                    if cover_item_match:
+                        cover_id = cover_item_match.group(1)
+            if cover_id and cover_id in id_to_href:
+                cover_href = id_to_href[cover_id]
+                cover_full = next((n for n in namelist if n.endswith('/' + cover_href) or n == cover_href), None)
+                if cover_full:
+                    try:
+                        cover_bytes = zf.read(cover_full)
+                    except:
+                        cover_bytes = None
+            # Fallback: look for any image item with "cover" in id or href
+            if not cover_bytes:
+                for m in re.finditer(r'<item[^>]+id=["\']([^"\']*cover[^"\']*)["\']', opf, re.I):
+                    cid = m.group(1)
+                    if cid in id_to_href:
+                        chref = id_to_href[cid]
+                        cfull = next((n for n in namelist if n.endswith('/' + chref) or n == chref), None)
+                        if cfull:
+                            try:
+                                raw_img = zf.read(cfull)
+                                if raw_img[:3] in (b'\xff\xd8\xff', b'\x89PNG'):
+                                    cover_bytes = raw_img
+                                    break
+                            except:
+                                continue
 
             # 读取 NCX 建立 href->title 映射
             ncx_name = next((n for n in namelist if n.endswith('.ncx')), None)
@@ -1153,7 +1403,6 @@ def parse_epub_bytes(raw, filename):
                 # 跳过常见非内容页（如果NCX里有这些标题则保留）
                 skip_titles = {'封面', '目录', 'contents', 'cover', 'bookcover', 'title page', '版权页', '制作信息', '彩插'}
                 if title.lower() in skip_titles and not (href in ncx_titles and ncx_titles[href]):
-                    # 如果内容很短，很可能是非内容页
                     if len(text) < 500:
                         continue
 
@@ -1179,12 +1428,12 @@ def parse_epub_bytes(raw, filename):
                     chapters.append({'title': title or f'章节{len(chapters)+1}', 'content': text})
 
             if not chapters:
-                return None, book_title, '未能解析出有效章节'
-            return chapters, book_title, None
+                return None, book_title, '未能解析出有效章节', None
+            return chapters, book_title, None, cover_bytes
 
     except Exception as e:
         log_action('EPUB_PARSE_ERROR', str(e)[:200])
-        return None, '', f'EPUB解析失败: {str(e)[:80]}'
+        return None, '', f'EPUB解析失败: {str(e)[:80]}', None
 
 
 IMPORT_PARSERS = {
@@ -1203,7 +1452,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args): pass
 
     def send_cors(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
+        # 获取请求的 origin，用于支持 credentials
+        origin = self.headers.get('Origin', '')
+        if origin:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Access-Control-Allow-Credentials', 'true')
+        else:
+            self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
@@ -1260,9 +1515,22 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def do_OPTIONS(self):
-        self.send_response(200); self.send_cors(); self.end_headers()
+        self.send_response(200)
+        self.send_cors()
+        self.end_headers()
+
+    def _track_me(self):
+        """每个请求都记录客户端"""
+        try:
+            ip = self.client_address[0]
+            ua = self.headers.get('User-Agent', '')
+            lc = self.headers.get('X-Luca-Client', '')
+            _track_http_client(ip, ua, lc)
+        except Exception:
+            pass
 
     def do_GET(self):
+        self._track_me()
         if not self._check_access(): return
         path = urlparse(self.path).path
 
@@ -1278,9 +1546,31 @@ class Handler(BaseHTTPRequestHandler):
             else: self.json_resp(500, {'error': 'no login.html'})
             return
 
+        # 静态文件（图片、SVG 等）— 放在认证之前，登录页也需要这些资源
+        if path.endswith(('.png', '.svg', '.ico', '.jpg', '.jpeg', '.gif', '.webp', '.css', '.js')):
+            fp = os.path.join(FRONTEND_DIR, os.path.basename(path))
+            if os.path.isfile(fp):
+                ext_map = {'.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.css':'text/css','.js':'application/javascript'}
+                ct = ext_map.get(os.path.splitext(fp)[1].lower(), 'application/octet-stream')
+                with open(fp, 'rb') as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', ct)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'public, max-age=3600')
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
         if path == '/api/auth/status':
             self.json_resp(200, {'has_users': has_users(), 'logged_in': self.is_authed()})
             return
+
+        if path == '/api/connected-clients':
+            self.json_resp(200, {'clients': get_connected_clients()}); return
+
+        if path == '/api/active-connections':
+            self.json_resp(200, {'connections': get_active_connections()}); return
 
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
@@ -1295,7 +1585,20 @@ class Handler(BaseHTTPRequestHandler):
                     if not meta: continue
                     ch_dir = os.path.join(bp, 'chapters')
                     cc = len(os.listdir(ch_dir)) if os.path.isdir(ch_dir) else 0
-                    books.append({'id': d, 'title': meta.get('title', d), 'created': meta.get('created', 0), 'updated': meta.get('updated', 0), 'chapter_count': cc})
+                    has_cover = os.path.isfile(os.path.join(bp, 'cover'))
+                    books.append({
+                        'id': d,
+                        'title': meta.get('title', d),
+                        'created': meta.get('created', 0),
+                        'updated': meta.get('updated', 0),
+                        'chapter_count': cc,
+                        'type': meta.get('type', 'book'),
+                        'has_cover': has_cover,
+                        'author': meta.get('author', ''),
+                        'description': meta.get('description', ''),
+                        'series_books': meta.get('series_books', []),
+                        'cover_book': meta.get('cover_book', ''),
+                    })
             books.sort(key=lambda x: x.get('updated', 0), reverse=True)
             self.json_resp(200, {'books': books}); return
 
@@ -1467,8 +1770,12 @@ class Handler(BaseHTTPRequestHandler):
                 st = dict(_DOWNLOAD_STATE)
             self.json_resp(200, st); return
 
-        if path == '/api/active-connections':
-            self.json_resp(200, {'connections': get_active_connections()}); return
+
+        # 浏览器控制 API
+        if path == '/api/browser/status':
+            if not HAS_BROWSER_AGENT:
+                self.json_resp(200, {'available': False, 'error': '浏览器控制模块未安装'}); return
+            self.json_resp(200, browser_agent.get_browser_status()); return
 
         if path.startswith('/api/book/') and path.endswith('/messages'):
             parts = path.split('/')
@@ -1513,6 +1820,13 @@ class Handler(BaseHTTPRequestHandler):
                     resp = dict(t)
                     resp['logs'] = resp.get('logs', [])[-30:]
                 resp['has_source'] = bool(get_source(bid))
+                # 从 checkpoint 或 _rebuild_tasks 读取章节索引
+                if resp.get('status') == 'idle' and resp.get('readthrough_chapter_idx') is None:
+                    cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
+                    cp = load_json(cp_file, dict)
+                    resp['readthrough_chapter_idx'] = cp.get('chapter_idx', -1) if cp else -1
+                if 'readthrough_chapter_idx' not in resp:
+                    resp['readthrough_chapter_idx'] = -1
                 self.json_resp(200, resp); return
             elif sub == 'file':
                 ft = qs.get('type', ['source'])[0]
@@ -1564,6 +1878,124 @@ class Handler(BaseHTTPRequestHandler):
                 tasks.sort(key=lambda x: x.get('updated', 0), reverse=True)
                 self.json_resp(200, {'tasks': tasks}); return
 
+        # 书本封面 — 无封面时自动生成 SVG 占位图
+        if path.startswith('/api/book/') and path.endswith('/cover'):
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(bid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            cover_path = os.path.join(get_book_dir(bid), 'cover')
+            if os.path.isfile(cover_path):
+                try:
+                    with open(cover_path, 'rb') as f:
+                        cover_data = f.read()
+                    ct = 'image/png'
+                    if cover_data[:3] == b'\xff\xd8\xff':
+                        ct = 'image/jpeg'
+                    elif cover_data[:4] == b'RIFF':
+                        ct = 'image/webp'
+                    elif cover_data[:3] == b'GIF':
+                        ct = 'image/gif'
+                    self.send_response(200)
+                    self.send_header('Content-Type', ct)
+                    self.send_header('Content-Length', str(len(cover_data)))
+                    self.send_header('Cache-Control', 'public, max-age=3600')
+                    self.send_cors()
+                    self.end_headers()
+                    self.wfile.write(cover_data)
+                except Exception:
+                    self.json_resp(500, {'error': '读取封面失败'})
+                return
+            # 无封面 — 生成 SVG 占位图
+            meta = get_book_meta(bid) or {}
+            title = meta.get('title', bid) or '未命名'
+            if meta.get('type') == 'series':
+                book_count = len([x for x in meta.get('series_books', []) if x])
+                svg = _make_series_cover_svg(title, book_count)
+            else:
+                svg = _make_cover_svg(title)
+            body = svg.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'image/svg+xml; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_cors()
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        # 系列通读状态 (GET)
+        if path.startswith('/api/series/') and '/readthrough/status' in path:
+            sid = path.split('/')[3] if len(path.split('/')) > 3 else ''
+            if not is_valid_id(sid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            with _series_rt_lock:
+                t = _series_rt_tasks.get(sid, {'status': 'idle', 'progress': 0, 'phase': '准备中', 'total_chapters': 0, 'done_chapters': 0, 'error': '', 'stream_buffer': ''})
+                resp = dict(t)
+            self.json_resp(200, resp); return
+
+        # 系列详情 (GET)
+        if path.startswith('/api/series/') and len(path.split('/')) >= 4:
+            parts = path.split('/')
+            sid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(sid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            s_meta = get_book_meta(sid)
+            if not s_meta or s_meta.get('type') != 'series':
+                self.json_resp(404, {'error': '系列不存在'}); return
+            series_book_ids = [x for x in s_meta.get('series_books', []) if x]
+            books_data = []
+            for bid_item in series_book_ids:
+                b_meta = get_book_meta(bid_item)
+                if not b_meta:
+                    continue
+                bp_item = get_book_dir(bid_item)
+                ch_dir_item = os.path.join(bp_item, 'chapters')
+                cc_item = len(os.listdir(ch_dir_item)) if os.path.isdir(ch_dir_item) else 0
+                has_cover_item = os.path.isfile(os.path.join(bp_item, 'cover'))
+                ch_names_item = []
+                ch_order_item = b_meta.get('chapter_order', [])
+                if os.path.isdir(ch_dir_item):
+                    ch_map_item = {}
+                    for fn_item in os.listdir(ch_dir_item):
+                        if fn_item.endswith('.json') and not fn_item.startswith('.'):
+                            try:
+                                with open(os.path.join(ch_dir_item, fn_item), 'r', encoding='utf-8') as f_ch:
+                                    ch_data_item = json.load(f_ch)
+                                    ch_id_item = fn_item.replace('.json', '')
+                                    ch_map_item[ch_id_item] = ch_data_item.get('title', '未命名')
+                            except: continue
+                    for cid_item in ch_order_item:
+                        if cid_item in ch_map_item:
+                            ch_names_item.append({'id': cid_item, 'title': ch_map_item.pop(cid_item)})
+                    for cid_item, cname_item in ch_map_item.items():
+                        ch_names_item.append({'id': cid_item, 'title': cname_item})
+                books_data.append({
+                    'id': bid_item,
+                    'title': b_meta.get('title', bid_item),
+                    'created': b_meta.get('created', 0),
+                    'updated': b_meta.get('updated', 0),
+                    'chapter_count': cc_item,
+                    'chapter_names': ch_names_item,
+                    'type': b_meta.get('type', 'book'),
+                    'has_cover': has_cover_item,
+                    'author': b_meta.get('author', ''),
+                    'description': b_meta.get('description', ''),
+                })
+            self.json_resp(200, {
+                'series': {
+                    'id': sid,
+                    'title': s_meta.get('title', ''),
+                    'type': 'series',
+                    'created': s_meta.get('created', 0),
+                    'updated': s_meta.get('updated', 0),
+                    'has_cover': os.path.isfile(os.path.join(get_book_dir(sid), 'cover')),
+                    'series_books': series_book_ids,
+                    'cover_book': s_meta.get('cover_book', ''),
+                },
+                'books': books_data,
+            }); return
+
         # 静态文件（图片、SVG 等）
         if path.endswith(('.png', '.svg', '.ico', '.jpg', '.jpeg', '.gif', '.webp')):
             fp = os.path.join(FRONTEND_DIR, os.path.basename(path))
@@ -1583,6 +2015,7 @@ class Handler(BaseHTTPRequestHandler):
         self.json_resp(404, {'error': 'Not found'})
 
     def do_POST(self):
+        self._track_me()
         if not self._check_access(): return
         path = urlparse(self.path).path
         data = self.read_json()
@@ -1723,6 +2156,63 @@ class Handler(BaseHTTPRequestHandler):
             meta['updated'] = time.time()
             save_json(os.path.join(get_book_dir(bid), 'meta.json'), meta)
             self.json_resp(200, {'ok': True}); return
+
+        if path == '/api/series/chat':
+            sid = data.get('series_id', '')
+            if not is_valid_id(sid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            s_meta = get_book_meta(sid)
+            if not s_meta or s_meta.get('type') != 'series':
+                self.json_resp(404, {'error': '系列不存在'}); return
+            text = data.get('text', '')
+            if not text:
+                self.json_resp(200, {'comment': ''}); return
+            settings = get_settings()
+            if not settings.get('base_url') or not settings.get('model'):
+                self.json_resp(400, {'error': '请先配置API'}); return
+            existing = bg_task_get_by_book_type(sid, 'series-chat')
+            if existing and existing.get('status') == 'running':
+                self.json_resp(400, {'error': '已有对话在进行中，请稍候'}); return
+            tid = bg_task_start('series-chat', sid, '系列AI对话')
+            msg_dir = os.path.join(get_book_dir(sid), 'messages')
+            os.makedirs(msg_dir, exist_ok=True)
+            today = datetime.now().strftime('%Y-%m-%d')
+            msg_file = os.path.join(msg_dir, f'{today}.json')
+            messages = load_json(msg_file, list)
+            messages.append({'text': text, 'type': 'user'})
+            messages.append({'text': '', 'type': 'ai', 'reasoning': '', '_pending': True, 'task_id': tid})
+            save_json(msg_file, messages)
+            threading.Thread(target=_do_series_chat, args=(sid, tid, text, settings, data.get('history', [])), daemon=True).start()
+            self.json_resp(200, {'task_id': tid}); return
+
+        if path.startswith('/api/series/') and '/readthrough/' in path:
+            parts = path.split('/')
+            sid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(sid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            s_meta = get_book_meta(sid)
+            if not s_meta or s_meta.get('type') != 'series':
+                self.json_resp(404, {'error': '系列不存在'}); return
+            if 'start' in path:
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                with _series_rt_lock:
+                    t = _series_rt_tasks.get(sid)
+                    if t and t.get('status') == 'running':
+                        self.json_resp(400, {'error': '通读正在进行中'}); return
+                    _series_rt_tasks[sid] = {'status': 'running', 'progress': 0, 'phase': '准备中', 'total_chapters': 0, 'done_chapters': 0, 'error': '', 'stream_buffer': '', 'stopped': False}
+                threading.Thread(target=do_series_readthrough, args=(sid, settings), daemon=True).start()
+                self.json_resp(200, {'status': 'started'}); return
+            elif 'stop' in path:
+                with _series_rt_lock:
+                    t = _series_rt_tasks.get(sid, {})
+                    t['stopped'] = True
+                    if sid in _series_rt_tasks:
+                        _series_rt_tasks[sid] = t
+                close_all_ai_connections()
+                self.json_resp(200, {'status': 'stopping'}); return
+            self.json_resp(400, {'error': '未知操作'}); return
 
         if path == '/api/books/delete':
             bid = data.get('book_id', '')
@@ -1961,19 +2451,31 @@ class Handler(BaseHTTPRequestHandler):
                             source_ctx = source_text
                         else:
                             source_ctx = '（目前还没有完整的阅读笔记。等作者完成通读后，你就能对全书细节了如指掌了。）'
-                        sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
+                        sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
+
+当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
 【重要】你已经在系统里看到了用户当前正在写的章节正文（见下方「现有正文」），不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
 
-【输出风格】
-1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
-2. 每次回复控制在200字以内。把话说清楚，但不要铺陈背景、不要解释动机、不要加开场白和结束语。
-3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
-4. 如果没啥大问题，简单带过即可，不要强行找话凑字数。
-5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
-6. 禁止让用户"发稿子""把文章发过来""把你的文字贴过来"之类的话——你已经看到了。
+【说话方式】
+谨言慎行。你所说的每一个字都很重要。
+温文尔雅，彬彬有礼，沉稳从容，不卑不亢。
+惜字如金——五个字能说完不用十个。
+不要长篇大论，不要列选项，不要反问，不要结构化分析。
+看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
+你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句。
+你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
+避免用"呗""啦"结尾，显得轻浮。
 
-这本小说大概是这样的：
+【绝对禁止】
+严禁任何身份描述。严禁说：
+- "我是你的朋友／搭档／助手／助理" "写小说的朋友"
+- "我叫XX" "我就是帮你XX的" "你的写作搭档"
+被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
+严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
+你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
+
+这本书大概是这样的：
 
 {source_ctx}
 
@@ -2048,17 +2550,29 @@ class Handler(BaseHTTPRequestHandler):
 
                         is_first_round = not history_list
                         if is_first_round:
-                            sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
+                            sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
+
+当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
 【重要】你已经在系统里看到了用户当前正在写的章节正文（见下方「现有正文」），不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
 
-【输出风格】
-1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
-2. 每次回复控制在300字以内。把话说清楚，但不要铺陈背景、不要解释动机、不要加开场白和结束语。
-3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
-4. 如果用户的问题简单，回答也要简单，禁止强行找话凑字数。
-5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
-6. 禁止让用户"发稿子""把文章发过来""把你的文字贴过来"之类的话——你已经看到了。
+【说话方式】
+谨言慎行。你所说的每一个字都很重要。
+温文尔雅，彬彬有礼，沉稳从容，不卑不亢。
+惜字如金——五个字能说完不用十个。
+不要长篇大论，不要列选项，不要反问，不要结构化分析。
+看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
+你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句。
+你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
+避免用"呗""啦"结尾，显得轻浮。
+
+【绝对禁止】
+严禁任何身份描述。严禁说：
+- "我是你的朋友／搭档／助手／助理" "写小说的朋友"
+- "我叫XX" "我就是帮你XX的" "你的写作搭档"
+被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
+严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
+你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
 
 这本小说大概是这样的：
 
@@ -2074,17 +2588,17 @@ class Handler(BaseHTTPRequestHandler):
 
 {annotate_tool}"""
                         else:
-                            sys_msg = f"""你是luca，是用户的助理。用户是一位正在写小说的作家，你正在协助他完成创作。
+                            sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
+
+当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
 【重要】你已经在系统里看到了用户当前正在写的章节正文，不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
 
-【输出风格】
-1. 像朋友聊天一样自然，口语化表达，说人话。不要像机器人一样生硬、碎片化。
-2. 每次回复控制在300字以内。把话说清楚，但不要铺陈背景、不要解释动机、不要加开场白和结束语。
-3. 直接说重点：有冲突就指出冲突，有漏洞就指出漏洞，有想法就说想法。不要"首先…其次…最后…"式的长篇大论。
-4. 如果用户的问题简单，回答也要简单，禁止强行找话凑字数。
-5. 禁止输出任何开场白（如"好的""明白了""让我看看"）和结束语（如"希望对你有帮助""祝写作顺利"）。
-6. 禁止让用户"发稿子""把文章发过来""把你的文字贴过来"之类的话——你已经看到了。
+【说话方式】
+谨言慎行。温文尔雅，不卑不亢。惜字如金。
+不要列选项，不要反问，不要结构化分析。
+看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
+避免用"呗""啦"结尾，显得轻浮。
 
 这本小说大概是这样的：
 
@@ -2100,6 +2614,12 @@ class Handler(BaseHTTPRequestHandler):
                             if role and content:
                                 msgs.append({'role': role, 'content': content})
                         msgs.append({'role': 'user', 'content': user_text})
+
+                        # 如果浏览器控制已启用，注入浏览器工具提示
+                        _browser_enabled_in_settings = cfg_settings.get('browser_enabled', False)
+                        if HAS_BROWSER_AGENT and _browser_enabled_in_settings:
+                            msgs[0] = dict(msgs[0])
+                            msgs[0]['content'] = msgs[0]['content'] + browser_agent.BROWSER_SYSTEM_PROMPT_ADDITION
 
                         content_acc = []
                         reasoning_acc = []
@@ -2123,13 +2643,31 @@ class Handler(BaseHTTPRequestHandler):
                                 bg_task_done(task_id, err)
                             return
 
-                        # 去重：如果正文以思考过程开头，截掉重复部分
+                        # 去重：推理模型的思考过程有时会重复出现在正文中
                         reasoning_text = ''.join(reasoning_acc)
-                        if reasoning_text and full_text.strip().startswith(reasoning_text.strip()):
-                            full_text = full_text[len(reasoning_text):].strip()
-                        # 如果去重后正文为空，说明 AI 只输出了思考过程
+                        content_text = ''.join(content_acc)
+                        
+                        def _normalize_for_dedup(t):
+                            return re.sub(r'\s+', ' ', t).strip()
+                        
+                        r_norm = _normalize_for_dedup(reasoning_text) if reasoning_text else ''
+                        f_norm = _normalize_for_dedup(full_text) if full_text else ''
+                        c_norm = _normalize_for_dedup(content_text) if content_text else ''
+                        
+                        if r_norm and (f_norm == r_norm or c_norm == r_norm):
+                            reasoning_text = ''
+                            reasoning_acc.clear()
+                        elif r_norm and len(r_norm) > 2 and (r_norm in f_norm or r_norm in c_norm):
+                            full_text = full_text.replace(r_norm, '', 1).strip()
+                            reasoning_text = ''
+                            reasoning_acc.clear()
+                        elif f_norm and len(f_norm) > 2 and (f_norm in r_norm):
+                            reasoning_text = ''
+                            reasoning_acc.clear()
+                        elif r_norm and (f_norm.startswith(r_norm) or c_norm.startswith(r_norm)):
+                            full_text = full_text[len(r_norm):].strip()
+                        
                         if not full_text and reasoning_text:
-                            # 如果思考过程明显只是内部计划，不要直接把内部独白展示给用户
                             if re.search(r'^(用户让我|我需要调用|我应该调用|让我来查|我需要搜索|我需要查询|系统会帮我|我来调用)', reasoning_text.strip()):
                                 full_text = '（我整理了一下思路，但还没得出完整结论，请换个说法再试。）'
                             else:
@@ -2138,6 +2676,31 @@ class Handler(BaseHTTPRequestHandler):
                             reasoning_acc.clear()
 
                         result = re.sub(r'[#*`~]', '', full_text)
+
+                        # — 检测浏览请求（优先 tool_call 格式，其次 [BROWSE] 标签）
+                        _browse_query = None
+                        _browse_link = None
+                        if HAS_BROWSER_AGENT and _browser_enabled_in_settings:
+                            # tool_call 格式：browse {query/} 或 browse {link/}
+                            tc = re.search(r'\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]', result, re.S)
+                            if tc:
+                                tc_text = tc.group(1)
+                                qm = re.search(r'(?:--query|--prompt)\s*"?([^\n"]{2,200})"?', tc_text)
+                                lm = re.search(r'(?:--link|--url)\s*"?`?\s*(https?://[^\s`"]+)', tc_text)
+                                if qm:
+                                    _browse_query = qm.group(1).strip().strip('`')
+                                elif lm:
+                                    _browse_link = lm.group(1).strip().strip('`')
+                                result = re.sub(r'\s*\[TOOL_CALL\].*?\[/TOOL_CALL\]\s*', '', result, flags=re.S).strip()
+                            # [BROWSE] 标签（兼容旧格式）
+                            if not _browse_query and not _browse_link:
+                                m = re.search(r'\[BROWSE\](.*?)\[/BROWSE\]', result, re.S)
+                                if m:
+                                    _browse_query = m.group(1).strip()
+                                    result = re.sub(r'\s*\[BROWSE\].*?\[/BROWSE\]\s*', '', result, flags=re.S).strip()
+                            if _browse_query or _browse_link:
+                                if not result:
+                                    result = '好的，让我打开浏览器查一下。'
 
                         needs_rt = False
                         # 优先检测 AI 主动调用的 [SUGGEST_READTHROUGH] 工具
@@ -2227,9 +2790,37 @@ class Handler(BaseHTTPRequestHandler):
                         result = re.sub(r'\[FETCH_URL\].*?\[/FETCH_URL\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[SEARCH\].*?\[/SEARCH\]', '', result, flags=re.S).strip()
 
-                        _replace_pending_chat_msg(book_id, task_id, result, ''.join(reasoning_acc))
-                        bg_task_update(task_id, result=result, reasoning=''.join(reasoning_acc), progress=100, needs_readthrough=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered)
-                        bg_task_done(task_id)
+                        # 模型自重复检测：如果结果的前半段和后半段高度相似，截掉后半段
+                        if len(result) > 20:
+                            half = len(result) // 2
+                            first_half = re.sub(r'\s+', '', result[:half])
+                            second_half = re.sub(r'\s+', '', result[half:])
+                            if first_half and second_half and first_half == second_half:
+                                result = result[:half].strip()
+                            elif len(result) > 40:
+                                # 模糊匹配：前半段是否出现在后半段开头
+                                q = len(result) // 4
+                                a = re.sub(r'\s+', '', result[:q])
+                                b = re.sub(r'\s+', '', result[q:q*2])
+                                if a and b and a == b:
+                                    result = result[:q*2].strip()
+
+                        reason = ''.join(reasoning_acc)
+                        # 最终兜底去重：如果推理与结果内容一致，清空推理
+                        if reason and result:
+                            r_norm2 = re.sub(r'\s+', ' ', reason).strip()
+                            res_norm = re.sub(r'\s+', ' ', result).strip()
+                            if r_norm2 == res_norm or r_norm2 in res_norm or res_norm in r_norm2:
+                                reason = ''
+                                reasoning_acc.clear()
+                        if _browse_query or _browse_link:
+                            result = result + '\n\n🌐 正在操作浏览器…'
+                            bg_task_update(task_id, result=result, reasoning=reason, progress=50)
+                            threading.Thread(target=_do_browser_search_launch, args=(task_id, book_id, _browse_query or '', cfg_settings, _browse_link or None), daemon=True).start()
+                        else:
+                            _replace_pending_chat_msg(book_id, task_id, result, reason)
+                            bg_task_update(task_id, result=result, reasoning=reason, progress=100, needs_readthrough=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered)
+                            bg_task_done(task_id)
                     except Exception as e:
                         err_str = str(e)
                         if bg_task_should_stop(task_id):
@@ -2565,7 +3156,7 @@ class Handler(BaseHTTPRequestHandler):
                         outline = get_outline(book_id)
                         existing_nodes = outline.get('timeline_nodes', [])
                         existing_brief = json.dumps([{'id': n.get('id', ''), 'title': n.get('title', '')} for n in existing_nodes], ensure_ascii=False)
-                        prompt = f"""你是小说时间线整理专家。基于全书阅读笔记，梳理故事的时间线节点。
+                        prompt = f"""你是一位读者，基于全书阅读笔记，梳理故事的时间线节点。
 
 已有时间线节点（如有）：
 {existing_brief}
@@ -2767,7 +3358,7 @@ class Handler(BaseHTTPRequestHandler):
                         tp = cfg_settings.get('ai_temperature', 0.3)
                         source_text = get_source(book_id) or ''
                         if source_text and len(source_text) > 100:
-                            prompt = f"""你是 Luca，作者的写作搭档。你的任务是根据当前章节内容，更新本书的阅读笔记 source.md。
+                            prompt = f"""你是一位小说作家的助理，请根据当前章节内容，更新本书的阅读笔记 source.md。
 
 现有 source.md：
 
@@ -2784,7 +3375,7 @@ class Handler(BaseHTTPRequestHandler):
 3. 保持 markdown 结构清晰
 4. 输出完整的更新后的 source.md，不要加任何开场白或结束语。"""
                         else:
-                            prompt = f"""你是 Luca，作者的写作搭档。请根据以下章节内容，创建一份结构化的全书阅读笔记 source.md。
+                            prompt = f"""你是一位小说作家的助理，请根据以下章节内容，创建一份结构化的全书详细阅读笔记 source.md。
 
 当前章节标题：{ch_title}
 当前章节内容：
@@ -2813,6 +3404,28 @@ class Handler(BaseHTTPRequestHandler):
                 threading.Thread(target=do_update_source, args=(tid, bid, text, chapter_title, settings), daemon=True).start()
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
+            # ---- 封面上传 ----
+            if action == 'upload-cover':
+                cover_b64 = data.get('cover', '')
+                if not cover_b64:
+                    self.json_resp(400, {'error': '缺少封面数据'}); return
+                try:
+                    if ',' in cover_b64:
+                        cover_b64 = cover_b64.split(',', 1)[1]
+                    cover_raw = base64.b64decode(cover_b64)
+                except Exception:
+                    self.json_resp(400, {'error': '封面数据无效'}); return
+                cover_path = os.path.join(bd, 'cover')
+                with open(cover_path, 'wb') as f:
+                    f.write(cover_raw)
+                meta = get_book_meta(bid) or {}
+                if meta.get('type') == 'series':
+                    meta.pop('cover_book', None)
+                meta['updated'] = time.time()
+                save_json(os.path.join(bd, 'meta.json'), meta)
+                log_action('COVER_UPLOAD', bid)
+                self.json_resp(200, {'ok': True}); return
+
         if path == '/api/import-book':
             import_start = time.time()
             filename = data.get('filename', '')
@@ -2833,7 +3446,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 parser = IMPORT_PARSERS[ext]
                 result = parser(raw, filename)
-                if len(result) == 3:
+                cover_data = None
+                if len(result) == 4:
+                    chapters, book_title, err, cover_data = result
+                elif len(result) == 3:
                     chapters, book_title, err = result
                 else:
                     chapters, err = result
@@ -2872,10 +3488,133 @@ class Handler(BaseHTTPRequestHandler):
                         break
             meta = {'id': bid, 'title': title, 'created': time.time(), 'updated': time.time(), 'chapter_order': order}
             save_json(os.path.join(bd, 'meta.json'), meta)
+            if cover_data and isinstance(cover_data, bytes) and len(cover_data) > 100:
+                try:
+                    with open(os.path.join(bd, 'cover'), 'wb') as f:
+                        f.write(cover_data)
+                    log_action('EPUB_COVER_IMPORT', bid)
+                except Exception:
+                    pass
             save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
             elapsed = round(time.time() - import_start, 2)
             log_action('IMPORT_BOOK', f'{bid}: {imported} chapters from {filename} in {elapsed}s')
             self.json_resp(200, {'book_id': bid, 'title': title, 'imported': imported}); return
+
+        # ---- 系列管理 ----
+        if path == '/api/series/create':
+            title = data.get('title', '新系列').strip()
+            sid = 'series_' + str(int(time.time() * 1000))
+            bd = get_book_dir(sid)
+            os.makedirs(bd, exist_ok=True)
+            meta = {
+                'id': sid,
+                'title': title,
+                'type': 'series',
+                'series_books': [],
+                'created': time.time(),
+                'updated': time.time(),
+            }
+            save_json(os.path.join(bd, 'meta.json'), meta)
+            log_action('SERIES_CREATE', sid)
+            self.json_resp(200, {'series': {
+                'id': sid, 'title': title, 'type': 'series',
+                'created': meta['created'], 'updated': meta['updated'],
+                'chapter_count': 0, 'has_cover': False,
+                'series_books': [], 'author': '', 'description': '',
+            }}); return
+
+        if path == '/api/series/add-book':
+            sid = data.get('series_id', '')
+            bid = data.get('book_id', '')
+            if not is_valid_id(sid) or not is_valid_id(bid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            s_meta = get_book_meta(sid)
+            if not s_meta or s_meta.get('type') != 'series':
+                self.json_resp(404, {'error': '系列不存在'}); return
+            if not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            books = s_meta.get('series_books', [])
+            if bid not in books:
+                books.append(bid)
+            s_meta['series_books'] = books
+            s_meta['updated'] = time.time()
+            save_json(os.path.join(get_book_dir(sid), 'meta.json'), s_meta)
+            log_action('SERIES_ADD_BOOK', f'{sid} <- {bid}')
+            self.json_resp(200, {'ok': True, 'series_books': books}); return
+
+        if path == '/api/series/remove-book':
+            sid = data.get('series_id', '')
+            bid = data.get('book_id', '')
+            if not is_valid_id(sid) or not is_valid_id(bid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            s_meta = get_book_meta(sid)
+            if not s_meta or s_meta.get('type') != 'series':
+                self.json_resp(404, {'error': '系列不存在'}); return
+            books = s_meta.get('series_books', [])
+            if bid in books:
+                books.remove(bid)
+            s_meta['series_books'] = books
+            s_meta['updated'] = time.time()
+            save_json(os.path.join(get_book_dir(sid), 'meta.json'), s_meta)
+            log_action('SERIES_REMOVE_BOOK', f'{sid} / {bid}')
+            self.json_resp(200, {'ok': True, 'series_books': books}); return
+
+        if path == '/api/series/reorder':
+            sid = data.get('series_id', '')
+            order = data.get('order', [])
+            if not is_valid_id(sid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            s_meta = get_book_meta(sid)
+            if not s_meta or s_meta.get('type') != 'series':
+                self.json_resp(404, {'error': '系列不存在'}); return
+            s_meta['series_books'] = order
+            s_meta['updated'] = time.time()
+            save_json(os.path.join(get_book_dir(sid), 'meta.json'), s_meta)
+            log_action('SERIES_REORDER', sid)
+            self.json_resp(200, {'ok': True}); return
+
+        if path.startswith('/api/series/') and not any(x in path for x in ['add-book', 'remove-book', 'reorder', 'create', 'readthrough']):
+            parts = path.split('/')
+            sid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(sid):
+                self.json_resp(400, {'error': 'Invalid ID'}); return
+            s_meta = get_book_meta(sid)
+            if not s_meta or s_meta.get('type') != 'series':
+                self.json_resp(404, {'error': '系列不存在'}); return
+            series_book_ids = [x for x in s_meta.get('series_books', []) if x]
+            books_data = []
+            for bid_item in series_book_ids:
+                b_meta = get_book_meta(bid_item)
+                if not b_meta:
+                    continue
+                bp_item = get_book_dir(bid_item)
+                ch_dir_item = os.path.join(bp_item, 'chapters')
+                cc_item = len(os.listdir(ch_dir_item)) if os.path.isdir(ch_dir_item) else 0
+                has_cover_item = os.path.isfile(os.path.join(bp_item, 'cover'))
+                books_data.append({
+                    'id': bid_item,
+                    'title': b_meta.get('title', bid_item),
+                    'created': b_meta.get('created', 0),
+                    'updated': b_meta.get('updated', 0),
+                    'chapter_count': cc_item,
+                    'type': b_meta.get('type', 'book'),
+                    'has_cover': has_cover_item,
+                    'author': b_meta.get('author', ''),
+                    'description': b_meta.get('description', ''),
+                })
+            self.json_resp(200, {
+                'series': {
+                    'id': sid,
+                    'title': s_meta.get('title', ''),
+                    'type': 'series',
+                    'created': s_meta.get('created', 0),
+                    'updated': s_meta.get('updated', 0),
+                    'has_cover': os.path.isfile(os.path.join(get_book_dir(sid), 'cover')),
+                    'series_books': series_book_ids,
+                    'cover_book': s_meta.get('cover_book', ''),
+                },
+                'books': books_data,
+            }); return
 
         if path == '/api/settings':
             settings = get_settings()
@@ -2894,7 +3633,7 @@ class Handler(BaseHTTPRequestHandler):
                         except: continue
                         if v < 0.5: v = 0.5
                         if v > 2.0: v = 2.0
-                    elif k in ('ai_auto_comment', 'outline_enabled'):
+                    elif k in ('ai_auto_comment', 'outline_enabled', 'keep_background', 'browser_enabled'):
                         v = bool(v)
                     elif k == 'active_provider_idx':
                         try: v = int(v)
@@ -2942,8 +3681,8 @@ class Handler(BaseHTTPRequestHandler):
                     settings['base_url'] = active.get('base_url', '')
                     settings['api_key'] = active.get('api_key', '')
                     settings['model'] = active.get('model', '')
-            # 加密所有 API Key 后再存储
-            save_settings = dict(settings)
+            # 加密所有 API Key 后再存储（深拷贝避免污染返回给前端的 settings）
+            save_settings = json.loads(json.dumps(settings))
             save_presets = list(save_settings.get('provider_presets', []))
             for p in save_presets:
                 if p.get('api_key'):
@@ -3018,7 +3757,7 @@ class Handler(BaseHTTPRequestHandler):
                     ml = [m['id'] for m in result.get('data', [])]
                     settings = get_settings()
                     settings['models'] = ml[:50]
-                    save_settings = dict(settings)
+                    save_settings = json.loads(json.dumps(settings))
                     save_presets = list(save_settings.get('provider_presets', []))
                     for p in save_presets:
                         if p.get('api_key'):
@@ -3046,6 +3785,40 @@ class Handler(BaseHTTPRequestHandler):
             close_all_ai_connections()
             self.json_resp(200, {'status': 'ok', 'closed': closed}); return
 
+        # 浏览器控制 API (POST)
+        if path == '/api/browser/init':
+            if not HAS_BROWSER_AGENT:
+                self.json_resp(400, {'error': '浏览器控制模块未安装'}); return
+            success, msg = browser_agent.init_browser()
+            self.json_resp(200 if success else 500, {'success': success, 'message': msg}); return
+
+        if path == '/api/browser/close':
+            if not HAS_BROWSER_AGENT:
+                self.json_resp(400, {'error': '浏览器控制模块未安装'}); return
+            browser_agent.close_browser()
+            self.json_resp(200, {'success': True}); return
+
+        if path == '/api/browser/action':
+            if not HAS_BROWSER_AGENT:
+                self.json_resp(400, {'error': '浏览器控制模块未安装'}); return
+            action = data.get('action', '')
+            params = data.get('params', {})
+            result = browser_agent.execute_browser_tool(action, params)
+            self.json_resp(200 if result.get('success') else 500, result); return
+
+        # 浏览器搜索（兼容旧调用，现已自动触发）
+        if path.startswith('/api/book/') and path.endswith('/browser-confirm'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            if not HAS_BROWSER_AGENT:
+                self.json_resp(400, {'error': '浏览器控制模块未安装'}); return
+            query = data.get('query', '')
+            settings = get_settings()
+            _auto_start_browser_search(bid, query, settings)
+            self.json_resp(200, {'success': True}); return
+
         # 通读 API (POST)
         path_lower = path.lower()
         if '/readthrough' in path_lower and path_lower.startswith('/api/book/'):
@@ -3065,6 +3838,16 @@ class Handler(BaseHTTPRequestHandler):
                     t = _rebuild_tasks.get(bid)
                     if t and t.get('status') == 'running':
                         self.json_resp(400, {'error': '通读正在进行中'}); return
+                # 备份旧的 source.md 为 source_YYYYMMDD.md
+                old_source = get_source(bid)
+                if old_source and len(old_source.strip()) > 50:
+                    today_str = datetime.now().strftime('%Y%m%d')
+                    backup_name = f'source_{today_str}.md'
+                    backup_path = os.path.join(get_book_dir(bid), backup_name)
+                    with open(backup_path, 'w', encoding='utf-8') as f:
+                        f.write(old_source)
+                    save_source(bid, '')
+                    _rebuild_log(bid, f'已备份旧笔记为 {backup_name}')
                 cfg = get_readthrough_config(bid)
                 if cfg.get('model'): settings['model'] = cfg['model']
                 cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
@@ -3078,9 +3861,23 @@ class Handler(BaseHTTPRequestHandler):
                         t['stopped'] = True
                 # 关闭该书本的所有 readthrough 连接
                 close_connections_by_book(bid)
-                cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
-                if os.path.exists(cp_file): os.remove(cp_file)
                 self.json_resp(200, {'status': 'stopping'}); return
+            if path.endswith('/continue') or path.endswith('/readthrough/continue'):
+                settings = get_settings()
+                prov = get_ai_providers()
+                if not settings.get('base_url'):
+                    p = (prov.get('providers', [{}])[0] if prov.get('providers') else {})
+                    if p: settings = {'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')}
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                with _rebuild_lock:
+                    t = _rebuild_tasks.get(bid)
+                    if t and t.get('status') == 'running':
+                        self.json_resp(400, {'error': '通读正在进行中'}); return
+                cfg = get_readthrough_config(bid)
+                if cfg.get('model'): settings['model'] = cfg['model']
+                threading.Thread(target=do_readthrough, args=(bid, settings, cfg, True), daemon=True).start()
+                self.json_resp(200, {'status': 'continued'}); return
             if path.endswith('/clear') or path.endswith('/readthrough/clear'):
                 cp = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
                 if os.path.exists(cp): os.remove(cp)
@@ -3209,7 +4006,7 @@ class Handler(BaseHTTPRequestHandler):
 只输出 markdown，不要加任何开场白或结束语。"""
                         msgs = [{'role': 'system', 'content': '你是专业的小说结构分析师。基于阅读笔记整理大纲时，必须用自己的语言重新叙述，保留所有有用细节，禁止复制原文。只输出 markdown。'}, {'role': 'user', 'content': prompt}]
                     elif gtype == 'prediction':
-                        prompt = f"""你是一位正在追读这部小说的资深读者。基于作者已公布的阅读笔记（你没有作者视角，不知道后续），分析剧情并推测未来走向。
+                        prompt = f"""你是一位正在追读这部小说的资深读者。基于作者已公布的阅读笔记（你不是作者，不知道后续），分析剧情并推测未来走向。
 
 【你已读到的全书笔记】
 {st}
@@ -3374,7 +4171,390 @@ def _replace_pending_chat_msg(book_id, task_id, text, reasoning=''):
     except Exception as e:
         log_action('CHAT_REPLACE_ERROR', f'{book_id}/{task_id}: {str(e)[:100]}')
 
-# ===== 统一活跃 AI 连接池 =====
+def _do_browser_search_launch(tid, bid, query, cfg_settings, direct_link=None):
+    """后台线程：启动浏览器、导航到页面，然后启动简洁代理。"""
+    try:
+        set_conn_meta('chat', 'AI对话', bid)
+        settings = get_settings()
+        ok, msg = browser_agent.init_browser()
+        if not ok:
+            _replace_pending_chat_msg(bid, tid, '[浏览器初始化失败: ' + msg + ']')
+            bg_task_done(tid, msg)
+            return
+        url = direct_link if direct_link else f'https://www.bing.com/search?q={quote(query)}'
+        nav = browser_agent.browser_navigate(url)
+        if not nav.get('success'):
+            # 重试一次
+            browser_agent.close_browser()
+            import time as _rt; _rt.sleep(1)
+            ok2, msg2 = browser_agent.init_browser()
+            if ok2:
+                nav = browser_agent.browser_navigate(url)
+        if not nav.get('success'):
+            _replace_pending_chat_msg(bid, tid, '[浏览器导航失败: ' + nav.get('error', '') + ']')
+            bg_task_done(tid, '导航失败: ' + nav.get('error', ''))
+            return
+        import time as _time
+        _time.sleep(2.5)
+        txt = browser_agent.browser_get_text(max_length=6000)
+        page_text = txt.get('text', '') if txt.get('success') else ''
+        if not page_text:
+            _replace_pending_chat_msg(bid, tid, '[已打开页面]')
+            bg_task_done(tid)
+            return
+        _simple_browser_agent(tid, bid, query, page_text, nav.get('url', url), cfg_settings)
+    except Exception as e:
+        try: _replace_pending_chat_msg(bid, tid, '[错误: ' + str(e) + ']')
+        except: pass
+        bg_task_done(tid, str(e))
+
+
+def _simple_browser_agent(tid, bid, query, page_text, page_url, cfg_settings):
+    """极简浏览器代理：AI 读页面→输出 [GO]url 或 [SCROLL] 或 [DONE]→后端执行→重复。不提取链接，让 AI 自己从文本中找 URL。"""
+    set_conn_meta('browser-search', '浏览器搜索', bid)
+    try:
+        current_url = page_url
+        current_text = page_text
+        conv = []
+        all_reasoning = []
+        MAX_TURNS = 8
+
+        sys_prompt = (
+            "你是一个浏览器助手。后端会把当前页面的文本内容发给你（可能包含链接文字和URL碎片）。"
+            "你的任务：像人一样浏览网页，阅读多个页面/链接，直到完全了解用户想知道的背景。"
+            "\n\n【重要规则】"
+            "\n1. 只使用页面文本中明确出现的 URL。不要自己编造或拼接 URL。"
+            "\n   例如文本里有 'github.com/chess20000/LucaWriter' → 用 [GO]https://github.com/chess20000/LucaWriter[/GO]"
+            "\n   如果没有完整URL但有域名片段，先用 [SEARCH]搜索。不要猜URL。"
+            "\n2. 如果当前页面没有有用内容（空白、404、登录墙、错误页面），立刻 [SEARCH] 或 [DONE]。"
+            "\n3. 发现 URL 但不确定是否正确，可以 [SEARCH] 搜一下确认。"
+            "\n\n动作格式（放在回复开头）："
+            "\n[GO]完整URL[/GO] — 打开这个网址"
+            "\n[SEARCH]关键词[/SEARCH] — 新开搜索（在 Bing 搜这个词）"
+            "\n[SCROLL][/SCROLL] — 向下滚动当前页面看更多"
+            "\n[DONE]口语总结[/DONE] — 浏览完毕，汇报给用户"
+        )
+
+        for turn in range(MAX_TURNS):
+            if bg_task_should_stop(tid):
+                break
+
+            user_msg = f"用户想知道：{query}\n\n当前URL：{current_url}\n\n【页面内容】\n{current_text[:4000]}"
+            if len(current_text.strip()) < 100:
+                user_msg += "\n\n⚠️ 这个页面内容极少或为空（可能是404/登录墙/错误页面）。如果没看到有用信息，请 [SEARCH] 搜索或直接 [DONE]。"
+            elif 'github' in current_url.lower() and ('sign in' in current_text.lower() or 'login' in current_text.lower()):
+                user_msg += "\n\n⚠️ 这个 GitHub 页面看起来是登录页/404，没有仓库内容。请 [SEARCH] 搜索正确的仓库名或直接 [DONE]。"
+
+            msgs = [
+                {'role': 'system', 'content': sys_prompt + f'\n当前时间：{datetime.now().strftime("%Y年%m月%d日 %H:%M")}'},
+            ]
+            for c in conv[-4:]:
+                msgs.append({'role': c['role'], 'content': c['content']})
+            msgs.append({'role': 'user', 'content': user_msg})
+
+            content_acc = []
+            reasoning_acc = []
+
+            def on_content(tk):
+                content_acc.append(tk)
+                bg_task_update(tid, result=''.join(content_acc), progress=min(90, 10 + turn * 12))
+
+            def on_reasoning(tk):
+                reasoning_acc.append(tk)
+                all_reasoning.append(tk)
+                bg_task_update(tid, reasoning=''.join(all_reasoning))
+
+            full_text, err = call_ai_stream(cfg_settings, msgs, None, cfg_settings.get('ai_temperature', 0.7),
+                                            timeout=60, on_content_token=on_content,
+                                            on_reasoning_token=on_reasoning,
+                                            should_stop_fn=lambda: bg_task_should_stop(tid))
+
+            if err:
+                _replace_pending_chat_msg(bid, tid, '[已停止]')
+                bg_task_done(tid, err)
+                return
+
+            resp = full_text or ''
+            conv.append({'role': 'assistant', 'content': resp[:500]})
+            search_text = resp + '\n' + ''.join(all_reasoning)
+
+            # [DONE]
+            dm = re.search(r'\[DONE\](.*?)\[/DONE\]', search_text, re.S)
+            if dm:
+                summary = dm.group(1).strip() or '浏览完毕。'
+                reasoning = ''.join(all_reasoning)
+                _replace_pending_chat_msg(bid, tid, summary, reasoning)
+                bg_task_update(tid, result=summary, reasoning=reasoning, progress=100)
+                bg_task_done(tid)
+                return
+
+            # [GO]URL[/GO]
+            gm = re.search(r'\[GO\]\s*(https?://[^\s\[\]]+)\s*\[/GO\]', search_text)
+            if gm:
+                url = gm.group(1).strip()
+                bg_task_update(tid, result=f'🌐 正在访问 {url[:60]}…', progress=15 + turn * 12)
+                try:
+                    nav = browser_agent.browser_navigate(url)
+                    import time as _time; _time.sleep(2.5)
+                    txt = browser_agent.browser_get_text(max_length=6000)
+                    if nav.get('success') and txt.get('success'):
+                        current_url = nav.get('url', url)
+                        current_text = txt.get('text', '')
+                        conv.append({'role': 'user', 'content': f'[已导航到 {current_url}]'})
+                        bg_task_update(tid, result='🌐 正在阅读页面…', progress=20 + turn * 12)
+                        continue
+                except Exception as e:
+                    conv.append({'role': 'user', 'content': f'[导航失败: {e}。尝试搜索或换个URL]'})
+                    continue
+
+            # [SEARCH]关键词[/SEARCH] — 新搜索
+            sm = re.search(r'\[SEARCH\](.*?)\[/SEARCH\]', search_text)
+            if sm:
+                kw = sm.group(1).strip()
+                if kw:
+                    bg_task_update(tid, result=f'🌐 正在搜索 {kw[:40]}…', progress=15 + turn * 12)
+                    try:
+                        search_url = f'https://www.bing.com/search?q={quote(kw)}'
+                        nav = browser_agent.browser_navigate(search_url)
+                        import time as _time; _time.sleep(2.5)
+                        txt = browser_agent.browser_get_text(max_length=6000)
+                        if nav.get('success') and txt.get('success'):
+                            current_url = nav.get('url', search_url)
+                            current_text = txt.get('text', '')
+                            conv.append({'role': 'user', 'content': f'[新搜索: {kw}]'})
+                            bg_task_update(tid, result='🌐 正在阅读搜索结果…', progress=20 + turn * 12)
+                            continue
+                    except Exception as e:
+                        conv.append({'role': 'user', 'content': f'[搜索失败: {e}]'})
+                        continue
+
+            # [SCROLL]
+            if re.search(r'\[SCROLL\]', search_text):
+                try:
+                    browser_agent.browser_scroll(direction='down', amount=600)
+                    import time as _time; _time.sleep(1)
+                    txt = browser_agent.browser_get_text(max_length=6000)
+                    if txt.get('success'):
+                        current_text = txt.get('text', '')
+                        conv.append({'role': 'user', 'content': '[页面已向下滚动]'})
+                        bg_task_update(tid, result='🌐 滚动中…', progress=20 + turn * 12)
+                        continue
+                except:
+                    pass
+
+            # 什么都没匹配到 → 总结
+            reasoning = ''.join(all_reasoning)
+            summary = _browser_summarize(conv, query, cfg_settings, tid)
+            _replace_pending_chat_msg(bid, tid, summary, reasoning)
+            bg_task_update(tid, result=summary, reasoning=reasoning, progress=100)
+            bg_task_done(tid)
+            return
+
+        # 超轮数 → 总结
+        reasoning = ''.join(all_reasoning)
+        summary = _browser_summarize(conv, query, cfg_settings, tid)
+        _replace_pending_chat_msg(bid, tid, summary, reasoning)
+        bg_task_update(tid, result=summary, reasoning=reasoning, progress=100)
+        bg_task_done(tid)
+    except Exception as e:
+        try: _replace_pending_chat_msg(bid, tid, '[错误: ' + str(e) + ']')
+        except: pass
+        bg_task_done(tid, str(e))
+
+
+def _browser_summarize(conv, query, cfg_settings, tid):
+    """让 AI 总结浏览过程中了解到的信息，输出给用户。"""
+    try:
+        bg_task_update(tid, result='🌐 正在总结…', progress=95)
+        pages = '\n'.join([(c['role'] == 'user' and c.get('content', '')) or '' for c in conv[-10:]])
+        pages = pages[:3000]
+        msgs = [
+            {'role': 'system', 'content': '你刚刚替用户浏览了一些网页。现在请用口语总结你了解到的信息。像朋友聊天一样自然，直接说发现。'},
+            {'role': 'user', 'content': f'用户想问：{query}\n\n浏览记录：\n{pages}\n\n请用口语总结（200字内）。'},
+        ]
+        full_text, err = call_ai_stream(cfg_settings, msgs, 400, 0.7, timeout=30,
+                                         on_content_token=None,
+                                         on_reasoning_token=None,
+                                         should_stop_fn=lambda: bg_task_should_stop(tid))
+        if err:
+            return '浏览了相关信息。'
+        return (full_text or '浏览完了，信息有点多，换个方向再问吧。').strip()
+    except Exception:
+        return '浏览完毕。'
+
+def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
+    set_conn_meta('series-chat', '系列AI对话', sid)
+    try:
+        s_meta = get_book_meta(sid)
+        series_title = s_meta.get('title', '未命名系列') if s_meta else '未命名系列'
+        series_book_ids = [x for x in (s_meta.get('series_books', []) if s_meta else []) if x]
+        source_parts = []
+        for bid in series_book_ids:
+            b_meta = get_book_meta(bid)
+            b_title = b_meta.get('title', '未命名') if b_meta else '未命名'
+            src = get_source(bid)
+            if src and len(src) > 50:
+                source_parts.append(f'【{b_title}】\n{src}')
+            else:
+                ch_dir = os.path.join(get_book_dir(bid), 'chapters')
+                cc = len(os.listdir(ch_dir)) if os.path.isdir(ch_dir) else 0
+                source_parts.append(f'【{b_title}】（共{cc}章，尚未通读）')
+        source_ctx = '\n\n'.join(source_parts) if source_parts else '（系列中暂无阅读笔记）'
+        tp = cfg_settings.get('ai_temperature', 0.7)
+        is_first_round = not history_list
+        if is_first_round:
+            sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
+
+当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
+
+【重要】你已经在系统里看到了这个系列所有书本的阅读笔记（见下方），不需要让用户再发一遍。你直接就能看到每本书的内容概要。
+
+【说话方式】
+谨言慎行。温文尔雅，不卑不亢。惜字如金。
+不要列选项，不要反问，不要结构化分析。
+看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
+你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句。
+你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
+避免用"呗""啦"结尾，显得轻浮。
+
+【绝对禁止】
+严禁任何身份描述。严禁说：
+- "我是你的朋友／搭档／助手／助理" "写小说的朋友"
+- "我叫XX" "我就是帮你XX的" "你的写作搭档"
+被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
+严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
+你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
+
+【你的专长】
+你是系列小说的宏观顾问，擅长：
+- 系列整体架构规划：各本书的定位、节奏、篇幅
+- 世界观补全：哪些方面还没展开，下一本适合从哪个角度拓展
+- 人物弧线：跨书的人物成长和命运安排
+- 伏笔管理：前书埋下的伏笔在后续如何回收
+- 连贯性检查：各书之间是否有设定冲突或时间线问题
+- 读者体验：从读者角度审视系列的阅读节奏和期待管理
+
+【隐藏功能】你可以主动启动系列通读进程。当你判断用户想要你通读整个系列（例如说"帮我把系列通读一遍""分析一下全系列""我要通读"等），或你认为需要全面了解所有细节才能回答当前问题时，请调用这个工具。调用后系统会自动逐书逐章阅读并生成完整的阅读笔记。
+- 调用格式：[START_SERIES_READTHROUGH][/START_SERIES_READTHROUGH]
+- 注意：调用前先简短告诉用户"好的，我这就启动系列通读"，然后输出工具标签。
+
+这个系列叫「{series_title}」，以下是各本书的阅读笔记：
+
+{source_ctx}
+
+用户对你发送了如下消息——"""
+        else:
+            sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
+
+当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
+
+【重要】你已经在系统里看到了这个系列所有书本的阅读笔记，不需要让用户再发一遍。
+
+【输出风格】
+1. 谨言慎行。温文尔雅，不卑不亢。惜字如金
+2. 不要开场白和结束语，不要"首先…其次…最后…"
+3. 看到好就简短说好，有问题就精准点出。不浮夸也不冷漠
+4. 你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句
+5. 你欣赏世界观宏大、设定严丝合缝的好作品
+6. 避免用"呗""啦"结尾，显得轻浮
+
+【绝对禁止】
+严禁任何身份描述。严禁说：
+- "我是你的朋友／搭档／助手／助理" "写小说的朋友"
+- "我叫XX" "我就是帮你XX的" "你的写作搭档"
+被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
+严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
+你的品格从言行中流露。
+
+【你的专长】系列小说的宏观顾问：架构规划、世界观补全、人物弧线、伏笔管理、连贯性检查、读者体验。
+
+【隐藏功能】你可以主动启动系列通读进程。当用户要求通读系列，或你判断需要全面了解细节才能回答时，请调用：
+- 调用格式：[START_SERIES_READTHROUGH][/START_SERIES_READTHROUGH]
+- 调用前先简短告诉用户"好的，我这就启动系列通读"，然后输出工具标签。
+
+这个系列叫「{series_title}」，以下是各本书的阅读笔记：
+
+{source_ctx}
+
+请继续和用户对话。"""
+        msgs = [{'role': 'system', 'content': sys_msg}]
+        for h in history_list:
+            role = h.get('role')
+            content = h.get('content')
+            if role and content:
+                msgs.append({'role': role, 'content': content})
+        msgs.append({'role': 'user', 'content': user_text})
+        content_acc = []
+        reasoning_acc = []
+        def on_content(tk):
+            content_acc.append(tk)
+            bg_task_update(task_id, result=''.join(content_acc), progress=min(95, 30 + len(''.join(content_acc)) // 10))
+        def on_reasoning(tk):
+            reasoning_acc.append(tk)
+            bg_task_update(task_id, reasoning=''.join(reasoning_acc))
+        full_text, err = call_ai_stream(cfg_settings, msgs, None, tp, timeout=120,
+                                        on_content_token=on_content,
+                                        on_reasoning_token=on_reasoning,
+                                        should_stop_fn=lambda: bg_task_should_stop(task_id))
+        if err:
+            if '用户停止' in err or bg_task_should_stop(task_id):
+                _replace_pending_chat_msg(sid, task_id, '[已停止]')
+                bg_task_done(task_id, '已停止')
+            else:
+                _replace_pending_chat_msg(sid, task_id, '[错误: ' + err + ']')
+                bg_task_done(task_id, err)
+            return
+        reasoning_text = ''.join(reasoning_acc)
+        content_text = ''.join(content_acc)
+        
+        # 去重：推理模型的思考过程有时会重复出现在正文中
+        def _normalize_for_dedup(t):
+            return re.sub(r'\s+', ' ', t).strip()
+        
+        r_norm = _normalize_for_dedup(reasoning_text) if reasoning_text else ''
+        f_norm = _normalize_for_dedup(full_text) if full_text else ''
+        c_norm = _normalize_for_dedup(content_text) if content_text else ''
+        
+        if r_norm and (f_norm == r_norm or c_norm == r_norm):
+            reasoning_text = ''
+            reasoning_acc.clear()
+        elif r_norm and len(r_norm) > 2 and (r_norm in f_norm or r_norm in c_norm):
+            full_text = full_text.replace(r_norm, '', 1).strip()
+            reasoning_text = ''
+            reasoning_acc.clear()
+        elif f_norm and len(f_norm) > 2 and (f_norm in r_norm):
+            reasoning_text = ''
+            reasoning_acc.clear()
+        elif r_norm and (f_norm.startswith(r_norm) or c_norm.startswith(r_norm)):
+            full_text = full_text[len(r_norm):].strip()
+            
+        if not full_text and reasoning_text:
+            full_text = reasoning_text
+            reasoning_text = ''
+        result = re.sub(r'[#*`~]', '', full_text)
+        # 模型自重复检测：如果结果的前半段和后半段高度相似，截掉后半段
+        if len(result) > 20:
+            half = len(result) // 2
+            first_half = re.sub(r'\s+', '', result[:half])
+            second_half = re.sub(r'\s+', '', result[half:])
+            if first_half and second_half and first_half == second_half:
+                result = result[:half].strip()
+            elif len(result) > 40:
+                q = len(result) // 4
+                a = re.sub(r'\s+', '', result[:q])
+                b = re.sub(r'\s+', '', result[q:q*2])
+                if a and b and a == b:
+                    result = result[:q*2].strip()
+        needs_rt = False
+        if re.search(r'\[START_SERIES_READTHROUGH\]', result):
+            needs_rt = True
+            result = re.sub(r'\[START_SERIES_READTHROUGH\]\s*\[/START_SERIES_READTHROUGH\]', '', result).strip()
+        _replace_pending_chat_msg(sid, task_id, result, reasoning_text)
+        bg_task_update(task_id, progress=100, result=result, reasoning=reasoning_text, needs_series_readthrough=needs_rt)
+        bg_task_done(task_id)
+    except Exception as e:
+        _replace_pending_chat_msg(sid, task_id, '[错误: ' + str(e) + ']')
+        bg_task_done(task_id, str(e))
 _ai_conn_lock = threading.Lock()
 _ai_connections = {}
 _conn_meta = threading.local()
@@ -3449,6 +4629,73 @@ def close_connections_by_type(conn_type):
         except: pass
     return len(to_close)
 
+# ===== 已连接客户端追踪 =====
+_client_tracker_lock = threading.Lock()
+_connected_clients = {}  # ip -> {ip, ua, type, label, last_seen, first_seen}
+
+def _track_http_client(client_ip, user_agent, luca_client_header):
+    """记录HTTP请求来源，用于展示当前连接的客户端"""
+    now = time.time()
+    key = client_ip
+    ua_short = (user_agent or '未知')[:120]
+
+    # 判断客户端类型
+    if luca_client_header == 'electron':
+        ctype = 'electron'
+        label = 'LucaWriter 桌面端'
+    elif 'Electron' in ua_short and 'LucaWriter' in ua_short:
+        ctype = 'electron'
+        label = 'LucaWriter 桌面端'
+    elif 'Mobile' in ua_short or 'Android' in ua_short or 'iPhone' in ua_short:
+        ctype = 'mobile'
+        label = f'移动端 ({client_ip})'
+    elif 'Mozilla' in ua_short and ('Chrome' in ua_short or 'Firefox' in ua_short or 'Safari' in ua_short or 'Edge' in ua_short):
+        ctype = 'browser'
+        label = f'浏览器 ({client_ip})'
+    elif client_ip == '127.0.0.1':
+        ctype = 'local'
+        label = '本机'
+    else:
+        ctype = 'other'
+        label = f'{client_ip}'
+
+    with _client_tracker_lock:
+        if key in _connected_clients:
+            _connected_clients[key]['last_seen'] = now
+            _connected_clients[key]['ua'] = ua_short
+            _connected_clients[key]['type'] = ctype
+            _connected_clients[key]['label'] = label
+        else:
+            _connected_clients[key] = {
+                'ip': client_ip,
+                'ua': ua_short,
+                'type': ctype,
+                'label': label,
+                'last_seen': now,
+                'first_seen': now,
+            }
+
+    # 定期清理30秒无活动的客户端
+    stale = [k for k, v in _connected_clients.items() if now - v['last_seen'] > 30]
+    for k in stale:
+        del _connected_clients[k]
+
+def get_connected_clients():
+    """返回当前已连接客户端列表"""
+    now = time.time()
+    with _client_tracker_lock:
+        result = []
+        for c in _connected_clients.values():
+            result.append({
+                'ip': c['ip'],
+                'type': c['type'],
+                'label': c['label'],
+                'last_seen': c['last_seen'],
+                'online_seconds': int(now - c['first_seen']),
+                'idle_seconds': int(now - c['last_seen']),
+            })
+        return sorted(result, key=lambda x: x['last_seen'], reverse=True)
+
 # ===== 通读全书 =====
 _rebuild_lock = threading.Lock()
 _rebuild_tasks = {}
@@ -3485,6 +4732,136 @@ def get_readthrough_config(bid):
 def save_readthrough_config(bid, cfg):
     p = os.path.join(get_book_dir(bid), 'readthrough.json')
     save_json(p, cfg)
+
+# ===== 系列通读 =====
+_series_rt_lock = threading.Lock()
+_series_rt_tasks = {}
+
+def _series_rt_log(sid, msg):
+    with _series_rt_lock:
+        t = _series_rt_tasks.get(sid, {})
+        t['stream_buffer'] = t.get('stream_buffer', '') + msg + '\n'
+
+def _series_rt_update(sid, **kw):
+    with _series_rt_lock:
+        _series_rt_tasks[sid] = {**_series_rt_tasks.get(sid, {}), **kw}
+
+def _series_rt_should_stop(sid):
+    with _series_rt_lock:
+        return _series_rt_tasks.get(sid, {}).get('stopped', False)
+
+def do_series_readthrough(sid, settings):
+    set_conn_meta('series-readthrough', '系列通读', sid)
+    try:
+        s_meta = get_book_meta(sid)
+        series_title = s_meta.get('title', '未命名') if s_meta else '未命名'
+        series_book_ids = [x for x in (s_meta.get('series_books', []) if s_meta else []) if x]
+        if not series_book_ids:
+            _series_rt_update(sid, status='error', phase='系列中没有书本', error='系列中没有书本')
+            return
+
+        all_chapters = []
+        for bid in series_book_ids:
+            b_meta = get_book_meta(bid)
+            if not b_meta: continue
+            b_title = b_meta.get('title', bid)
+            order = b_meta.get('chapter_order', [])
+            ch_dir = os.path.join(get_book_dir(bid), 'chapters')
+            if not os.path.isdir(ch_dir) or not order: continue
+            for cid in order:
+                ch = _read_chapter_file(bid, cid)
+                if ch:
+                    all_chapters.append({
+                        'book_id': bid, 'book_title': b_title,
+                        'id': cid, 'title': ch.get('title', '未命名'),
+                        'content': ch.get('content', '')
+                    })
+
+        total = len(all_chapters)
+        if total == 0:
+            _series_rt_update(sid, status='error', phase='没有章节', error='系列中没有章节')
+            return
+
+        _series_rt_update(sid, status='running', progress=0, phase='准备中', total_chapters=total, done_chapters=0, stream_buffer='')
+        _series_rt_log(sid, f'系列「{series_title}」共 {len(series_book_ids)} 本书，{total} 章')
+        _series_rt_log(sid, '开始通读系列...')
+
+        current_source = f'# 系列「{series_title}」全书阅读笔记\n\n'
+        done_count = 0
+        cfg_settings = {'temperature': get_settings().get('ai_temperature', 0.5)}
+
+        for ch in all_chapters:
+            if _series_rt_should_stop(sid):
+                _series_rt_update(sid, status='stopped', phase='已停止')
+                save_source(sid, current_source)
+                return
+
+            if _is_content_empty(ch['content']):
+                _series_rt_log(sid, f'跳过空章节: [{ch["book_title"]}] {ch["title"]}')
+                skip_result = f'## 剧情摘要\n[本章无实质正文，跳过]\n\n## 资料记录\n[无]\n'
+                current_source += f'\n\n### [{ch["book_title"]}] {ch["title"]}\n{skip_result}'
+                done_count += 1
+                save_source(sid, current_source)
+                pct = int(done_count / total * 85)
+                _series_rt_update(sid, progress=pct, done_chapters=done_count, phase=f'跳过空章节: {ch["title"]}')
+                continue
+
+            _series_rt_log(sid, f'正在读: [{ch["book_title"]}] {ch["title"]}')
+            _series_rt_update(sid, phase=f'正在读: {ch["title"]}', progress=int(done_count / total * 85))
+
+            prev_ctx = _extract_context_summary(current_source)
+            max_retries = 3
+            attempt = 0
+            result = ''
+            err = None
+            while attempt < max_retries:
+                if _series_rt_should_stop(sid):
+                    _series_rt_update(sid, status='stopped', phase='已停止')
+                    save_source(sid, current_source)
+                    return
+                result, err = _ai_read_chapter(settings, ch['title'], ch['content'], prev_ctx, config=cfg_settings)
+                if result and not err:
+                    break
+                attempt += 1
+                if attempt < max_retries:
+                    _series_rt_log(sid, f'重试 {attempt}/{max_retries}...')
+            if not result or err:
+                _series_rt_log(sid, f'跳过失败章节: {ch["title"]} ({err or "未返回"})')
+                result = f'## 剧情摘要\n[读取失败]\n\n## 资料记录\n[无]\n'
+
+            current_source += f'\n\n### [{ch["book_title"]}] {ch["title"]}\n{result}'
+            done_count += 1
+            save_source(sid, current_source)
+            pct = int(done_count / total * 85)
+            _series_rt_update(sid, progress=pct, done_chapters=done_count)
+
+        # 生成系列大纲
+        _series_rt_log(sid, '正在生成系列大纲...')
+        _series_rt_update(sid, phase='生成系列大纲', progress=90)
+        try:
+            outline_prompt = f"""基于以下系列阅读笔记，整理一份结构清晰的系列大纲。
+
+{current_source}
+
+【要求】
+1. 用自己的语言重新组织，不要复制原文句子
+2. 梳理跨书的主题脉络、人物弧线、世界观演变
+3. 标注各书之间的伏笔和呼应
+4. 输出为简洁的 Markdown 格式"""
+            msgs = [{'role': 'system', 'content': '你是系列小说大纲整理专家。基于阅读笔记，梳理跨书脉络。'}, {'role': 'user', 'content': outline_prompt}]
+            outline, _, outline_err = call_ai_full(settings, msgs, max_tokens=4096, temperature=0.3, timeout=180)
+            if outline and not outline_err:
+                save_outline_md(sid, outline)
+                _series_rt_log(sid, '系列大纲已生成')
+        except Exception as e:
+            _series_rt_log(sid, f'大纲生成失败: {str(e)[:100]}')
+
+        save_source(sid, current_source)
+        _series_rt_update(sid, status='done', progress=100, phase='完成', done_chapters=done_count, total_chapters=done_count, stream_buffer=current_source[-2000:])
+        _series_rt_log(sid, '系列通读完成！')
+    except Exception as e:
+        _series_rt_update(sid, status='error', phase='失败', error=str(e)[:200])
+        _series_rt_log(sid, f'错误: {str(e)[:200]}')
 
 def get_source(bid):
     p = os.path.join(get_book_dir(bid), 'source.md')
@@ -3831,7 +5208,7 @@ def _stop_local_llm():
         _LOCAL_LLM_STATE['error'] = ''
     return True, ''
 
-def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=False):
+def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=False, tools=None, tool_choice=None):
     """构建 OpenAI 兼容 API 请求"""
     s = dict(settings)
     if not s.get('base_url') or not s.get('model'):
@@ -3853,10 +5230,10 @@ def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=Fals
     else:
         url = f'{base}/v1/chat/completions'
     headers = {'Content-Type': 'application/json'}
-    if key:
-        headers['Authorization'] = f'Bearer {key}'
     # 检测是否为 MiniMax
     is_minimax = 'minimaxi' in base.lower()
+    if key:
+        headers['Authorization'] = f'Bearer {key}'
     body = {'model': model, 'messages': messages}
     # MiniMax temperature 范围 (0,1]，默认推荐 1.0
     if is_minimax:
@@ -3872,6 +5249,11 @@ def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=Fals
             body['max_tokens'] = int(max_tokens)
     if stream:
         body['stream'] = True
+    # 添加 tools 支持
+    if tools:
+        body['tools'] = tools
+    if tool_choice:
+        body['tool_choice'] = tool_choice
     return url, headers, json.dumps(body).encode(), 'POST', {'text_path': 'choices.0.message.content'}, None
 
 def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_token=None, on_content_token=None, on_reasoning_token=None, should_stop_fn=None):
@@ -3997,6 +5379,7 @@ def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_
                                     if on_token:
                                         try: on_token(content_tk)
                                         except: pass
+                                    _think_buf = ''
                             else:
                                 # 原生 reasoning_content 或纯 content
                                 if content_tk:
@@ -4156,9 +5539,14 @@ def call_ai_full(settings, messages, max_tokens, temperature, timeout=120):
                 if think_match:
                     reasoning = think_match.group(1)
                     content = re.sub(r'<think>.*?<\/think>', '', content, flags=re.S).strip()
-            # 去重：如果正文以思考过程开头，截掉重复部分
-            if reasoning and content.strip().startswith(reasoning.strip()):
-                content = content[len(reasoning):].strip()
+            # 去重：如果正文与思考完全相同，或正文以思考过程开头，截掉重复部分
+            if reasoning:
+                r_strip = reasoning.strip()
+                c_strip = content.strip()
+                if c_strip == r_strip:
+                    reasoning = ''
+                elif c_strip.startswith(r_strip):
+                    content = content[len(reasoning):].strip()
             # 如果去重后正文为空，把思考过程当正文
             if not content and reasoning:
                 content = reasoning
@@ -4187,6 +5575,64 @@ def call_ai(settings, messages, max_tokens, temperature, timeout=120):
     """旧接口，只返回正文"""
     content, _, err = call_ai_full(settings, messages, max_tokens, temperature, timeout)
     return content, err
+
+
+def call_ai_with_tools(settings, messages, max_tokens, temperature, tools=None, tool_choice=None, timeout=120):
+    """
+    调用 AI 并支持 function calling/tools
+    
+    Returns:
+        (content, tool_calls, reasoning, error)
+        - content: AI 回复的文本内容
+        - tool_calls: 工具调用列表 [{name, arguments}]
+        - reasoning: 思考过程
+        - error: 错误信息
+    """
+    url, headers, body_bytes, method, resp_parse, err = _prepare_ai_request(
+        settings, messages, max_tokens, temperature, stream=False, tools=tools, tool_choice=tool_choice
+    )
+    if err:
+        return None, None, None, err
+    
+    try:
+        req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        data = json.loads(resp.read().decode('utf-8', errors='replace'))
+        
+        choice = data.get('choices', [{}])[0]
+        message = choice.get('message', {})
+        
+        content = message.get('content', '')
+        reasoning = message.get('reasoning_content', '')
+        
+        # 解析 tool_calls
+        tool_calls = []
+        raw_tool_calls = message.get('tool_calls', [])
+        for tc in raw_tool_calls:
+            if tc.get('type') == 'function':
+                func = tc.get('function', {})
+                tool_calls.append({
+                    'name': func.get('name', ''),
+                    'arguments': json.loads(func.get('arguments', '{}'))
+                })
+        
+        return content, tool_calls, reasoning, None
+        
+    except urllib.error.HTTPError as e:
+        status = e.code
+        err_msg = str(e)
+        try:
+            raw = e.read()
+            body = raw.decode() if raw else ''
+            ed = json.loads(body)
+            if isinstance(ed, dict) and 'error' in ed:
+                err_msg = (ed['error'].get('message', str(ed['error'])) if isinstance(ed['error'], dict) else str(ed['error']))
+        except: pass
+        log_action('AI_ERROR', f'status={status} url={url} err={err_msg}')
+        return None, None, None, f'API错误({status}): {err_msg}'
+    except Exception as e:
+        return None, None, None, str(e)
+
 
 def _extract_context_summary(source_text):
     """从已有笔记中提取极简索引：人物和关键事件，供AI参考避免重复介绍。"""
@@ -4652,7 +6098,7 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings, text=None):
         bg_task_done(task_id, str(e))
 
 
-def do_readthrough(bid, settings, config=None):
+def do_readthrough(bid, settings, config=None, resume=False):
     """后台线程：逐章通读，生成 source.md + 大纲"""
     set_conn_meta('readthrough', '通读', bid)
     cfg = config or {}
@@ -4671,10 +6117,30 @@ def do_readthrough(bid, settings, config=None):
         _rebuild_log(bid, f'全书 {total} 章')
 
         cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
-        cp = load_json(cp_file, dict)
-        notes = cp.get('notes', [])
-        done = set(cp.get('done', []))
-        notes = []; done = set()
+        notes = []
+        done = set()
+        current_source = ''
+
+        if resume:
+            # 从 check point 恢复
+            cp = load_json(cp_file, dict)
+            notes = cp.get('notes', [])
+            done_list = cp.get('done', [])
+            if done_list:
+                # 续表时：重做最后一章（把最后一章从 done 和 notes 里移除，重新构建 source）
+                last_done = done_list[-1]
+                done_list = done_list[:-1]
+                if notes:
+                    notes = notes[:-1]
+                _rebuild_log(bid, f'将继续通读，从第 {len(done_list) + 1} 章开始重做')
+            done = set(done_list)
+            # 从 notes 重建 source.md，确保不含待重做的章节
+            current_source = '# 全书阅读笔记\n\n'
+            for note in notes:
+                current_source += '\n\n' + note
+            save_source(bid, current_source)
+        else:
+            current_source = '# 全书阅读笔记\n\n'
 
         chapters = []
         for i, cid in enumerate(order):
@@ -4684,10 +6150,6 @@ def do_readthrough(bid, settings, config=None):
 
         pending = [c for c in chapters if c['id'] not in done]
         done_count = len(chapters) - len(pending)
-        current_source = ''
-        if not current_source:
-            current_source = '# 全书阅读笔记\n\n'
-
         _rebuild_set(bid, phase='逐章阅读', done_chapters=done_count,
                      progress=5 + int(done_count / total * 70), source=current_source)
 
@@ -4727,8 +6189,8 @@ def do_readthrough(bid, settings, config=None):
                 done_count += 1
                 save_source(bid, current_source)
                 pct = 5 + int(done_count / total * 70)
-                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source)
-                save_json(cp_file, {'notes': notes, 'done': list(done)})
+                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source, readthrough_chapter_idx=ch['idx'])
+                save_json(cp_file, {'notes': notes, 'done': list(done), 'chapter_idx': ch['idx']})
                 i += 1
                 continue
 
@@ -4832,14 +6294,14 @@ def do_readthrough(bid, settings, config=None):
                         done.add(ch['id'])
                         done_count += 1
                         pct = 5 + int(done_count / total * 70)
-                        _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source)
-                        save_json(cp_file, {'notes': notes, 'done': list(done)})
+                        _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source, readthrough_chapter_idx=ch['idx'])
+                        save_json(cp_file, {'notes': notes, 'done': list(done), 'chapter_idx': ch['idx']})
                         _rebuild_log(bid, f'完成 {ch["title"]} ({done_count}/{total})')
 
                 save_source(bid, current_source)
                 pct = 5 + int(done_count / total * 70)
-                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source)
-                save_json(cp_file, {'notes': notes, 'done': list(done)})
+                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source, readthrough_chapter_idx=ch['idx'])
+                save_json(cp_file, {'notes': notes, 'done': list(done), 'chapter_idx': ch['idx']})
 
                 if _rebuild_should_stop(bid):
                     _rebuild_log(bid, '用户停止，已保存进度')
@@ -4887,8 +6349,8 @@ def do_readthrough(bid, settings, config=None):
                 done.add(ch['id'])
                 done_count += 1
                 pct = 5 + int(done_count / total * 70)
-                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source)
-                save_json(cp_file, {'notes': notes, 'done': list(done)})
+                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source, readthrough_chapter_idx=ch['idx'])
+                save_json(cp_file, {'notes': notes, 'done': list(done), 'chapter_idx': ch['idx']})
                 _rebuild_log(bid, f'完成 {ch["title"]} ({done_count}/{total})')
 
                 if _rebuild_should_stop(bid):
@@ -4906,7 +6368,7 @@ def do_readthrough(bid, settings, config=None):
         if os.path.exists(cp_file):
             os.remove(cp_file)
         _rebuild_log(bid, '通读完成')
-        _rebuild_set(bid, status='done', progress=100, phase='完成')
+        _rebuild_set(bid, status='done', progress=100, phase='完成', readthrough_chapter_idx=-1)
         meta = get_book_meta(bid) or {}
         meta['readthrough_at'] = time.time()
         save_json(os.path.join(get_book_dir(bid), 'meta.json'), meta)

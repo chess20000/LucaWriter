@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, BrowserView, Menu, dialog, ipcMain, Tray, nativeImage } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -6,8 +6,20 @@ const http = require('http');
 
 let pyProc = null;
 let mainWindow = null;
+let browserCtrlWindow = null;
+let browserTabs = {};       // { tabId: { view: BrowserView, title: str, url: str, cdpTargetId: str } }
+let browserActiveTab = null;
+let browserTabSeq = 0;
+const BROWSER_CTRL_PORT = 9224;
+let tray = null;
 let isKilling = false;
+let isQuitting = false;
 const PORT = 20000;
+const BROWSER_DEBUG_PORT = 9223;
+
+// 为浏览器控制功能启用 CDP 调试端口
+app.commandLine.appendSwitch('remote-debugging-port', String(BROWSER_DEBUG_PORT));
+app.commandLine.appendSwitch('remote-allow-origins', '*');
 
 function getUserDataPath() {
   return path.join(app.getPath('userData'), 'data');
@@ -31,6 +43,32 @@ function getBuiltinPath() {
   return path.join(__dirname, '..', 'builtin');
 }
 
+function getSettingsPath() {
+  return path.join(getUserDataPath(), 'settings.json');
+}
+
+function readKeepBackground() {
+  try {
+    if (!fs.existsSync(getSettingsPath())) return false;
+    var raw = fs.readFileSync(getSettingsPath(), 'utf-8');
+    var s = JSON.parse(raw);
+    return !!s.keep_background;
+  } catch (e) {
+    return false;
+  }
+}
+
+function readAccessScope() {
+  try {
+    if (!fs.existsSync(getSettingsPath())) return '127.0.0.1';
+    var raw = fs.readFileSync(getSettingsPath(), 'utf-8');
+    var s = JSON.parse(raw);
+    return s.access_scope || '127.0.0.1';
+  } catch (e) {
+    return '127.0.0.1';
+  }
+}
+
 function startBackend() {
   const dataDir = getUserDataPath();
   fs.mkdirSync(dataDir, { recursive: true });
@@ -40,6 +78,8 @@ function startBackend() {
     FRONTEND_DIR: getFrontendPath(),
     BUILTIN_BOOKS_DIR: getBuiltinPath(),
     LOCAL_LLM_DIR: app.isPackaged ? path.join(process.resourcesPath, 'local_llm') : path.join(__dirname, '..', 'local_llm'),
+    BROWSER_DEBUG_PORT: String(BROWSER_DEBUG_PORT),
+     BROWSER_CTRL_PORT: String(BROWSER_CTRL_PORT),
   });
 
   if (app.isPackaged) {
@@ -153,6 +193,57 @@ function waitForBackend(maxRetries, interval) {
   });
 }
 
+function createTray() {
+  if (tray) return;
+
+  var iconPath = path.join(getFrontendPath(), 'tray-icon.png');
+  var trayIcon;
+  try {
+    trayIcon = nativeImage.createFromPath(iconPath);
+    if (trayIcon.isEmpty()) {
+      trayIcon = nativeImage.createFromPath(path.join(getFrontendPath(), 'icon.ico'));
+    }
+  } catch (e) {
+    trayIcon = nativeImage.createEmpty();
+  }
+
+  tray = new Tray(trayIcon);
+  tray.setToolTip('LucaWriter');
+
+  updateTrayMenu();
+
+  tray.on('double-click', function() {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+      if (!readKeepBackground()) destroyTray();
+    }
+  });
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+
+  var scope = readAccessScope();
+  var scopeLabel = scope === '0.0.0.0' ? '0.0.0.0（全部）' : '127.0.0.1（仅本机）';
+
+  var contextMenu = Menu.buildFromTemplate([
+    { label: 'LucaWriter v1.0.0', enabled: false },
+    { label: '监听: ' + scopeLabel, enabled: false },
+    { type: 'separator' },
+    { label: '退出', click: function() { isQuitting = true; destroyTray(); app.quit(); }},
+  ]);
+
+  tray.setContextMenu(contextMenu);
+}
+
+function destroyTray() {
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+}
+
 ipcMain.on('window-minimize', function() {
   if (mainWindow) mainWindow.minimize();
 });
@@ -168,7 +259,14 @@ ipcMain.on('window-maximize', function() {
 });
 
 ipcMain.on('window-close', function() {
-  if (mainWindow) mainWindow.close();
+  if (!mainWindow) return;
+  if (readKeepBackground() && process.platform === 'win32') {
+    mainWindow.hide();
+    createTray();
+  } else {
+    isQuitting = true;
+    mainWindow.close();
+  }
 });
 
 ipcMain.handle('window-is-maximized', function() {
@@ -185,6 +283,7 @@ function createWindow() {
     title: 'LucaWriter',
     backgroundColor: '#111111',
     frame: false,
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       devTools: false,
@@ -205,6 +304,19 @@ function createWindow() {
     mainWindow.webContents.send('maximize-change', false);
   });
 
+  mainWindow.on('close', function(event) {
+    if (!isQuitting && readKeepBackground() && process.platform === 'win32') {
+      event.preventDefault();
+      mainWindow.hide();
+      createTray();
+    }
+  });
+
+  mainWindow.on('closed', function() {
+    mainWindow = null;
+    destroyTray();
+  });
+
   Menu.setApplicationMenu(null);
 
   mainWindow.webContents.on('before-input-event', function(event, input) {
@@ -220,10 +332,6 @@ function createWindow() {
     if (input.control && (input.key === 'U' || input.key === 'u')) {
       event.preventDefault();
     }
-  });
-
-  mainWindow.on('closed', function() {
-    mainWindow = null;
   });
 }
 
@@ -253,7 +361,9 @@ if (!gotTheLock) {
   app.on('second-instance', function() {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();
+      destroyTray();
     }
   });
 
@@ -265,18 +375,254 @@ if (!gotTheLock) {
       return;
     }
     createWindow();
+    startBrowserCtrlServer();
     loadApp();
+
+function ensureBrowserCtrlWindow() {
+  if (browserCtrlWindow && !browserCtrlWindow.isDestroyed()) return;
+
+  browserCtrlWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    show: false,
+    parent: mainWindow,
+    skipTaskbar: true,
+    title: 'LucaWriter 浏览器',
+    backgroundColor: '#1a1a2e',
+    webPreferences: {
+      preload: path.join(__dirname, 'browser-preload.js'),
+      devTools: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      webviewTag: true,
+    },
+  });
+
+  var browserHtml = path.join(__dirname, 'browser.html');
+  if (!fs.existsSync(browserHtml)) {
+    browserHtml = path.join(getFrontendPath(), 'browser.html');
+  }
+  if (!fs.existsSync(browserHtml)) {
+    browserHtml = path.join(__dirname, '..', 'electron', 'browser.html');
+  }
+
+  browserCtrlWindow.loadFile(browserHtml);
+
+  browserCtrlWindow.on('resize', updateActiveBrowserViewBounds);
+  browserCtrlWindow.on('closed', function() {
+    browserCtrlWindow = null;
+    Object.keys(browserTabs).forEach(function(id) {
+      var t = browserTabs[id];
+      if (t.view) { try { t.view.webContents.destroy(); } catch(e) {} }
+    });
+    browserTabs = {};
+    browserActiveTab = null;
+  });
+
+  createBrowserTab('新标签页', 'about:blank');
+}
+
+function updateActiveBrowserViewBounds() {
+  if (!browserCtrlWindow || browserCtrlWindow.isDestroyed()) return;
+  var tb = browserCtrlWindow.getBounds();
+  var tabBarHeight = 36;
+  var contentBounds = { x: 0, y: tabBarHeight, width: tb.width, height: tb.height - tabBarHeight };
+  Object.keys(browserTabs).forEach(function(id) {
+    var t = browserTabs[id];
+    if (t.view) {
+      if (id === browserActiveTab) {
+        t.view.setBounds(contentBounds);
+      } else {
+        t.view.setBounds({ x: -10000, y: -10000, width: 1, height: 1 });
+      }
+    }
+  });
+}
+
+function createBrowserTab(title, url) {
+  browserTabSeq++;
+  var tabId = 'tab_' + browserTabSeq;
+  var view = new BrowserView({
+    webPreferences: {
+      devTools: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  browserCtrlWindow.addBrowserView(view);
+  view.webContents.loadURL(url || 'about:blank');
+
+  browserTabs[tabId] = { view: view, title: title, url: url || 'about:blank', cdpTargetId: '' };
+
+  view.webContents.on('page-title-updated', function(e, t) {
+    if (browserTabs[tabId]) {
+      browserTabs[tabId].title = t || title;
+      browserTabs[tabId].url = view.webContents.getURL();
+      if (browserCtrlWindow && !browserCtrlWindow.isDestroyed()) {
+        browserCtrlWindow.webContents.send('browser-tab-updated', { tabId: tabId, title: t });
+      }
+    }
+  });
+
+  view.webContents.on('did-navigate', function(e, u) {
+    if (browserTabs[tabId]) {
+      browserTabs[tabId].url = u;
+    }
+  });
+
+  view.webContents.on('destroyed', function() {
+    if (browserTabs[tabId]) {
+      delete browserTabs[tabId];
+    }
+  });
+
+  if (browserCtrlWindow && !browserCtrlWindow.isDestroyed()) {
+    browserCtrlWindow.webContents.send('browser-tab-created', { tabId: tabId, title: title });
+  }
+
+  switchBrowserTab(tabId);
+  return tabId;
+}
+
+function switchBrowserTab(tabId) {
+  if (!browserTabs[tabId]) return;
+  browserActiveTab = tabId;
+  updateActiveBrowserViewBounds();
+  if (browserCtrlWindow && !browserCtrlWindow.isDestroyed()) {
+    browserCtrlWindow.webContents.send('browser-switched', { tabId: tabId });
+  }
+}
+
+function closeBrowserTab(tabId) {
+  if (!browserTabs[tabId]) return;
+  var t = browserTabs[tabId];
+  try { t.view.webContents.destroy(); } catch(e) {}
+  browserCtrlWindow.removeBrowserView(t.view);
+  delete browserTabs[tabId];
+
+  if (browserCtrlWindow && !browserCtrlWindow.isDestroyed()) {
+    browserCtrlWindow.webContents.send('browser-tab-removed', { tabId: tabId });
+  }
+
+  if (browserActiveTab === tabId) {
+    var ids = Object.keys(browserTabs);
+    if (ids.length > 0) {
+      switchBrowserTab(ids[ids.length - 1]);
+    } else {
+      browserActiveTab = null;
+    }
+  }
+}
+
+// IPC: 标签页操作
+ipcMain.on('browser-new-tab', function() {
+  createBrowserTab('新标签页', 'about:blank');
+});
+
+ipcMain.on('browser-close-tab', function(e, tabId) {
+  closeBrowserTab(tabId);
+});
+
+ipcMain.on('browser-switch-tab', function(e, tabId) {
+  switchBrowserTab(tabId);
+});
+
+// 内部 HTTP 服务器：Python 后端通过此接口获取活跃标签的 CDP 信息
+function startBrowserCtrlServer() {
+  http.createServer(function(req, res) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Content-Type', 'application/json');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200); res.end(); return;
+    }
+
+    var url = req.url;
+    var match;
+
+    if (url === '/tab/active') {
+      if (!browserActiveTab || !browserTabs[browserActiveTab]) {
+        res.writeHead(200); res.end(JSON.stringify({ ok: false, error: 'no active tab' })); return;
+      }
+      var t = browserTabs[browserActiveTab];
+      var wcId = t.view.webContents.id;
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ok: true,
+        tabId: browserActiveTab,
+        webContentsId: wcId,
+        url: t.url,
+        title: t.title,
+        debugPort: BROWSER_DEBUG_PORT,
+      }));
+      return;
+    }
+
+    if (url === '/tab/new') {
+      ensureBrowserCtrlWindow();
+      var tabId = createBrowserTab('新标签页', 'about:blank');
+      var nt = browserTabs[tabId];
+      res.writeHead(200);
+      res.end(JSON.stringify({
+        ok: true,
+        tabId: tabId,
+        webContentsId: nt.view.webContents.id,
+        debugPort: BROWSER_DEBUG_PORT,
+      }));
+      return;
+    }
+
+    if (req.method === 'POST' && (match = url.match(/^\/tab\/navigate\/(.+)$/))) {
+      var tid = match[1];
+      if (!browserTabs[tid]) {
+        res.writeHead(404); res.end(JSON.stringify({ ok: false, error: 'tab not found' })); return;
+      }
+      var body = '';
+      req.on('data', function(c) { body += c; });
+      req.on('end', function() {
+        try {
+          var d = JSON.parse(body);
+          browserTabs[tid].view.webContents.loadURL(d.url);
+          browserTabs[tid].url = d.url;
+          res.writeHead(200);
+          res.end(JSON.stringify({ ok: true }));
+        } catch(e) {
+          res.writeHead(400);
+          res.end(JSON.stringify({ ok: false, error: String(e) }));
+        }
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end(JSON.stringify({ ok: false, error: 'not found' }));
+  }).listen(BROWSER_CTRL_PORT, '127.0.0.1', function() {
+    console.log('Browser control API on http://127.0.0.1:' + BROWSER_CTRL_PORT);
+  });
+}
   });
 
   app.on('window-all-closed', function() {
     if (process.platform !== 'darwin') {
-      app.quit();
+      if (!readKeepBackground() || isQuitting) {
+        app.quit();
+      }
     }
   });
 
   app.on('before-quit', async function(event) {
+    if (!isQuitting && readKeepBackground() && process.platform === 'win32') {
+      return;
+    }
     event.preventDefault();
-
+    destroyTray();
+    if (browserCtrlWindow && !browserCtrlWindow.isDestroyed()) {
+      browserCtrlWindow.destroy();
+    }
     try {
       await killBackend();
     } catch (err) {

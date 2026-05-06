@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>LucaWriter</title>
-<link rel="icon" href="icon.ico">
+<link rel="icon" href="icon.ico?v=4">
 <style>
-:root{--bg:#111;--surface:#1a1a1a;--surface2:#222;--t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;--accent:#bca55d;--on-accent:#111;--danger:#c45c5c;--border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);--r1:4px;--r4:0px}
+:root{--bg:#111;--surface:#1a1a1a;--surface2:#222;--t1:#e8e4de;--t2:#8a8580;--t3:#5a5550;--accent:#E8C46C;--on-accent:#111;--danger:#c45c5c;--border:rgba(255,255,255,.06);--border2:rgba(255,255,255,.1);--r1:4px;--r4:0px}
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;background:var(--bg);color:var(--t1);min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
 .login-titlebar{display:none;height:44px;background:var(--surface);border-bottom:1px solid var(--border2);flex-shrink:0;-webkit-app-region:drag;align-items:center;padding:0 14px;justify-content:flex-end}
@@ -50,7 +50,7 @@ body.electron .login-titlebar{display:flex}
 <div class="login-body">
 <div class="wrap">
 <div class="card" id="mainCard">
-  <div class="brand"><div class="brand-icon"><img src="icon.png" alt="LucaWriter"></div><h1>LucaWriter</h1></div>
+  <div class="brand"><div class="brand-icon" style="background:var(--accent);border-radius:6px"><img src="icon.png" alt="LucaWriter" style="width:100%;height:100%;display:block;border-radius:6px"></div><h1>LucaWriter</h1></div>
   <form id="authForm">
     <div class="fg"><label>Username</label><input type="text" id="username" required placeholder="Username" autocomplete="username"></div>
     <div class="fg"><label>Password</label><input type="password" id="password" required placeholder="Password (min 4)" autocomplete="current-password"><div class="hint" id="pwHint"></div></div>

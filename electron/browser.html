@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:#1a1a2e;color:#e0e0e0;font-family:"Segoe UI","Microsoft YaHei",sans-serif;font-size:13px}
+#tab-bar{display:flex;height:36px;background:#16213e;border-bottom:1px solid #0f3460;overflow-x:auto;flex-shrink:0}
+#tab-bar::-webkit-scrollbar{height:4px}
+#tab-bar::-webkit-scrollbar-thumb{background:#0f3460;border-radius:2px}
+.tab{display:flex;align-items:center;min-width:120px;max-width:200px;padding:0 10px;height:36px;background:#1a1a2e;border-right:1px solid #0f3460;cursor:pointer;white-space:nowrap;user-select:none;flex-shrink:0}
+.tab.active{background:#0f3460;color:#fff}
+.tab-title{overflow:hidden;text-overflow:ellipsis;flex:1;font-size:12px}
+.tab-close{margin-left:6px;width:18px;height:18px;line-height:18px;text-align:center;border-radius:3px;font-size:14px;color:#888;flex-shrink:0}
+.tab-close:hover{background:#e74c3c;color:#fff}
+#content-area{flex:1;position:relative;overflow:hidden}
+#btn-new-tab{display:flex;align-items:center;justify-content:center;width:30px;height:36px;flex-shrink:0;cursor:pointer;font-size:18px;color:#888;border-right:1px solid #0f3460}
+#btn-new-tab:hover{background:#0f3460;color:#fff}
+</style>
+</head>
+<body>
+<div id="tab-bar">
+  <div id="btn-new-tab" title="新建标签页">+</div>
+</div>
+<div id="content-area"></div>
+<script>
+var api = window.browserAPI;
+var tabs = {};
+var activeTabId = null;
+
+function createTabEl(tabId, title) {
+  var el = document.createElement('div');
+  el.className = 'tab';
+  el.setAttribute('data-tab-id', tabId);
+  el.innerHTML = '<span class="tab-title">' + esc(title || '新标签页') + '</span><span class="tab-close">&times;</span>';
+  el.querySelector('.tab-title').onclick = function() { switchTab(tabId); };
+  el.querySelector('.tab-close').onclick = function(e) {
+    e.stopPropagation();
+    closeTab(tabId);
+  };
+  var bar = document.getElementById('tab-bar');
+  bar.insertBefore(el, bar.lastElementChild || null);
+  tabs[tabId] = { el: el, title: title || '新标签页' };
+  return el;
+}
+
+function switchTab(tabId) {
+  if (activeTabId === tabId) return;
+  if (activeTabId && tabs[activeTabId]) {
+    tabs[activeTabId].el.classList.remove('active');
+  }
+  activeTabId = tabId;
+  if (tabs[tabId]) tabs[tabId].el.classList.add('active');
+  api.send('browser-switch-tab', tabId);
+}
+
+function closeTab(tabId) {
+  api.send('browser-close-tab', tabId);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+document.getElementById('btn-new-tab').onclick = function() {
+  api.send('browser-new-tab');
+};
+
+api.on('browser-tab-created', function(data) {
+  createTabEl(data.tabId, data.title);
+  if (!activeTabId) switchTab(data.tabId);
+});
+
+api.on('browser-tab-updated', function(data) {
+  if (tabs[data.tabId]) {
+    tabs[data.tabId].title = data.title || tabs[data.tabId].title;
+    var titleEl = tabs[data.tabId].el.querySelector('.tab-title');
+    if (titleEl) titleEl.textContent = data.title || '新标签页';
+  }
+});
+
+api.on('browser-tab-removed', function(data) {
+  if (tabs[data.tabId]) {
+    tabs[data.tabId].el.remove();
+    delete tabs[data.tabId];
+  }
+  if (activeTabId === data.tabId) {
+    var ids = Object.keys(tabs);
+    if (ids.length > 0) switchTab(ids[ids.length - 1]);
+    else activeTabId = null;
+  }
+});
+
+api.on('browser-switched', function(data) {
+  if (activeTabId && tabs[activeTabId]) {
+    tabs[activeTabId].el.classList.remove('active');
+  }
+  activeTabId = data.tabId;
+  if (tabs[activeTabId]) tabs[activeTabId].el.classList.add('active');
+});
+</script>
+</body>
+</html>

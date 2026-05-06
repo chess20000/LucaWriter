@@ -2,3 +2,4 @@ python-docx
 PyPDF2
 ebooklib
 modelscope
+DrissionPage
