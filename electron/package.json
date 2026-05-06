@@ -8,7 +8,9 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win",
-    "build:dir": "electron-builder --win --dir"
+    "build:dir": "electron-builder --win --dir",
+    "build:mac": "electron-builder --mac",
+    "build:mac:dir": "electron-builder --mac --dir"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -86,6 +88,34 @@
       "installerLanguages": ["zh_CN"],
       "language": 2052,
       "include": "installer.nsh"
+    },
+    "mac": {
+      "icon": "../build_macos/icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "artifactName": "LucaWriter-${version}-mac-${arch}.${ext}",
+      "extendInfo": {
+        "CFBundleDocumentTypes": [],
+        "NSRequiresAquaSystemAppearance": false
+      },
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "../build_macos/entitlements.mac.plist",
+      "entitlementsInherit": "../build_macos/entitlements.mac.plist"
+    },
+    "dmg": {
+      "title": "LucaWriter ${version}",
+      "icon": "../build_macos/icon.icns",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ],
+      "window": { "width": 540, "height": 380 }
     },
     "asar": true
   }

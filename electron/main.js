@@ -26,7 +26,8 @@ function getUserDataPath() {
 }
 
 function getBackendExePath() {
-  return path.join(process.resourcesPath, 'backend', 'LucaWriterBackend.exe');
+  var exeName = process.platform === 'win32' ? 'LucaWriterBackend.exe' : 'LucaWriterBackend';
+  return path.join(process.resourcesPath, 'backend', exeName);
 }
 
 function getFrontendPath() {
@@ -260,9 +261,9 @@ ipcMain.on('window-maximize', function() {
 
 ipcMain.on('window-close', function() {
   if (!mainWindow) return;
-  if (readKeepBackground() && process.platform === 'win32') {
+  if (readKeepBackground() && (process.platform === 'win32' || process.platform === 'darwin')) {
     mainWindow.hide();
-    createTray();
+    if (process.platform === 'win32') createTray();
   } else {
     isQuitting = true;
     mainWindow.close();
@@ -305,10 +306,10 @@ function createWindow() {
   });
 
   mainWindow.on('close', function(event) {
-    if (!isQuitting && readKeepBackground() && process.platform === 'win32') {
+    if (!isQuitting && readKeepBackground() && (process.platform === 'win32' || process.platform === 'darwin')) {
       event.preventDefault();
       mainWindow.hide();
-      createTray();
+      if (process.platform === 'win32') createTray();
     }
   });
 
@@ -610,6 +611,18 @@ function startBrowserCtrlServer() {
     if (process.platform !== 'darwin') {
       if (!readKeepBackground() || isQuitting) {
         app.quit();
+      }
+    }
+  });
+
+  app.on('activate', function() {
+    if (process.platform === 'darwin') {
+      if (!mainWindow) {
+        createWindow();
+        loadApp();
+      } else {
+        mainWindow.show();
+        mainWindow.focus();
       }
     }
   });

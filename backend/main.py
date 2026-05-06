@@ -21,6 +21,15 @@ from ipaddress import ip_network, ip_address
 from http.cookies import SimpleCookie
 import html as _html_mod
 
+if not os.environ.get('SSL_CERT_FILE'):
+    try:
+        import certifi
+        os.environ['SSL_CERT_FILE'] = certifi.where()
+    except ImportError:
+        _macos_cert = '/etc/ssl/cert.pem'
+        if sys.platform == 'darwin' and os.path.exists(_macos_cert):
+            os.environ['SSL_CERT_FILE'] = _macos_cert
+
 try:
     import docx as docx_mod
     HAS_DOCX = True

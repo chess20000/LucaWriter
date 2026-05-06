@@ -15,6 +15,7 @@ backend/.msc
 electron/dist-backend/
 electron/dist-builtin/
 electron/build-temp/
+electron/.pyinstaller_cache/
 electron/node_modules/
 .DS_Store
 .idea/

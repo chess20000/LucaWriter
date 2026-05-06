@@ -18,8 +18,8 @@ def make_rounded(src_path, dst_path, size=None):
     draw = ImageDraw.Draw(mask)
     draw.rounded_rectangle([(0, 0), (w - 1, h - 1)], radius=radius, fill=255)
 
-    transparent = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    result = Image.composite(img, transparent, mask)
+    white_bg = Image.new('RGBA', (w, h), (255, 255, 255, 255))
+    result = Image.composite(img, white_bg, mask)
 
     if size is not None:
         result = result.resize((size, size), Image.LANCZOS)
@@ -66,8 +66,8 @@ def main():
     draw = ImageDraw.Draw(mask)
     draw.rounded_rectangle([(0, 0), (w - 1, h - 1)], radius=radius, fill=255)
 
-    transparent = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    result_256 = Image.composite(img, transparent, mask)
+    white_bg = Image.new('RGBA', (w, h), (255, 255, 255, 255))
+    result_256 = Image.composite(img, white_bg, mask)
 
     png_path = os.path.join(electron_dir, 'icon.png')
     result_256.save(png_path, format='PNG')
