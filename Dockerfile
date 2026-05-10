@@ -8,7 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/main.py /app/backend/main.py
 COPY frontend/index.html /app/frontend/index.html
 COPY frontend/login.html /app/frontend/login.html
-COPY frontend/readthrough.html /app/frontend/readthrough.html
 
 RUN mkdir -p /app/usrdata
 

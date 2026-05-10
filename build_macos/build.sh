@@ -87,7 +87,6 @@ echo ""
 
 echo "[6/9] Building backend with PyInstaller..."
 export PYINSTALLER_CONFIG_DIR="$ELECTRON_DIR/.pyinstaller_cache"
-_CERTIFI_WHERE="$($PYTHON_EXE -c "import certifi; print(certifi.where())" 2>/dev/null || echo "")"
 $PYTHON_EXE -m PyInstaller --onedir \
     --noconsole \
     --name LucaWriterBackend \
@@ -99,8 +98,7 @@ $PYTHON_EXE -m PyInstaller --onedir \
     --hidden-import PyPDF2 \
     --hidden-import ebooklib \
     --hidden-import ebooklib.epub \
-    --hidden-import certifi \
-    $([ -n "$_CERTIFI_WHERE" ] && echo "--add-data $_CERTIFI_WHERE:certifi") \
+    --collect-all certifi \
     "$ROOT_DIR/backend/main.py" || {
     echo "[ERROR] PyInstaller build failed"
     exit 1

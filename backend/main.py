@@ -67,6 +67,14 @@ except ImportError:
     HAS_BROWSER_AGENT = False
     browser_agent = None
 
+# 导入图标生成器
+try:
+    import icon_generator
+    HAS_ICON_GENERATOR = True
+except ImportError:
+    HAS_ICON_GENERATOR = False
+    icon_generator = None
+
 LW_MAGIC = b'LW1'
 LW_SALT_LEN = 16
 LW_IV_LEN = 16
@@ -126,7 +134,7 @@ DEFAULT_SETTINGS = {
     'access_scope': '127.0.0.1',
     'keep_background': False,
     'browser_enabled': False,
-    'theme_accent': '#E8C46C',
+    'theme_accent': '#E8CC7A',
     'theme_mode': 'dark',
 }
 DEFAULT_OUTLINE = {
@@ -411,20 +419,59 @@ _encrypt_key = _get_encrypt_key()
 def _encrypt_str(plaintext):
     if not plaintext:
         return ''
-    data = plaintext.encode('utf-8')
-    result = bytes([data[i] ^ _encrypt_key[i % len(_encrypt_key)] for i in range(len(data))])
-    return 'ENC:' + base64.b64encode(result).decode()
+    if HAS_CRYPTO:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        nonce = os.urandom(12)
+        aesgcm = AESGCM(_encrypt_key)
+        ct = aesgcm.encrypt(nonce, plaintext.encode('utf-8'), None)
+        return 'ENC2:' + base64.b64encode(nonce + ct).decode()
+    else:
+        data = plaintext.encode('utf-8')
+        result = bytes([data[i] ^ _encrypt_key[i % len(_encrypt_key)] for i in range(len(data))])
+        return 'ENC:' + base64.b64encode(result).decode()
 
 
 def _decrypt_str(ciphertext):
-    if not ciphertext or not ciphertext.startswith('ENC:'):
+    if not ciphertext:
         return ciphertext
-    try:
-        data = base64.b64decode(ciphertext[4:])
-        result = bytes([data[i] ^ _encrypt_key[i % len(_encrypt_key)] for i in range(len(data))])
-        return result.decode('utf-8')
-    except Exception:
-        return ciphertext
+    if ciphertext.startswith('ENC2:'):
+        try:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            raw = base64.b64decode(ciphertext[5:])
+            nonce, ct = raw[:12], raw[12:]
+            aesgcm = AESGCM(_encrypt_key)
+            return aesgcm.decrypt(nonce, ct, None).decode('utf-8')
+        except Exception:
+            return ciphertext
+    if ciphertext.startswith('ENC:'):
+        try:
+            data = base64.b64decode(ciphertext[4:])
+            result = bytes([data[i] ^ _encrypt_key[i % len(_encrypt_key)] for i in range(len(data))])
+            return result.decode('utf-8')
+        except Exception:
+            return ciphertext
+    return ciphertext
+
+
+# Rate limiter (in-memory, per-IP)
+_rate_limit_store = {}
+_rate_limit_lock = threading.Lock()
+
+
+def check_rate_limit(key, max_requests, window_seconds):
+    now = time.time()
+    with _rate_limit_lock:
+        if key not in _rate_limit_store:
+            _rate_limit_store[key] = []
+        times = [t for t in _rate_limit_store[key] if now - t < window_seconds]
+        if len(times) >= max_requests:
+            return False
+        times.append(now)
+        _rate_limit_store[key] = times
+        # Clean up old entries periodically
+        if len(_rate_limit_store) > 10000:
+            _rate_limit_store.clear()
+        return True
 
 
 def hash_password(pw):
@@ -882,8 +929,18 @@ def has_users():
 
 def validate_session(token):
     if not token: return False
-    for s in load_json(SESSIONS_FILE, list):
-        if s.get('token') == token and s.get('expires', 0) > time.time(): return True
+    sessions = load_json(SESSIONS_FILE, list)
+    now = time.time()
+    for s in sessions:
+        if s.get('token') == token and s.get('expires', 0) > now:
+            # Sliding expiration: extend if more than halfway expired
+            created = s.get('created', 0)
+            if created > 0:
+                lifetime = s['expires'] - created
+                if lifetime > 0 and (s['expires'] - now) < lifetime * 0.5:
+                    s['expires'] = now + lifetime
+                    save_json(SESSIONS_FILE, sessions)
+            return True
     return False
 
 
@@ -900,10 +957,11 @@ def make_session(username, remember=False):
     token = secrets.token_hex(32)
     sessions = load_json(SESSIONS_FILE, list)
     sessions = [s for s in sessions if s.get('expires', 0) > time.time()]
+    now = time.time()
     if remember:
-        sessions.append({'token': token, 'user': username, 'expires': time.time() + 86400 * 90})
+        sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400 * 90})
     else:
-        sessions.append({'token': token, 'user': username, 'expires': time.time() + 86400})
+        sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400})
     save_json(SESSIONS_FILE, sessions)
     return token
 
@@ -1516,6 +1574,24 @@ class Handler(BaseHTTPRequestHandler):
                 return False
         return True
 
+    def _check_csrf(self):
+        # CSRF check only matters when server is exposed to network
+        try:
+            s = load_json(SETTINGS_FILE)
+            scope = s.get('access_scope', '127.0.0.1')
+        except Exception:
+            scope = '127.0.0.1'
+        if scope == '127.0.0.1':
+            return True
+        origin = self.headers.get('Origin', '')
+        if not origin:
+            return True  # Non-browser clients don't send Origin
+        host = self.headers.get('Host', '')
+        if host and origin.endswith('://' + host):
+            return True
+        self.json_resp(403, {'error': 'CSRF check failed'})
+        return False
+
     def serve_file(self, name):
         for p in [os.path.join(FRONTEND_DIR, name), f'/app/{name}', f'./{name}']:
             try:
@@ -1543,6 +1619,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self._check_access(): return
         path = urlparse(self.path).path
 
+        # 兼容：支持 /summary 作为 /readthrough 的别名（前端/外部可能使用 summary 命名）
+        if '/summary/' in path:
+            path = path.replace('/summary/', '/readthrough/')
+        if path == '/summary':
+            path = '/readthrough'
+
         if path in ('/', '/index.html'):
             c = self.serve_file('index.html')
             if c: self.html_resp(c)
@@ -1554,6 +1636,35 @@ class Handler(BaseHTTPRequestHandler):
             if c: self.html_resp(c)
             else: self.json_resp(500, {'error': 'no login.html'})
             return
+
+        # 动态主题图标生成
+        if path == '/icon.png' or path == '/icon.ico':
+            if HAS_ICON_GENERATOR:
+                settings = get_settings()
+                theme_accent = settings.get('theme_accent', '#E8CC7A')
+                icon_bytes = icon_generator.get_icon_bytes(theme_accent)
+                if icon_bytes:
+                    ct = 'image/png' if path.endswith('.png') else 'image/x-icon'
+                    self.send_response(200)
+                    self.send_header('Content-Type', ct)
+                    self.send_header('Content-Length', str(len(icon_bytes)))
+                    self.send_header('Cache-Control', 'no-cache')
+                    self.end_headers()
+                    self.wfile.write(icon_bytes)
+                    return
+            # 回退到静态文件
+            fp = os.path.join(FRONTEND_DIR, os.path.basename(path))
+            if os.path.isfile(fp):
+                with open(fp, 'rb') as f:
+                    body = f.read()
+                ct = 'image/png' if path.endswith('.png') else 'image/x-icon'
+                self.send_response(200)
+                self.send_header('Content-Type', ct)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'public, max-age=3600')
+                self.end_headers()
+                self.wfile.write(body)
+                return
 
         # 静态文件（图片、SVG 等）— 放在认证之前，登录页也需要这些资源
         if path.endswith(('.png', '.svg', '.ico', '.jpg', '.jpeg', '.gif', '.webp', '.css', '.js')):
@@ -1754,6 +1865,17 @@ class Handler(BaseHTTPRequestHandler):
             gs = get_settings()
             log_action('SETTINGS_GET', f"return model_context_length={gs.get('model_context_length')}")
             self.json_resp(200, gs); return
+
+        if path == '/api/icon':
+            qs = parse_qs(urlparse(self.path).query)
+            size = int(qs.get('size', [None])[0]) if qs.get('size') else None
+            settings = get_settings()
+            theme_accent = settings.get('theme_accent', '#E8CC7A')
+            if HAS_ICON_GENERATOR:
+                icon_base64 = icon_generator.get_icon_base64(theme_accent, size)
+            else:
+                icon_base64 = None
+            self.json_resp(200, {'icon': icon_base64, 'theme_accent': theme_accent}); return
 
         if path == '/api/local-llm/status':
             self.json_resp(200, {'running': _local_llm_status()}); return
@@ -2026,7 +2148,15 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._track_me()
         if not self._check_access(): return
+        if not self._check_csrf(): return
         path = urlparse(self.path).path
+
+        # 兼容：支持 /summary 作为 /readthrough 的别名
+        if '/summary/' in path:
+            path = path.replace('/summary/', '/readthrough/')
+        if path == '/summary':
+            path = '/readthrough'
+
         data = self.read_json()
         if data is None: self.json_resp(413, {'error': 'Too large'}); return
 
@@ -2035,6 +2165,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/auth/setup':
             if has_users(): self.json_resp(403, {'error': '已有用户'}); return
+            if not check_rate_limit(f'setup:{self.client_address[0]}', 5, 60):
+                self.json_resp(429, {'error': '请求过于频繁，请稍后再试'}); return
             u = data.get('username', '').strip()
             p = data.get('password', '')
             remember = data.get('remember', False)
@@ -2043,19 +2175,21 @@ class Handler(BaseHTTPRequestHandler):
             token = make_session(u, remember=remember)
             log_action('SETUP', u)
             max_age = 7776000 if remember else 86400
-            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'}); return
+            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'}); return
 
         if path == '/api/auth/login':
             u = data.get('username', '').strip()
             p = data.get('password', '')
             remember = data.get('remember', False)
+            if not check_rate_limit(f'login:{self.client_address[0]}', 10, 60):
+                self.json_resp(429, {'error': '请求过于频繁，请稍后再试'}); return
             users = load_json(USERS_FILE)
             if u not in users or users[u]['password'] != hash_password(p):
                 self.json_resp(401, {'error': '用户名或密码错误'}); return
             token = make_session(u, remember=remember)
             log_action('LOGIN', u)
             max_age = 7776000 if remember else 86400
-            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'}); return
+            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'}); return
 
         if path == '/api/auth/logout':
             t = get_cookie_token(self.headers)
@@ -2436,6 +2570,8 @@ class Handler(BaseHTTPRequestHandler):
             if action == 'comment':
                 text = data.get('text', '')
                 if not text: self.json_resp(200, {'comment': ''}); return
+                if not check_rate_limit(f'chat:{self.client_address[0]}', 30, 60):
+                    self.json_resp(429, {'error': '请求过于频繁，请稍后再试'}); return
                 settings = get_settings()
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
@@ -4760,7 +4896,7 @@ def _series_rt_should_stop(sid):
         return _series_rt_tasks.get(sid, {}).get('stopped', False)
 
 def do_series_readthrough(sid, settings):
-    set_conn_meta('series-readthrough', '系列通读', sid)
+    set_conn_meta('series-readthrough', '系列摘要', sid)
     try:
         s_meta = get_book_meta(sid)
         series_title = s_meta.get('title', '未命名') if s_meta else '未命名'
@@ -6109,7 +6245,7 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings, text=None):
 
 def do_readthrough(bid, settings, config=None, resume=False):
     """后台线程：逐章通读，生成 source.md + 大纲"""
-    set_conn_meta('readthrough', '通读', bid)
+    set_conn_meta('readthrough', '摘要', bid)
     cfg = config or {}
     try:
         _rebuild_set(bid, status='running', progress=0, phase='准备中', total_chapters=0, done_chapters=0,
@@ -6386,6 +6522,20 @@ def do_readthrough(bid, settings, config=None, resume=False):
         err = f'通读崩溃: {str(e)[:200]}'
         _rebuild_log(bid, err)
         _rebuild_set(bid, status='error', progress=100, error=err + '\n' + traceback.format_exc()[-300:])
+
+
+# 兼容别名：summary -> readthrough
+def get_summary_config(bid):
+    return get_readthrough_config(bid)
+
+def save_summary_config(bid, cfg):
+    return save_readthrough_config(bid, cfg)
+
+def do_series_summary(sid, settings):
+    return do_series_readthrough(sid, settings)
+
+def do_summary(bid, settings, config=None, resume=False):
+    return do_readthrough(bid, settings, config, resume)
 
 
 def run():

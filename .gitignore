@@ -24,7 +24,10 @@ electron/node_modules/
 venv/
 env/
 .venv/
+.claude/
 
 _*.py
 demo/
-.gitignore
+
+# Allow .gitkeep in otherwise-ignored directories
+!.gitkeep

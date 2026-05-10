@@ -82,6 +82,7 @@ echo [4/8] Building backend with PyInstaller...
     --hidden-import PyPDF2 ^
     --hidden-import ebooklib ^
     --hidden-import ebooklib.epub ^
+    --collect-all certifi ^
     "%ROOT_DIR%backend\main.py"
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed

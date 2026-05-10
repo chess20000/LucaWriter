@@ -3,43 +3,43 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>LucaWriter</title>
+<title>LucaWriter – AI 写作搭档</title>
 <link rel="icon" href="icon.ico?v=4">
 <style>
 :root{
- --bg:#1a1a1a;--surface:#232323;--surface2:#2b2b2b;--surface3:#333333;--surface4:#3b3b3b;
- --t1:#ffffff;--t2:#9e9a94;--t3:#6b6560;
- --accent:#E8C46C;--accent2:#E8C46C;
- --accent-a03:rgba(232,196,108,.03);--accent-a12:rgba(232,196,108,.12);
- --accent-a15:rgba(232,196,108,.15);--accent-a20:rgba(232,196,108,.2);
- --accent-a25:rgba(232,196,108,.25);--accent-a30:rgba(232,196,108,.3);
- --accent-a40:rgba(232,196,108,.4);--accent-a70:rgba(232,196,108,.7);
- --accent-a90:rgba(232,196,108,.9);
- --accent-dim:var(--accent-a12);
- --danger:#c45c5c;--warn:#E8C46C;
+ --bg:#0b1220;--surface:rgba(13,21,43,.72);--surface2:rgba(18,28,56,.72);--surface3:rgba(23,36,70,.72);--surface4:rgba(28,43,88,.72);
+ --t1:#f8f9ff;--t2:#b5bedb;--t3:#8b98b3;
+ --accent:#E8CC7A;--accent2:#F0D889;
+ --accent-a03:rgba(232,204,122,.03);--accent-a12:rgba(232,204,122,.12);
+ --accent-a15:rgba(232,204,122,.15);--accent-a20:rgba(232,204,122,.2);
+ --accent-a25:rgba(232,204,122,.25);--accent-a30:rgba(232,204,122,.3);
+ --accent-a40:rgba(232,204,122,.4);--accent-a70:rgba(232,204,122,.7);
+ --accent-a90:rgba(232,204,122,.9);
+ --accent-dim:rgba(232,204,122,.12);
+ --danger:#f27d7d;--warn:#f6c96d;
  --border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.12);
  --r1:4px;--r2:6px;--r3:8px;--r4:12px;
  --font-mono:"SF Mono","Fira Code",Menlo,monospace;
- --font-sans:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Noto Sans SC",sans-serif;
+ --font-sans:-apple-system,BlinkMacSystemFont,"Noto Sans SC","Helvetica Neue",sans-serif;
  --font-serif:"Noto Serif SC","Source Han Serif SC","Songti SC",Georgia,serif;
- --scrollbar:rgba(255,255,255,.1);--scrollbar-hover:rgba(232,196,108,.2)
+ --scrollbar:rgba(255,255,255,.14);--scrollbar-hover:rgba(232,204,122,.22)
 }
 [data-theme-mode="light"]{
  --bg:#f0f0f0;--surface:#ffffff;--surface2:#f5f5f5;--surface3:#ebebeb;--surface4:#e0e0e0;
  --t1:#1a1a1a;--t2:#555555;--t3:#999999;
  --border:rgba(0,0,0,.08);--border2:rgba(0,0,0,.12);
- --scrollbar:rgba(0,0,0,.1);--scrollbar-hover:rgba(232,196,108,.3)
+ --scrollbar:rgba(0,0,0,.1);--scrollbar-hover:rgba(232,204,122,.3)
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 button,input,textarea,select{font-family:inherit}
 html,body{height:100%;overflow:hidden}
-body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-font-smoothing:antialiased}
+body{font-family:var(--font-sans);background:radial-gradient(circle at 18% 15%, rgba(232,204,122,.12), transparent 18%),radial-gradient(circle at 82% 12%, rgba(240,216,137,.08), transparent 24%),linear-gradient(180deg,#070b15 0%,#0b1220 100%);color:var(--t1);-webkit-font-smoothing:antialiased;min-height:100vh;overflow:hidden}
 ::selection{background:var(--accent);color:var(--bg)}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:var(--r1)}::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-hover)}
 
 .app{display:flex;flex-direction:column;height:100vh;height:100dvh}
 
-.topbar{height:44px;display:flex;align-items:center;padding:0 14px;background:var(--surface);border-bottom:1px solid var(--border2);flex-shrink:0;gap:6px;z-index:10}
+.topbar{height:38px;display:flex;align-items:center;padding:0 14px;background:rgba(14,23,44,.76);border-bottom:1px solid rgba(255,255,255,.06);backdrop-filter:blur(18px);flex-shrink:0;gap:8px;z-index:10}
 .topbar-logo{width:24px;height:24px;border-radius:var(--r1);flex-shrink:0;margin-right:6px}
 .topbar-breadcrumb{display:flex;align-items:center;gap:4px;font-size:13px;overflow:hidden;flex:1;min-width:0}
 .topbar-breadcrumb .bc-book{color:var(--t2);cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;flex-shrink:0}
@@ -52,6 +52,26 @@ body{font-family:var(--font-sans);background:var(--bg);color:var(--t1);-webkit-f
 .topbar-btn.accent{color:var(--accent)}
 .topbar-btn.accent:hover{background:var(--accent-dim)}
 .topbar-sep{flex:1;min-width:12px}
+
+.glass-surface,
+.topbar,
+.left-sidebar,
+.bookshelf-view,
+.book-card,
+.editor-top,
+.editor-body,
+.right-sidebar,
+.bottom-panel,
+.modal,
+.confirm-box,
+.prompt-box,
+.series-chat,
+.series-summary,
+.task-detail-panel {
+  background:rgba(11,18,34,.68);
+  border:1px solid rgba(255,255,255,.08);
+  backdrop-filter:blur(18px);
+}
 body.electron .topbar{-webkit-app-region:drag;padding-right:0}
 body.electron .topbar-logo,body.electron .topbar-breadcrumb,body.electron .task-queue-wrap,body.electron .topbar-btn{margin-top:0;-webkit-app-region:no-drag}
 .win-controls{display:none;flex-shrink:0;-webkit-app-region:no-drag;margin-left:auto}
@@ -155,7 +175,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .editor-wc{font-size:11px;color:var(--t3);flex-shrink:0;font-family:var(--font-mono)}
 .save-indicator{font-size:11px;color:var(--t3);flex-shrink:0;font-family:var(--font-mono);opacity:0;transition:opacity .2s}
 .save-indicator.show{opacity:1}.save-indicator.err{color:var(--danger)}
-.editor-body{flex:1;overflow:hidden;position:relative;background:var(--bg)}
+.editor-body{flex:1;overflow:hidden;position:relative;background:transparent}
 .editor-body textarea{width:100%;height:100%;resize:none;background:transparent;border:none;font-family:var(--font-serif);line-height:2.1;font-size:17px;color:var(--t1);outline:none;padding:24px 40px;letter-spacing:.3px;caret-color:var(--accent);position:relative;z-index:1}
 .editor-body textarea::placeholder{color:var(--t3)}
 .editor-body textarea::selection{background:var(--accent);color:var(--bg)}
@@ -180,7 +200,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .editor-highlight-content mark.green{background:rgba(95,184,120,.25)}
 .editor-highlight-content mark.pink{background:rgba(212,107,139,.25)}
 .editor-highlight-content mark.blue{background:rgba(90,159,212,.25)}
-.ai-readthrough-card{margin-top:6px;padding:8px 10px;background:var(--accent-dim);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5}
+.ai-summary-card{margin-top:6px;padding:8px 10px;background:var(--accent-dim);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5}
 .rt-warning{color:var(--danger);margin:4px 0;font-weight:600}
 .rt-btn{background:var(--accent);color:var(--bg);border:none;padding:4px 10px;border-radius:var(--r1);font-size:11px;font-weight:600;cursor:pointer;margin-top:4px}
 .rt-btn:hover{background:var(--accent2)}
@@ -332,7 +352,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .panel-right-head{padding:0 12px;height:28px;display:flex;align-items:center;border-bottom:1px solid var(--border);flex-shrink:0;font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;background:var(--surface)}
 .panel-right-body{flex:1;overflow-y:auto;background:var(--bg)}
 .rt-source{width:100%;height:100%;background:var(--bg);border:none;padding:10px 12px;font-size:11px;line-height:1.8;font-family:var(--font-mono);color:var(--t1);resize:none;outline:none}
-.readthrough-pane{flex-direction:column;height:100%;overflow:hidden}
+.summary-pane{flex-direction:column;height:100%;overflow:hidden}
 .timeline-pane,.prediction-pane,.outline-pane{flex-direction:column;height:100%;overflow:hidden}
 
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(2px);z-index:100;justify-content:center;align-items:center}
@@ -465,7 +485,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .series-chat-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;color:var(--t1);flex-shrink:0}
 .series-chat-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px;min-height:0}
 .series-chat-input-row{display:flex;gap:6px;padding:8px;border-top:1px solid var(--border);flex-shrink:0}
-.series-readthrough{width:320px;flex-shrink:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden}
+.series-summary{width:320px;flex-shrink:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden}
 .series-rt-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent);flex-shrink:0}
 .series-rt-header .ai-send{padding:2px 8px;font-size:10px}
 .series-book-item{display:flex;align-items:stretch;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);padding:12px;transition:all .15s;cursor:pointer;position:relative;min-height:110px}
@@ -531,7 +551,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
  </div>
  <div class="topbar-sep"></div>
-    <button class="topbar-btn" id="topbarReadthroughBtn" onclick="openReadthrough()" style="display:none">通读</button>
+    <button class="topbar-btn" id="topbarSummaryBtn" onclick="openSummary()" style="display:none">摘要</button>
     <button class="topbar-btn" onclick="openSettings()">设置</button>
     <div class="win-controls" id="winControls">
       <button class="wc-min" onclick="electronAPI.minimize()" title="最小化"><svg viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5"/></svg></button>
@@ -564,15 +584,15 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
    <div class="series-chat-messages" id="seriesAIMessages"></div>
    <div class="series-chat-input-row"><input class="ai-input" id="seriesAIInput" placeholder="问 Luca 关于系列规划、世界观..." style="flex:1" onkeydown="if(event.key==='Enter')sendSeriesAI()"><button class="ai-send" onclick="sendSeriesAI()">发送</button></div>
   </div>
-  <div class="series-readthrough" id="seriesRT" style="display:none">
-   <div class="series-rt-header"><span>系列通读</span><button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="toggleSeriesReadthrough()">&#10005;</button></div>
+  <div class="series-summary" id="seriesRT" style="display:none">
+   <div class="series-rt-header"><span>系列摘要</span><button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="toggleSeriesSummary()">&#10005;</button></div>
    <pre id="seriesRTStream" style="flex:1;margin:0;padding:8px 12px;font-size:11px;line-height:1.7;font-family:var(--font-mono);color:var(--t2);white-space:pre-wrap;word-break:break-word;overflow-y:auto">等待开始...</pre>
    <div style="display:flex;gap:8px;padding:8px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
     <div style="flex:1;display:flex;flex-direction:column;gap:3px">
      <div style="height:4px;background:var(--surface3);border-radius:var(--r1);overflow:hidden"><div id="seriesRTProgress" style="height:100%;background:var(--accent);width:0%;transition:width .3s"></div></div>
      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3)"><span id="seriesRTPhase">准备中...</span><span id="seriesRTChapters">0/0</span></div>
     </div>
-    <button class="ai-send" onclick="startSeriesRT()" id="seriesRTStartBtn">开始通读系列</button>
+    <button class="ai-send" onclick="startSeriesRT()" id="seriesRTStartBtn">开始系列摘要</button>
    </div>
   </div>
  </div>
@@ -633,7 +653,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
           <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')">时间线</button>
           <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')">预言</button>
           <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')">大纲</button>
-          <button class="bottom-tab active" data-btab="readthrough" onclick="switchBottomTab('readthrough')">通读</button>
+          <button class="bottom-tab active" data-btab="summary" onclick="switchBottomTab('summary')">摘要</button>
  </div>
  <button class="bottom-toggle" onclick="toggleBottomPanel()" title="切换底部面板">&#9650;</button>
  </div>
@@ -692,7 +712,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
 
  <!-- -->
- <div class="bottom-pane active readthrough-pane" id="readthroughPane">
+ <div class="bottom-pane active summary-pane" id="summaryPane">
  <div class="panel-layout">
  <div class="panel-left">
               <div class="panel-left-head">AI 实时输出</div>
@@ -704,7 +724,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="panel-right">
               <div class="panel-right-head">阅读笔记 (source.md)</div>
  <div class="panel-right-body">
- <textarea class="rt-source" id="rtSource" readonly placeholder="通读完成后此处显示笔记..." style="flex:1;width:100%;resize:none;border:none;background:transparent;height:100%"></textarea>
+ <textarea class="rt-source" id="rtSource" readonly placeholder="摘要完成后此处显示笔记..." style="flex:1;width:100%;resize:none;border:none;background:transparent;height:100%"></textarea>
  </div>
  </div>
  </div>
@@ -719,7 +739,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="rt-bar" style="height:4px;background:var(--surface3);border-radius:var(--r1);overflow:hidden"><div class="rt-fill" id="rtProgress" style="height:100%;background:var(--accent);width:0%;transition:width .3s"></div></div>
  <div class="rt-info" style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3)"><span id="rtPhase">准备中...</span><span id="rtChapters">0/0 章</span></div>
  </div>
-            <button class="ai-send" onclick="startRT()" id="rtStartBtn">开始通读</button>
+            <button class="ai-send" onclick="startRT()" id="rtStartBtn">开始摘要</button>
             <button class="ai-send" onclick="clearRT()" id="rtClearBtn" style="display:none;background:var(--danger);color:#fff;border:none">清空进度</button>
  </div>
  </div>
@@ -977,6 +997,15 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 </div>
 
 <script>
+// 动态加载主题图标
+function loadThemedIcon(){
+  api('GET','/api/icon',undefined,function(d){
+    if(d&&d.icon){
+      var imgs=document.querySelectorAll('img[src="icon.png"]');
+      imgs.forEach(function(img){img.src=d.icon});
+    }
+  });
+}
 if(window.electronAPI)document.body.classList.add('electron');
 if(window.electronAPI&&window.electronAPI.onMaximizeChange){function _updateMaxBtn(m){var b=document.getElementById('wcMax');if(!b)return;if(m){b.title='还原';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="2.5" y="0.5" width="7" height="7"/><rect x="0.5" y="2.5" width="7" height="7"/></svg>'}else{b.title='最大化';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>'}}window.electronAPI.onMaximizeChange(function(m){_updateMaxBtn(m)});window.electronAPI.isMaximized().then(function(m){_updateMaxBtn(m)});var _tb=document.querySelector('.topbar');if(_tb)_tb.addEventListener('dblclick',function(e){if(e.target.closest('.win-controls')||e.target.closest('button')||e.target.closest('input'))return;window.electronAPI.maximize()})}
 var bookId=null,chapterId=null,settings={};
@@ -990,7 +1019,7 @@ var _focusTitleAfterLoad=false;
 var allChapters=[],chapterOrder=[];
 var aiMessages=[];
 var currentChapter=null;
-var currentBottomTab='readthrough';
+var currentBottomTab='summary';
 var bottomPanelOpen=false;
 var bottomPanelHeight=window.innerHeight-44;
 var savedBottomPanelHeight=window.innerHeight-44;
@@ -1018,17 +1047,15 @@ var _connPollTimer=null;
 var _prevConnIds=new Set();
 var _connTypeMap={
   chat:{label:'聊',color:'#5a9fd4',name:'AI对话'},
-  readthrough:{label:'读',color:'#E8C46C',name:'通读全书'},
+  summary:{label:'读',color:'#E8CC7A',name:'摘要全书'},
   timeline:{label:'时',color:'#8b7fd9',name:'生成时间线'},
   outline:{label:'纲',color:'#5fb878',name:'生成大纲'},
   prediction:{label:'预',color:'#d46b6b',name:'生成预言'},
   auto_comment:{label:'自',color:'#9e9e9e',name:'自动建议'},
   memory:{label:'忆',color:'#9e9e9e',name:'记忆更新'},
-  'chapter-complete':{label:'章',color:'#E8C46C',name:'本章通读'},
+  'chapter-complete':{label:'章',color:'#E8CC7A',name:'本章摘要'},
   'series-chat':{label:'系',color:'#5a9fd4',name:'系列AI对话'},
-  'series-readthrough':{label:'读',color:'#E8C46C',name:'系列通读'},
-  unknown:{label:'?',color:'var(--t3)',name:'未知'}
-};
+  'series-summary':{label:'读',color:'#E8CC7A',name:'系列摘要'},
 
 function _startConnPoll(){
  if(_connPollTimer)return;
@@ -1093,7 +1120,7 @@ function toggleTaskDetail(){
 function stopAllTasks(){
   // 直接取消后台所有对AI提供商的活跃连接
  api('POST','/api/stop-all-ai',{},function(d){});
-  // 停止通读
+  // 停止摘要
  if(_rtTaskId){stopRT();}
   // 把本地 pending 的聊天消息标记为已停止
  var last=aiMessages[aiMessages.length-1];
@@ -1166,7 +1193,7 @@ function clearAppState(){
  try{localStorage.removeItem('lucawriter_state')}catch(e){}
 }
 
-function init(){loadSettings();_startConnPoll();setupImport();setupBottomPanelDrag();setupModals();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
+function init(){loadSettings();loadThemedIcon();_startConnPoll();setupImport();setupBottomPanelDrag();setupModals();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
 
 function setupModals(){
  document.querySelectorAll('.modal-bg,.confirm-bg,.prompt-bg').forEach(function(bg){
@@ -1194,7 +1221,7 @@ function setupModals(){
 function showBookShelf(){
  bookId=null;chapterId=null;currentChapter=null;currentBookTitle='';
  seriesId=null;seriesTitle='';seriesBooks=[];seriesBookOrder=[];
- $('topbarReadthroughBtn').style.display='none';
+ $('topbarSummaryBtn').style.display='none';
  $('editorView').style.display='none';$('bottomPanel').style.display='none';
  $('bookshelfView').classList.add('active');
  $('seriesView').classList.remove('active');
@@ -1320,7 +1347,7 @@ function showBookCreate(){showPrompt('新建书本','书名','新建书本',func
 function openBook(id){
  bookId=id;chapterId=null;currentChapter=null;inTrash=false;aiMessages=[];
  bookAnnotations={};
- $('topbarReadthroughBtn').style.display='';
+ $('topbarSummaryBtn').style.display='';
  $('bookshelfView').classList.remove('active');
  $('seriesView').classList.remove('active');
  $('editorView').style.display='flex';$('bottomPanel').style.display='flex';
@@ -1330,7 +1357,7 @@ function openBook(id){
  $('saveIndicator').className='save-indicator';
  $('editorChapterBadge').style.display='none';
  charCount=0;
- // Reset readthrough panel for new book
+ // Reset summary panel for new book
   $('rtStream').textContent='等待开始...';
  $('rtSource').value='';
   $('rtProgress').style.width='0%';$('rtPhase').textContent='准备中...';
@@ -1361,7 +1388,7 @@ function backToBooks(){
  clearAppState();
  setEditorLoading(false);
  if(seriesId){
-  $('topbarReadthroughBtn').style.display='none';
+  $('topbarSummaryBtn').style.display='none';
   $('bookshelfView').classList.remove('active');
   $('editorView').style.display='none';$('bottomPanel').style.display='none';
   $('seriesView').classList.add('active');
@@ -1680,10 +1707,10 @@ function renderAIMessages(){
  d.textContent=m.text;
  }
  c.appendChild(d);
- if(m.type==='ai' && m.needs_readthrough){
+ if(m.type==='ai' && m.needs_summary){
  var card=document.createElement('div');
- card.className='ai-readthrough-card';
- card.innerHTML='<div>AI 建议通读全书</div><div class="rt-warning">可能会消耗很多token哦</div><button class="rt-btn" onclick="startRTFromChat()">开始通读</button>';
+ card.className='ai-summary-card';
+ card.innerHTML='<div>AI 建议摘要全书</div><div class="rt-warning">可能会消耗很多token哦</div><button class="rt-btn" onclick="startRTFromChat()">开始摘要</button>';
  c.appendChild(card);
  }
  if(m.type==='ai' && (m._streaming||m._pending)){
@@ -1733,7 +1760,7 @@ function sendAI(){
  var summary=st.result||'';
  if(summary){
  var card=document.createElement('div');
- card.className='ai-readthrough-card';
+ card.className='ai-summary-card';
  card.innerHTML='<div style="font-weight:700;margin-bottom:4px">&#10003; 本章摘要</div><div style="white-space:pre-wrap;max-height:200px;overflow-y:auto">'+esc(summary.slice(0,800))+(summary.length>800?'...':'')+'</div>';
  $('aiMessages').appendChild(card);
  $('aiMessages').scrollTop=$('aiMessages').scrollHeight;
@@ -1779,7 +1806,7 @@ function _doSendAI(text){
  var m=aiMessages[msgIdx];
  if(st.status==='done'){
  clearInterval(pollTimer);
- if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_readthrough=st.needs_readthrough;m.annotations_changed=st.annotations_changed;}
+ if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;}
  renderAIMessages();saveAIMessages();
  if(st.annotations_changed){loadAnnotations();}
  if(st.complete_chapter){
@@ -1927,9 +1954,9 @@ function applyThemeMode(mode){
 
 function _updateConnTypeColors(){
  var hex=_currentThemeAccent;
- _connTypeMap.readthrough.color=hex;
+ _connTypeMap.summary.color=hex;
  _connTypeMap['chapter-complete'].color=hex;
- _connTypeMap['series-readthrough'].color=hex;
+ _connTypeMap['series-summary'].color=hex;
 }
 
 function onThemeAccentInput(val){
@@ -2392,6 +2419,7 @@ function saveSettings(){
  console.log('saveSettings response:', s, JSON.stringify(r));
  if(s===200){
  settings=r;providerPresets=r.provider_presets||providerPresets;currentPresetIdx=r.active_provider_idx||0;applySettings();
+ loadThemedIcon(); // 刷新主题图标
  refreshLocalLLMProgress();
  toast('设置已保存','success');
  if(oldScope!==newScope){
@@ -2503,7 +2531,7 @@ function switchBottomTab(tab){
  $('timelinePane').classList.toggle('active',tab==='timeline');
  $('predictionPane').classList.toggle('active',tab==='prediction');
  $('outlinePane').classList.toggle('active',tab==='outline');
- $('readthroughPane').classList.toggle('active',tab==='readthrough');
+ $('summaryPane').classList.toggle('active',tab==='summary');
  if(!bottomPanelOpen){openBottomPanel()}
  if(tab==='outline'){loadOutlineSource()}
 }
@@ -2600,8 +2628,8 @@ function openSeries(id,title){
  $('seriesRTStream').textContent='等待开始...';
  $('seriesRTProgress').style.width='0%';$('seriesRTPhase').textContent='准备中...';
  $('seriesRTChapters').textContent='0/0';
- $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始通读系列';
- $('topbarReadthroughBtn').style.display='none';
+ $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始系列摘要';
+ $('topbarSummaryBtn').style.display='none';
  $('bookshelfView').classList.remove('active');
  $('editorView').style.display='none';$('bottomPanel').style.display='none';
  $('seriesView').classList.add('active');
@@ -2934,8 +2962,8 @@ function sendSeriesAI(){
      clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;
      if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';}
      renderSeriesAIMessages();saveSeriesAIMessages();
-     if(st.needs_series_readthrough){
-      toggleSeriesReadthrough();
+     if(st.needs_series_summary){
+      toggleSeriesSummary();
       setTimeout(function(){startSeriesRT()},500);
      }
     }else if(st.status==='error'){
@@ -2971,8 +2999,8 @@ function _checkPendingSeriesChat(){
       clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;
       m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';
       renderSeriesAIMessages();saveSeriesAIMessages();
-      if(st.needs_series_readthrough){
-       toggleSeriesReadthrough();
+      if(st.needs_series_summary){
+       toggleSeriesSummary();
        setTimeout(function(){startSeriesRT()},500);
       }
      }else if(st.status==='error'){
@@ -2990,9 +3018,9 @@ function _checkPendingSeriesChat(){
  }
 }
 
-/* === 系列通读 === */
+/* === 系列摘要 === */
 var _seriesRTPoll=null;
-function toggleSeriesReadthrough(){
+function toggleSeriesSummary(){
  if(!seriesId)return;
  var rt=$('seriesRT');var chat=$('seriesChatPanel');
  var open=(rt.style.display!=='none');
@@ -3007,9 +3035,9 @@ function toggleSeriesReadthrough(){
 function _pollSeriesRT(){
  if(_seriesRTPoll)return;
  _seriesRTPoll=setInterval(function(){
-  api('GET','/api/series/'+seriesId+'/readthrough/status',undefined,function(d){
+  api('GET','/api/series/'+seriesId+'/summary/status',undefined,function(d){
    if(!d||d.status==='idle'){
-    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始通读系列';
+    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始系列摘要';
     return;
    }
    if(d.stream_buffer)$('seriesRTStream').textContent=d.stream_buffer||'';
@@ -3017,14 +3045,14 @@ function _pollSeriesRT(){
    $('seriesRTPhase').textContent=d.phase||'';
    $('seriesRTChapters').textContent=(d.done_chapters||0)+'/'+(d.total_chapters||0);
    if(d.status==='done'){
-    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='重新通读';
+    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='重新摘要';
     $('seriesRTPhase').textContent='完成';
-    toast('系列通读完成！','success');
+    toast('系列摘要完成！','success');
    }else if(d.status==='error'){
-    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始通读系列';
+    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始系列摘要';
     $('seriesRTPhase').textContent=(d.error||'错误');
    }else if(d.status==='running'){
-    $('seriesRTStartBtn').textContent='通读中...';
+    $('seriesRTStartBtn').textContent='摘要中...';
    }
   });
  },500);
@@ -3041,9 +3069,9 @@ function startSeriesRT(){
   }
   $('seriesRTStream').textContent='';
   $('seriesRTProgress').style.width='0%';$('seriesRTPhase').textContent='启动中...';$('seriesRTChapters').textContent='0/0';
-  $('seriesRTStartBtn').textContent='通读中...';
+  $('seriesRTStartBtn').textContent='摘要中...';
   api('POST','/api/series/'+seriesId+'/readthrough/start',{},function(d){
-   if(!d||d.error){toast(d&&d.error||'启动失败','error');$('seriesRTStartBtn').textContent='开始通读系列';return}
+   if(!d||d.error){toast(d&&d.error||'启动失败','error');$('seriesRTStartBtn').textContent='开始系列摘要';return}
    _pollSeriesRT();
   });
  });
@@ -3317,13 +3345,13 @@ function setupBottomPanelDrag(){
 
 
 
- function openReadthrough(){
+ function openSummary(){
  if(!bookId){toast('请先打开一本书','warn');return}
- if(bottomPanelOpen && currentBottomTab==='readthrough'){
+ if(bottomPanelOpen && currentBottomTab==='summary'){
  closeBottomPanel();
  return;
  }
- switchBottomTab('readthrough');
+ switchBottomTab('summary');
  if(rtPollTimer===null)pollRTStatus();
 }
 
@@ -3351,7 +3379,7 @@ function loadSourceToRT(){
       ss.placeholder='source.md 已加载';
  }else{
  ss.value='';
-      ss.placeholder='通读完成后此处显示笔记...';
+      ss.placeholder='摘要完成后此处显示笔记...';
  }
  });
 }
@@ -3404,18 +3432,18 @@ function _setRTButton(status, chapterIdx){
   b.style.background='';b.style.color='';b.style.border='';
   if(chapterIdx===undefined||chapterIdx===null) chapterIdx=-1;
   if(chapterIdx===-1){
-   // 已完成通读：显示重新开始
+   // 已完成摘要：显示重新开始
    b.textContent='重新开始';
    b.onclick=function(){startRT();};
    c.style.display='none';
   }else if(chapterIdx>=0){
    // 有进度：继续+清空进度
-   b.textContent='继续通读';
+   b.textContent='继续摘要';
    b.onclick=function(){startRTContinue();};
    c.style.display='';
   }else{
    // 无进度无 source
-   b.textContent='开始通读';
+   b.textContent='开始摘要';
    b.onclick=function(){startRT();};
    c.style.display='none';
   }
@@ -3423,7 +3451,7 @@ function _setRTButton(status, chapterIdx){
 }
 function clearRT(){
   if(!bookId)return;
-  if(!confirm('确定清空所有通读笔记并重新开始？'))return;
+  if(!confirm('确定清空所有摘要笔记并重新开始？'))return;
  api('POST','/api/book/'+bookId+'/readthrough/clear',{},function(d,s){
  if(s===200){
  $('rtStream').textContent='...';
@@ -3432,7 +3460,7 @@ function clearRT(){
  $('rtProgress').style.width='0%';$('rtPhase').textContent='...';
  $('rtChapters').textContent='0/0 章';
  _setRTButton('idle', -1);
-  toast('通读笔记已清空','success');
+  toast('摘要笔记已清空','success');
  rtLastStatus='idle';
  rtLastDoneChapters=0;
  rtLastChapterIdx=-1;
@@ -3482,7 +3510,7 @@ function updateRTUI(d,s){
  }else if(st==='done'){
  clearInterval(rtPollTimer);rtPollTimer=null;
  _setRTButton('idle', chapterIdx);
- $('rtPhase').textContent='完成';toast('通读完成！','success');
+ $('rtPhase').textContent='完成';toast('摘要完成！','success');
  rtLastDoneChapters=doneCh;
  loadSourceToRT();
  }else if(st==='idle'){
@@ -3495,11 +3523,11 @@ function updateRTUI(d,s){
  _setRTButton('idle', chapterIdx);
  rtLastDoneChapters=doneCh;
  loadSourceToRT();
- toast('通读已保存进度','warn');
+ toast('摘要已保存进度','warn');
  }else if(st==='error'){
  clearInterval(rtPollTimer);rtPollTimer=null;
  _setRTButton('idle', chapterIdx);
- toast(d.error||'通读失败','error');
+ toast(d.error||'摘要失败','error');
  rtLastDoneChapters=doneCh;
  loadSourceToRT();
  }
@@ -3602,8 +3630,8 @@ function syncHighlights(){
 
 function startRTFromChat(){
  if(!bookId)return;
- showConfirm('','确认开始通读吗？',function(){
- switchBottomTab('readthrough');
+ showConfirm('','确认开始摘要吗？',function(){
+ switchBottomTab('summary');
  startRT();
  });
 }
