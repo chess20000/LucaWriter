@@ -136,6 +136,7 @@ DEFAULT_SETTINGS = {
     'browser_enabled': False,
     'theme_accent': '#E8CC7A',
     'theme_mode': 'dark',
+    'ui_scale': 1.0,
 }
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
@@ -1876,6 +1877,18 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 icon_base64 = None
             self.json_resp(200, {'icon': icon_base64, 'theme_accent': theme_accent}); return
+
+        if path == '/api/theme-is-light':
+            settings = get_settings()
+            theme_accent = settings.get('theme_accent', '#E8CC7A')
+            is_light = True
+            if HAS_ICON_GENERATOR:
+                try:
+                    rgb = icon_generator.hex_to_rgb(theme_accent)
+                    is_light = icon_generator.is_light_color(rgb)
+                except Exception:
+                    is_light = True
+            self.json_resp(200, {'is_light': is_light, 'theme_accent': theme_accent}); return
 
         if path == '/api/local-llm/status':
             self.json_resp(200, {'running': _local_llm_status()}); return
@@ -3898,8 +3911,30 @@ class Handler(BaseHTTPRequestHandler):
                     url = f"{bu}/v1/models"
                 req = urllib.request.Request(url, headers=headers, method='GET')
                 with urllib.request.urlopen(req, timeout=30) as resp:
-                    result = json.loads(resp.read().decode())
-                    ml = [m['id'] for m in result.get('data', [])]
+                    raw = resp.read().decode()
+                    print('[fetch-models] raw[:500]:', raw[:500])
+                    result = json.loads(raw)
+                    ml = []
+                    # try various response formats
+                    if isinstance(result, list):
+                        ml = [m.get('id') or m.get('name') or m.get('model') or str(m) if isinstance(m, dict) else str(m) for m in result]
+                    elif isinstance(result, dict):
+                        data_list = result.get('data') or result.get('models') or result.get('result') or []
+                        if isinstance(data_list, dict):
+                            data_list = data_list.get('data') or data_list.get('models') or []
+                        if not isinstance(data_list, list):
+                            data_list = []
+                        for m in data_list:
+                            if isinstance(m, dict):
+                                ml.append(m.get('id') or m.get('name') or m.get('model') or str(m))
+                            elif isinstance(m, str):
+                                ml.append(m)
+                            else:
+                                ml.append(str(m))
+                    # deduplicate while preserving order
+                    seen = set()
+                    ml = [x for x in ml if not (x in seen or seen.add(x))]
+                    print('[fetch-models] parsed ml:', ml[:10])
                     settings = get_settings()
                     settings['models'] = ml[:50]
                     save_settings = json.loads(json.dumps(settings))
