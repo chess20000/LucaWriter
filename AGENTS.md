@@ -105,3 +105,26 @@ A: 取决于所选模型的上下文窗口。在线模型通常支持 8K-128K to
 
 **Q: 弹窗里的输入框选中文本时，鼠标滑到窗口外面松开，窗口会关掉？**
 A: 该问题已在最新版本修复。现在只有真正点击黑色背景区域时才会关闭弹窗，选中文字再拖到外面松开不会误关闭。
+
+## 对话摘要 (2026-05-13)
+
+### 本次会话完成的工作
+
+**UI 大改造：Luca 聊天框从右侧移到左侧**
+- 整体布局：trigger(18px) → leftStack(chat + 章节列表overlay) → resizeHandle → editor-area
+- 章节列表以 absolute overlay 方式覆盖在聊天框上方（z-index:5），展开时遮住聊天框
+- 底栏：AI 输入框在左边（与聊天框宽度同步 via ResizeObserver），Tab 栏（时间线/预言/大纲/摘要）在右边
+- sendAI() 按 Enter 后自动收起章节列表
+
+**底栏溢出修复（核心架构变更）**
+- `.app` 从 `display:flex;flex-direction:column` 改为 `display:grid;grid-template-rows:38px 1fr auto`
+- Grid 引擎物理约束行高，彻底解决底栏展开时超出屏幕的问题
+
+**其他交互优化**
+- 底栏点击可靠性：引入 4px 拖拽阈值区分点击/拖拽，移除 grip handler
+- 章节列表交互：移除展开/收起延迟和 opacity 动画，鼠标移入秒开、移出秒关
+- 鼠标移到窗口最左边缘不再误触发章节列表收起（relatedTarget === null 时返回 false）
+- 思考文字旋转速度从 2000ms 改为 3000ms
+- 删除 syncAIPadding() 功能（不再随底栏抬升聊天消息）
+- 删除 sidebar-header（返回按钮、章节标签），回收站按钮移到 footer 与"新建章节"并排
+- 底栏展开时隐藏 AI 输入框（纯 CSS：`.bottom-panel:not(.collapsed) #aiInputZone{display:none}`）

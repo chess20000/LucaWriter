@@ -68,7 +68,7 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 ::selection{background:var(--t3);color:#fff}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:var(--r1)}::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-hover)}
 
-.app{display:flex;flex-direction:column;height:100%;overflow:hidden;position:relative}
+.app{display:grid;grid-template-rows:38px 1fr auto;height:100%;overflow:hidden;position:relative}
 
 .topbar{height:38px;display:flex;align-items:center;padding:0 12px;background:rgba(14,23,44,.76);border-bottom:1px solid rgba(255,255,255,.06);backdrop-filter:blur(18px);flex-shrink:0;gap:8px;z-index:10}
 .topbar{box-shadow:var(--panel-shadow)}
@@ -157,14 +157,15 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 }
 
 .main{display:flex;flex:1;flex-direction:column;overflow:hidden}
-.main-row{display:flex;flex:1;overflow:hidden}
+.main-row{display:flex;flex:1;overflow:hidden;min-height:0}
 
 .resize-handle{width:5px;flex-shrink:0;cursor:col-resize;position:relative;z-index:10;background:transparent;margin:0 -2px}
 .resize-handle::after{content:'';position:absolute;top:0;bottom:0;left:50%;transform:translateX(-50%);width:1px;background:transparent;transition:background .15s}
 .resize-handle:hover::after,.resize-handle.dragging::after{background:var(--accent)}
 
-.left-sidebar{width:230px;flex-shrink:0;background:var(--surface);display:flex;flex-direction:column;overflow:hidden;border:none;position:relative;transition:width .25s ease,opacity .2s ease}
-.left-sidebar.collapsed{width:0;opacity:0;pointer-events:none;flex:0 0 0;border:none}
+.left-stack{width:320px;flex-shrink:0;position:relative;overflow:hidden;height:100%;align-self:stretch}
+.left-sidebar{width:100%;background:var(--surface);display:flex;flex-direction:column;overflow:hidden;border:none;position:absolute;inset:0;z-index:5}
+.left-sidebar.collapsed{opacity:0;pointer-events:none}
 .sidebar-trigger{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:5;background:var(--surface);border-right:1px solid var(--border);transition:background .15s,color .15s;color:var(--t3);position:relative}
 .sidebar-trigger:hover{background:var(--surface2);color:var(--t-on-surface)}
 .sidebar-trigger svg{width:12px;height:12px;transform:rotate(0deg);transition:transform .25s ease}
@@ -182,8 +183,8 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .sidebar-search input::placeholder{color:var(--t-on-surface-muted)}
 .sidebar-search input:focus{border-color:var(--accent)}
 
-.chapter-list{flex:1;overflow-y:auto;padding:6px}
-.ch-item{padding:10px 14px;border-radius:var(--r2);font-size:14px;color:var(--t-on-surface-muted);cursor:pointer;display:flex;align-items:center;gap:10px;margin:4px 0;transition:all .12s;position:relative;border:1px solid transparent}
+.chapter-list{flex:1;overflow-y:auto;padding:6px;direction:rtl}
+.ch-item{padding:10px 14px;border-radius:var(--r2);font-size:14px;color:var(--t-on-surface-muted);cursor:pointer;display:flex;align-items:center;gap:10px;margin:4px 0;transition:all .12s;position:relative;border:1px solid transparent;direction:ltr}
 .ch-item:hover{color:var(--t-on-surface);background:var(--surface2)}
 .ch-item.active{background:var(--accent-a12);color:var(--t-on-surface);font-weight:600;border-color:var(--accent);box-shadow:inset 2px 0 0 var(--accent);backdrop-filter:blur(6px)}
 .ch-item .ch-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
@@ -267,7 +268,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .editor-body textarea::placeholder{color:var(--t3)}
 .editor-body textarea::selection{background:var(--t3);color:#fff}
 
-.right-sidebar{width:280px;flex-shrink:0;background:var(--surface);display:flex;flex-direction:column;overflow:hidden;border:none}
+.right-sidebar{width:100%;height:100%;background:var(--surface);display:flex;flex-direction:column;overflow:hidden;border:none}
 .right-sidebar-header{padding:10px 14px;font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.5px;border-bottom:1px solid var(--border);flex-shrink:0}
 .right-content{flex:1;overflow-y:auto;display:flex;flex-direction:column}
 
@@ -293,10 +294,9 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .rt-btn:hover{background:var(--accent2)}
 .ctx-tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--surface2);color:var(--t3);font-size:10px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle}
 
-.bottom-panel{position:absolute;bottom:0;left:0;right:0;z-index:20;background:var(--surface);border-top:1px solid var(--border2);display:flex;flex-direction:column;overflow:hidden;transition:height .2s cubic-bezier(.4,0,.2,1);height:30px;box-shadow:0 -8px 32px rgba(0,0,0,.4)}
+.bottom-panel{z-index:20;background:var(--surface);border-top:1px solid var(--border2);display:flex;flex-direction:column;overflow:hidden;transition:height .2s cubic-bezier(.4,0,.2,1);height:30px;box-shadow:0 -8px 32px rgba(0,0,0,.4)}
 .bottom-panel.collapsed{overflow:hidden;box-shadow:none;max-height:none}
-.bottom-panel:not(.collapsed){max-height:var(--bp-max-h,calc(100% - 40px))}
-.bottom-handle{display:flex;align-items:center;justify-content:space-between;padding:0 16px;height:30px;flex-shrink:0;gap:0;user-select:none;position:relative}
+.bottom-handle{display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 0;height:30px;flex-shrink:0;gap:0;user-select:none;position:relative}
 .handle-grip{display:flex;align-items:center;position:absolute;left:50%;transform:translateX(-50%);gap:12px;cursor:ns-resize}
 .handle-grip span{display:block;width:20px;height:2px;background:var(--surface4);border-radius:1px;transition:background .15s}
 .handle-grip:hover span{background:var(--t2)}
@@ -304,7 +304,8 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .bottom-panel.collapsed .handle-hint::after{content:'点击展开'}
 .bottom-panel:not(.collapsed) .handle-hint::after{content:'点击收起'}
 .bottom-tabs{display:flex;gap:0;flex-shrink:0;overflow-x:auto}
-#aiInputZone{width:280px;flex:none;display:flex;align-items:stretch;margin-right:-17px}
+#aiInputZone{width:280px;flex:none;display:flex;align-items:stretch;margin-left:18px}
+.bottom-panel:not(.collapsed) #aiInputZone{display:none!important}
 .bottom-tab{background:none;border:none;color:var(--t3);font-size:12px;font-weight:600;padding:1px 12px 5px;border-radius:var(--r1);cursor:pointer;transition:all .1s;white-space:nowrap}
 .bottom-tab:hover{color:var(--t2)}
 .bottom-tab.active{color:var(--t1)}
@@ -542,7 +543,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .prompt-btns{display:flex;gap:12px;justify-content:center;align-items:center}
 .prompt-btns button{flex:0 1 auto;min-width:140px;padding:10px 18px;border-radius:var(--r1);font-size:14px;font-weight:700;cursor:pointer;border:none;transition:all .12s;touch-action:manipulation}
 
-@media(max-width:900px){.left-sidebar{width:180px}.right-sidebar{width:230px}}
+@media(max-width:900px){.left-stack{width:230px}}
 @media(max-width:768px){.main-row{display:none}.bottom-panel{display:none}}
 
 .pw-mask{-webkit-text-security:disc;font-family:var(--font-mono)}
@@ -726,22 +727,35 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="sidebar-trigger" id="sidebarTrigger" title="展开章节栏">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
  </div>
- <div class="left-sidebar collapsed" id="leftSidebar">
- <div class="sidebar-header">
- <button class="back-btn" onclick="backToBooks()" title="返回书架">&#8592; 书架</button>
-          <span class="sidebar-label" id="sidebarLabel">章节</span>
-          <button class="trash-toggle" onclick="toggleTrash()" id="trashToggleBtn">回收站</button>
+
+ <div class="left-stack" id="leftStack">
+
+ <div class="right-sidebar" id="rightSidebar">
+  <div class="right-sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0">
+  <div class="right-sidebar-header" style="display:flex;justify-content:space-between;align-items:center">
+  <span>Luca</span>
+            <button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="clearAIChat()" title="清空对话">清空</button>
+  </div>
+  <div class="right-content" id="aiMessages" style="gap:6px;padding:8px 14px 36px 14px"></div>
+  </div>
  </div>
+
+ <div class="left-sidebar collapsed" id="leftSidebar">
  <div class="sidebar-search" id="sidebar-search">
           <input id="chSearch" placeholder="搜索章节..." oninput="filterChapters()">
  </div>
-        <div class="sidebar-footer" style="padding:6px 12px">
+        <div class="sidebar-footer" style="padding:6px 12px;display:flex;gap:8px;justify-content:center">
           <button onclick="addChapter()">+ 新建章节</button>
+          <button class="trash-toggle" onclick="toggleTrash()" id="trashToggleBtn">回收站</button>
  </div>
  <div class="book-list-panel" id="bookListPanel" style="display:none;flex-direction:column;flex:1;overflow-y:auto;padding:4px"></div>
  <div class="chapter-list" id="chapterList"></div>
  <div class="ch-trash-wrap" id="trashList"></div>
  </div>
+
+ </div>
+
+ <div class="resize-handle" id="resizeHandleR" title="拖拽调整左侧栏宽度"></div>
 
  <div class="editor-area">
  <div class="editor-top">
@@ -755,31 +769,19 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <textarea id="editorArea" placeholder="开始写作..." oninput="onContentChange()"></textarea>
  </div>
  </div>
-
- <div class="resize-handle" id="resizeHandleR" title="拖拽调整右侧栏宽度"></div>
-
- <div class="right-sidebar" id="rightSidebar">
-  <div class="right-sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0">
-  <div class="right-sidebar-header" style="display:flex;justify-content:space-between;align-items:center">
-  <span>Luca</span>
-            <button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="clearAIChat()" title="清空对话">清空</button>
-  </div>
-  <div class="right-content" id="aiMessages" style="gap:6px;padding:8px 14px 36px 14px"></div>
-  </div>
- </div>
  </div>
 
   <div class="bottom-panel" id="bottomPanel">
   <div class="bottom-handle" id="bottomHandle">
     <div class="handle-grip"><span></span><span></span><span></span></div>
-    <div class="bottom-tabs" style="margin-left:16px">
+    <div id="aiInputZone" style="width:280px;flex:none;display:flex;align-items:stretch;margin-left:18px">
+    <input class="ai-input" id="aiInput" placeholder="问 Luca" style="flex:1;min-width:0;height:30px;padding:0 10px;font-size:12px;border-radius:0;border:none;background:var(--surface2);color:var(--t1);outline:none" onkeydown="if(event.key==='Enter')sendAI()">
+    </div>
+    <div class="bottom-tabs" style="margin-left:auto">
           <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')">时间线</button>
           <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')">预言</button>
           <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')">大纲</button>
           <button class="bottom-tab active" data-btab="summary" onclick="switchBottomTab('summary')">摘要</button>
-    </div>
-    <div id="aiInputZone" style="width:250px;flex:none;display:flex;align-items:stretch;margin-left:auto">
-    <input class="ai-input" id="aiInput" placeholder="问 Luca" style="flex:1;min-width:0;height:30px;padding:0 10px;font-size:12px;border-radius:0;border:none;background:var(--surface2);color:var(--t1);outline:none" onkeydown="if(event.key==='Enter')sendAI()">
     </div>
   </div>
  <div class="bottom-body">
@@ -1162,9 +1164,8 @@ var allChapters=[],chapterOrder=[];
 var aiMessages=[];
 var currentChapter=null;
 var currentBottomTab='summary';
-function _appHeight(){var a=$('app');return(a?a.clientHeight:window.innerHeight)-40}
+function _appHeight(){var a=$('app'),tb=$('topbar');var tbh=tb?tb.offsetHeight:38;return(a?a.clientHeight:window.innerHeight)-tbh}
 function _syncBpMaxHeight(){var a=$('app');if(a)a.style.setProperty('--bp-max-h',_appHeight()+'px')}
-function syncAIPadding(){var msg=$('aiMessages'),panel=$('bottomPanel');if(msg&&panel){var h=panel.offsetHeight||30;msg.style.paddingBottom=(h>38?h+8:36)+'px'}}
 var bottomPanelOpen=false;
 var _collapseTimer=null;
 var bottomPanelHeight=_appHeight();
@@ -1286,7 +1287,7 @@ function stopAllTasks(){
 }
 
 function $(id){return document.getElementById(id)}
-function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 
 var _confirmCb=null;
 function toast(msg,type,dur){var t=$('toast');t.textContent=msg;t.className='toast '+(type||'');t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('show')},dur||2000)}
@@ -1548,7 +1549,6 @@ function backToBooks(){
 
 function showBookListInSidebar(){
  $('bookListPanel').style.display='flex';$('chapterList').style.display='none';$('sidebar-search').style.display='none';
- $('sidebarLabel').textContent='Books';
  api('GET','/api/books',undefined,function(d){
  var panel=$('bookListPanel');panel.innerHTML='';
  (d.books||[]).forEach(function(b){
@@ -1560,7 +1560,7 @@ function showBookListInSidebar(){
  });
 }
 
-function hideBookListInSidebar(){$('bookListPanel').style.display='none';$('chapterList').style.display='';$('sidebar-search').style.display='';$('sidebarLabel').textContent='章节'}
+function hideBookListInSidebar(){$('bookListPanel').style.display='none';$('chapterList').style.display='';$('sidebar-search').style.display=''}
 
 function createBook(){showPrompt('新建书本','书名','新建书本',function(t){if(!t)return;api('POST','/api/books/create',{title:t},function(d){if(d.book){cachedBooks=null;currentBookTitle=d.book.title;openBook(d.book.id)}})})}
 
@@ -1824,14 +1824,20 @@ function _startChatPoll(taskId){
 
 var _thinkingWords=['思考中……','推理中……','正在分析……','处理中……','正在计算……','梳理一下……','酝酿一下……','让我想想……','我来看看……','构思小作文……','对方正在输入……','输入中……','我在打字……','等一下……','智慧的眼神……','注意到……','挠下巴……'];
 var _thinkingTimer=null;
-function _rotateThinkingWord(){
+var _currentThinkingWord='';
+function _applyThinkingWord(){
+  if(!_currentThinkingWord)_currentThinkingWord=_thinkingWords[Math.floor(Math.random()*_thinkingWords.length)];
   var words=document.querySelectorAll('.thinking-word');
-  words.forEach(function(el){el.textContent=_thinkingWords[Math.floor(Math.random()*_thinkingWords.length)]});
+  words.forEach(function(el){el.textContent=_currentThinkingWord});
+}
+function _rotateThinkingWord(){
+  _currentThinkingWord=_thinkingWords[Math.floor(Math.random()*_thinkingWords.length)];
+  _applyThinkingWord();
 }
 function _startThinkingRotation(){
-  _rotateThinkingWord();
+  _applyThinkingWord();
   if(_thinkingTimer)return;
-  _thinkingTimer=setInterval(_rotateThinkingWord,2000);
+  _thinkingTimer=setInterval(_rotateThinkingWord,5000);
 }
 function _stopThinkingRotation(){if(_thinkingTimer){clearInterval(_thinkingTimer);_thinkingTimer=null;}}
 
@@ -1842,8 +1848,8 @@ function saveAIMessages(){if(!bookId)return;api('POST','/api/book/'+bookId+'/mes
 function renderAIMessages(){
   var c=$('aiMessages');c.innerHTML='';
    if(!aiMessages.length){c.innerHTML='<div class="ai-msg ai-msg-ai" style="text-align:center;font-size:10px;background:transparent;border:none;padding:10px;color:var(--t3)">Luca 会随着你写作，为你提供建议</div>';return}
-  aiMessages.forEach(function(m){
- var d=document.createElement('div');d.className='ai-msg ai-msg-'+m.type;
+  aiMessages.forEach(function(m,idx){
+ var d=document.createElement('div');d.className='ai-msg ai-msg-'+m.type;d.dataset.idx=idx;
    if(m.type==='ai'){
   var isLive=m._streaming||m._pending;
   var statusText='';
@@ -1854,7 +1860,7 @@ function renderAIMessages(){
   var header='<div class="ai-msg-header" onclick="toggleReasoningFromHeader(this)" data-has-reasoning="'+(hasReasoning||isLive?'1':'0')+'"><img class="ai-msg-logo" src="logo-white.png" alt="">'+statusText+'</div>';
   var reasonHtml='';
   if(m.reasoning){
-  reasonHtml='<div class="ai-reasoning"><div class="ai-reasoning-body">'+esc(String(m.reasoning))+'</div></div>';
+  reasonHtml='<div class="ai-reasoning"><div class="ai-reasoning-body'+(m._reasoningOpen?' open':'')+'">'+esc(String(m.reasoning))+'</div></div>';
   }
   if(m._pending && !m.text && !m.reasoning){
   var dots=(m._pollTick||0)%3;var dotStr=''+(dots===0?'\u25CF':(dots===1?'\u25CF\u25CF':'\u25CF\u25CF\u25CF'));
@@ -1892,7 +1898,9 @@ function toggleReasoningFromHeader(el){
   var body=el.closest('.ai-msg').querySelector('.ai-reasoning-body');
   if(!body)return;
   body.classList.remove('streaming');
-  body.classList.toggle('open');
+  var open=body.classList.toggle('open');
+  var msgEl=el.closest('.ai-msg');
+  if(msgEl&&msgEl.dataset.idx!==undefined){var m=aiMessages[+msgEl.dataset.idx];if(m)m._reasoningOpen=open;}
 }
 
 function toggleReasoning(el){
@@ -1909,6 +1917,8 @@ function sendAI(){
  var text=$('aiInput').value.trim();
  if(!text||!bookId)return;
  $('aiInput').value='';
+ var sb=$('leftSidebar'),tr=$('sidebarTrigger');
+ if(sb&&!sb.classList.contains('collapsed')){sb.classList.add('collapsed');if(tr)tr.classList.remove('expanded')}
  _doSendAI(text);
 }
 
@@ -2915,11 +2925,9 @@ function openBottomPanel(){
  panel.style.display='flex';
  var saved=parseInt(localStorage.getItem('lw_bottom_panel_h')||'0');
  var full=_appHeight();
- if(saved && saved>60 && saved<full-20){bottomPanelHeight=saved}
- else{bottomPanelHeight=full}
+ if(saved && saved>60 && saved<full){bottomPanelHeight=saved}
+ else{bottomPanelHeight=Math.round(full*0.6)}
  panel.style.height=bottomPanelHeight+'px';
- _syncBpMaxHeight();
- syncAIPadding();
  panel.classList.remove('collapsed');
 }
 
@@ -2928,7 +2936,6 @@ function closeBottomPanel(){
   var panel=$('bottomPanel');
   clearTimeout(_collapseTimer);
   panel.style.height='30px';
-  syncAIPadding();
   _collapseTimer=setTimeout(function(){panel.classList.add('collapsed')},220);
 }
 
@@ -3616,25 +3623,17 @@ function setupBottomPanelDrag(){
  var dragging=false,didDrag=false,startY=0,startH=0;
 
  handle.addEventListener('mousedown',function(e){
- if(e.target.closest('.bottom-tab')||e.target.closest('.bottom-toggle'))return;
- dragging=true;didDrag=false;
- startY=e.clientY;
- startH=panel.offsetHeight;
- document.body.style.cursor='ns-resize';
- document.body.style.userSelect='none';
+  if(e.target.closest('.bottom-tab')||e.target.closest('.bottom-toggle'))return;
+  dragging=false;didDrag=false;
+  startY=e.clientY;
+  startH=panel.offsetHeight;
  });
 
   handle.addEventListener('click',function(e){
   if(didDrag)return;
-  if(e.target.closest('.bottom-tab')||e.target.closest('#aiInputZone'))return;
-  toggleBottomPanel();
-  });
-
- var grip=handle.querySelector('.handle-grip');
- if(grip)grip.addEventListener('click',function(e){
-  e.stopPropagation();
-  toggleBottomPanel();
-  });
+  if(e.target.closest('.bottom-tab')||e.target.closest('.bottom-toggle')||e.target.closest('#aiInputZone input'))return;
+  openSummary();
+ });
 
  handle.addEventListener('dblclick',function(e){
  if(e.target.closest('.bottom-tab')||e.target.closest('.bottom-toggle'))return;
@@ -3642,38 +3641,43 @@ function setupBottomPanelDrag(){
  localStorage.removeItem('lw_bottom_panel_h');
  var full=_appHeight();
  panel.style.height=full+'px';
- _syncBpMaxHeight();
- syncAIPadding();
  bottomPanelHeight=full;
  bottomPanelOpen=true;
  });
 
  document.addEventListener('mousemove',function(e){
- if(!dragging)return;
- if(!didDrag){didDrag=true;panel.style.transition='none'}
+  if(startY===0)return;
+  if(!dragging&&Math.abs(e.clientY-startY)>4){
+   dragging=true;didDrag=true;
+   document.body.style.cursor='ns-resize';
+   document.body.style.userSelect='none';
+   panel.style.transition='none';
+  }
+  if(!dragging)return;
  var h=startH+(startY-e.clientY);
  h=Math.max(30,Math.min(_appHeight(),h));
  panel.style.height=h+'px';
- _syncBpMaxHeight();
- syncAIPadding();
  panel.classList.remove('collapsed');
  bottomPanelHeight=h;
  bottomPanelOpen=true;
  });
 
  document.addEventListener('mouseup',function(){
- if(!dragging)return;
- dragging=false;
- document.body.style.cursor='';
- document.body.style.userSelect='';
- panel.style.transition='';
- var minH=handle.offsetHeight||30;
- if(panel.offsetHeight<=38){
- closeBottomPanel();
- }else{
- savedBottomPanelHeight=bottomPanelHeight;
- localStorage.setItem('lw_bottom_panel_h',bottomPanelHeight);
- }
+  if(startY===0)return;
+  if(dragging){
+   dragging=false;
+   document.body.style.cursor='';
+   document.body.style.userSelect='';
+   panel.style.transition='';
+   var minH=handle.offsetHeight||30;
+   if(panel.offsetHeight<=38){
+    closeBottomPanel();
+   }else{
+    savedBottomPanelHeight=bottomPanelHeight;
+    localStorage.setItem('lw_bottom_panel_h',bottomPanelHeight);
+   }
+  }
+  startY=0;
  });
 }
 
@@ -3682,9 +3686,7 @@ function setupBottomPanelDrag(){
 	  var full=_appHeight();
 	  var saved=parseInt(localStorage.getItem('lw_bottom_panel_h')||'0');
 	  var panel=$('bottomPanel');
-	  if(!saved||saved>=full-20){bottomPanelHeight=full;panel.style.height=full+'px'}
-	  _syncBpMaxHeight();
-	  syncAIPadding();
+	  if(!saved||saved>=full){bottomPanelHeight=full;panel.style.height=full+'px'}
 	 }
 	 syncInputWidth();
 	});
@@ -3695,14 +3697,20 @@ function setupBottomPanelDrag(){
   var zone=$('aiInputZone'),rs=document.getElementById('rightSidebar');
   if(zone&&rs)zone.style.width=rs.offsetWidth+'px';
  }
+ (function(){
+  var rs=document.getElementById('rightSidebar'),zone=$('aiInputZone');
+  if(!rs||!zone)return;
+  if(typeof ResizeObserver!=='undefined'){
+   var ro=new ResizeObserver(function(){zone.style.width=rs.offsetWidth+'px'});
+   ro.observe(rs);
+  }
+ })();
   function setupResizeHandles(){
    var state=null;
    try{state=JSON.parse(localStorage.getItem('lucawriter_layout')||'null')}catch(e){}
-   var leftW=state&&state.leftWidth||230;
-   var rightW=state&&state.rightWidth||280;
-   var left=$('leftSidebar'),right=$('rightSidebar');
-    if(left)left.style.width=leftW+'px';
-    if(right)right.style.width=rightW+'px';
+   var stackW=state&&state.leftWidth||280;
+   var stack=document.getElementById('leftStack');
+    if(stack)stack.style.width=stackW+'px';
     syncInputWidth();
 
   function makeResizable(handleId,sidebarId,minW,isRight){
@@ -3723,7 +3731,7 @@ function setupBottomPanelDrag(){
     var dx=isRight?(startX-e.clientX):(e.clientX-startX);
     var w=Math.max(minW,Math.min(500,startW+dx));
     sidebar.style.width=w+'px';
-    if(isRight)syncInputWidth();
+    syncInputWidth();
    });
 
    document.addEventListener('mouseup',function(){
@@ -3731,28 +3739,35 @@ function setupBottomPanelDrag(){
     dragging=false;
     handle.classList.remove('dragging');
     document.body.style.cursor='';document.body.style.userSelect='';
-    var ls=document.getElementById('leftSidebar'),rs=document.getElementById('rightSidebar');
-    var data={leftWidth:ls?ls.offsetWidth:230,rightWidth:rs?rs.offsetWidth:280};
+    var stack=document.getElementById('leftStack');
+    var data={leftWidth:stack?stack.offsetWidth:280};
     try{localStorage.setItem('lucawriter_layout',JSON.stringify(data))}catch(e){}
    });
   }
 
-  makeResizable('resizeHandleR','rightSidebar',200,true);
+  makeResizable('resizeHandleR','leftStack',200,false);
 
   (function(){
    var trigger=document.getElementById('sidebarTrigger');
    var sidebar=document.getElementById('leftSidebar');
    if(!trigger||!sidebar)return;
    var expandTimer=null,collapseTimer=null;
-   var DELAY=700,COLLAPSE_DELAY=300;
+   var DELAY=0,COLLAPSE_DELAY=0;
    function clearTimers(){clearTimeout(expandTimer);clearTimeout(collapseTimer);expandTimer=null;collapseTimer=null}
    function doExpand(){sidebar.classList.remove('collapsed');trigger.classList.add('expanded')}
-   function doCollapse(){sidebar.classList.add('collapsed');trigger.classList.remove('expanded')}
+   function doCollapse(){if(document.activeElement&&document.activeElement.id==='aiInput')return;sidebar.classList.add('collapsed');trigger.classList.remove('expanded')}
+   var stack=document.getElementById('leftStack');
+   function shouldCollapse(related){
+     if(!related)return false;
+     return !stack.contains(related);
+    }
    trigger.addEventListener('mouseenter',function(e){clearTimers();expandTimer=setTimeout(doExpand,DELAY)});
    sidebar.addEventListener('mouseenter',function(){clearTimers()});
-   trigger.addEventListener('mouseleave',function(e){clearTimers();if(!sidebar.classList.contains('collapsed'))collapseTimer=setTimeout(doCollapse,COLLAPSE_DELAY)});
-   sidebar.addEventListener('mouseleave',function(e){clearTimers();collapseTimer=setTimeout(doCollapse,COLLAPSE_DELAY)});
+   trigger.addEventListener('mouseleave',function(e){clearTimers();if(!sidebar.classList.contains('collapsed')&&shouldCollapse(e.relatedTarget))collapseTimer=setTimeout(doCollapse,COLLAPSE_DELAY)});
+   sidebar.addEventListener('mouseleave',function(e){clearTimers();if(!sidebar.classList.contains('collapsed')&&shouldCollapse(e.relatedTarget))collapseTimer=setTimeout(doCollapse,COLLAPSE_DELAY)});
    trigger.addEventListener('click',function(e){clearTimers();if(sidebar.classList.contains('collapsed'))doExpand();else doCollapse()});
+   $('aiInput').addEventListener('blur',function(){if(!sidebar.classList.contains('collapsed'))collapseTimer=setTimeout(doCollapse,COLLAPSE_DELAY)});
+   $('aiInput').addEventListener('focus',function(){clearTimers()});
   })();
  }
 

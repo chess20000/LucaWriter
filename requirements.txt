@@ -4,3 +4,4 @@ ebooklib
 modelscope
 DrissionPage
 certifi
+cryptography

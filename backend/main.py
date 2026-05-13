@@ -641,7 +641,7 @@ def get_settings():
             if p.get('name') == 'Ollama':
                 p['name'] = 'DeepSeek'
                 p['base_url'] = 'https://api.deepseek.com'
-                p['model'] = 'deepseek-v4-flash'
+                p['model'] = 'deepseek-chat'
                 changed = True
             # 同时确保 MiniMax URL 带 /v1
             if p.get('name') == 'MiniMax' and not p.get('base_url', '').endswith('/v1'):
@@ -1832,6 +1832,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/settings':
             gs = get_settings()
+            if not self.is_authed():
+                gs.pop('api_key', None)
+                gs.pop('search_api_key', None)
+                for p in gs.get('provider_presets', []):
+                    if isinstance(p, dict) and p.get('api_key'):
+                        p['api_key'] = '***'
             self.json_resp(200, gs); return
 
         if not self.is_authed():
@@ -4023,6 +4029,8 @@ class Handler(BaseHTTPRequestHandler):
             }); return
 
         if path == '/api/settings':
+            if not self.is_authed():
+                self.json_resp(401, {'error': '未登录'}); return
             settings = get_settings()
             log_action('SETTINGS_SAVE', f"request model_context_length={data.get('model_context_length', 'NOT_PRESENT')}")
             for k in DEFAULT_SETTINGS:
@@ -4270,7 +4278,7 @@ class Handler(BaseHTTPRequestHandler):
                 prov = get_ai_providers()
                 if not settings.get('base_url'):
                     p = (prov.get('providers', [{}])[0] if prov.get('providers') else {})
-                    if p: settings = {'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')}
+                    if p: settings.update({'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')})
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
                 with _rebuild_lock:
@@ -4306,7 +4314,7 @@ class Handler(BaseHTTPRequestHandler):
                 prov = get_ai_providers()
                 if not settings.get('base_url'):
                     p = (prov.get('providers', [{}])[0] if prov.get('providers') else {})
-                    if p: settings = {'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')}
+                    if p: settings.update({'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')})
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
                 with _rebuild_lock:
@@ -5718,8 +5726,8 @@ def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_
     try:
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
         print(f'[call_ai_stream] URL: {url}')
-        print(f'[call_ai_stream] Headers: {headers}')
-        print(f'[call_ai_stream] Body preview: {body_bytes[:500]}')
+        safe_headers = {k: (v[:15] + '...' if k == 'Authorization' else v) for k, v in headers.items()}
+        print(f'[call_ai_stream] Headers: {safe_headers}')
         resp = urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context())
         register_ai_connection(tid, resp)
         for raw_line in resp:
@@ -7245,7 +7253,7 @@ def do_readthrough(bid, settings, config=None, resume=False):
                      progress=5 + int(done_count / total * 70), source=current_source)
 
         # 读取用户设置的上下文长度（优先手动填写，0 表示关闭批量）
-        context_window = settings.get('model_context_length', 0)
+        context_window = _get_effective_context_length(settings)
         use_batch = False
         if isinstance(context_window, int) and context_window > 0:
             use_batch = True
