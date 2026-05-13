@@ -296,7 +296,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .bottom-panel.collapsed .handle-hint::after{content:'点击展开'}
 .bottom-panel:not(.collapsed) .handle-hint::after{content:'点击收起'}
 .bottom-tabs{display:flex;gap:0;flex-shrink:0;overflow-x:auto}
-#aiInputZone{width:280px;flex:none;display:flex;align-items:stretch}
+#aiInputZone{width:280px;flex:none;display:flex;align-items:stretch;margin-right:-17px}
 .bottom-tab{background:none;border:none;color:var(--t3);font-size:12px;font-weight:600;padding:1px 12px 5px;border-radius:var(--r1);cursor:pointer;transition:all .1s;white-space:nowrap}
 .bottom-tab:hover{color:var(--t2)}
 .bottom-tab.active{color:var(--t1)}
@@ -380,7 +380,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .ai-msg-header{display:flex;align-items:center;gap:4px;margin-bottom:4px;cursor:pointer}
 .ai-msg-header:hover .ai-msg-logo{opacity:1}
 .ai-msg-logo{width:22px;height:22px;flex-shrink:0;margin-left:-4px}
-.ai-msg-status{font-size:10px;color:var(--t3);font-weight:500;padding-top:2px}
+.ai-msg-status{font-size:10px;color:var(--t3);font-weight:500;padding-top:3px}
 [data-theme-mode="light"] .ai-msg-logo{filter:invert(1);opacity:.5}
 .ai-reasoning-toggle{cursor:pointer;font-size:10px;color:var(--accent);font-weight:600;display:inline-flex;align-items:center;gap:3px}
 .ai-reasoning-toggle:hover{color:var(--accent2)}
@@ -587,7 +587,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .series-body{flex:1;display:flex;gap:16px;overflow:hidden;min-height:0}
 .series-chat{width:320px;flex-shrink:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden}
 .series-chat-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;color:var(--t1);flex-shrink:0}
-.series-chat-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px;min-height:0}
+.series-chat-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 12px;min-height:0}
 .series-chat-input-row{display:flex;gap:6px;padding:8px;border-top:1px solid var(--border);flex-shrink:0}
 .series-summary{width:320px;flex-shrink:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden}
 .series-rt-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent);flex-shrink:0}
@@ -755,7 +755,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
   <span>Luca</span>
             <button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="clearAIChat()" title="清空对话">清空</button>
   </div>
-  <div class="right-content" id="aiMessages" style="gap:6px;padding:8px 8px 36px 8px"></div>
+  <div class="right-content" id="aiMessages" style="gap:6px;padding:8px 14px 36px 14px"></div>
   </div>
  </div>
  </div>
@@ -912,6 +912,15 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
   <div class="mg"><label>API URL</label><input id="sUrl" placeholder="如 http://localhost:1234/v1"></div>
  <div class="mg"><label>API Key</label><input id="sKey" type="text" class="pw-mask" placeholder="sk-..." autocomplete="off"></div>
  <div style="display:flex;gap:6px"><div class="mg" style="flex:1"><label>Model</label><div class="cs-wrap" id="csWrap_sModel"><button class="cs-trigger" type="button" onclick="toggleCS(this)"><span class="cs-label">选择模型</span><svg class="cs-arrow" viewBox="0 0 10 6"><path d="M0 0l5 6 5-6z"/></svg></button><div class="cs-dropdown"></div><select id="sModel" class="cs-src" style="display:none"><option value="">选择模型</option></select></div></div><button class="topbar-btn accent" style="align-self:flex-end;margin-bottom:12px;padding-top:10px;padding-bottom:10px;font-size:14px" onclick="fetchModels()" id="fetchBtn">获取模型</button></div>
+ <div class="mg" id="ctxLenRow">
+  <label>上下文长度（token）</label>
+  <div style="display:flex;align-items:center;gap:8px">
+   <input id="sPresetCtxLen" type="number" min="0" step="1" placeholder="如 128000" style="flex:1">
+   <span id="ctxEstimate" style="font-size:11px;color:var(--t3);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis">-</span>
+   <button class="topbar-btn" style="padding:6px 10px;font-size:11px;white-space:nowrap" onclick="refreshContextEstimate()" title="刷新上下文估算">📊</button>
+  </div>
+  <p id="ctxWarn" style="font-size:11px;color:var(--warn);display:none;margin-top:2px">⚠ 当前内容超出模型上下文窗口，发送消息时将自动压缩</p>
+ </div>
  <div class="mg" style="margin-top:10px">
  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:12px;font-weight:600">
       <input type="checkbox" id="sUseCustomJson" style="width:auto" onchange="toggleCustomJson()"> 使用自定义JSON配置（高级）
@@ -2174,15 +2183,15 @@ function onAccessScopeChange(){
 function openSettings(){
  var raw=settings.provider_presets||[];
   // 深拷贝，避免关闭弹窗后污染内存中的 settings
- providerPresets=raw.map(function(p){return{name:p.name||'',base_url:p.base_url||'',api_key:p.api_key||'',model:p.model||'',use_custom_json:!!p.use_custom_json,custom_json:p.custom_json||''}});
+ providerPresets=raw.map(function(p){return{name:p.name||'',base_url:p.base_url||'',api_key:p.api_key||'',model:p.model||'',context_length:p.context_length||0,use_custom_json:!!p.use_custom_json,custom_json:p.custom_json||''}});
  if(!providerPresets.length){
   providerPresets=[
-  {name:'LMStudio',base_url:'http://localhost:1234/v1',api_key:'',model:'',use_custom_json:false,custom_json:''},
-  {name:'DeepSeek',base_url:'https://api.deepseek.com',api_key:'',model:'deepseek-v4-flash',use_custom_json:false,custom_json:''},
-  {name:'MiniMax',base_url:'https://api.minimaxi.com/v1',api_key:'',model:'MiniMax-M2.5',use_custom_json:false,custom_json:''},
-       {name:'预设4',base_url:'',api_key:'',model:'',use_custom_json:false,custom_json:''},
-  {name:'5',base_url:'',api_key:'',model:'',use_custom_json:false,custom_json:''},
-  {name:' Llama.cpp',base_url:'http://127.0.0.1:8080/v1',api_key:'',model:'',use_custom_json:false,custom_json:''}
+  {name:'LMStudio',base_url:'http://localhost:1234/v1',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''},
+  {name:'DeepSeek',base_url:'https://api.deepseek.com',api_key:'',model:'deepseek-v4-flash',context_length:0,use_custom_json:false,custom_json:''},
+  {name:'MiniMax',base_url:'https://api.minimaxi.com/v1',api_key:'',model:'MiniMax-M2.5',context_length:0,use_custom_json:false,custom_json:''},
+       {name:'预设4',base_url:'',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''},
+  {name:'5',base_url:'',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''},
+  {name:' Llama.cpp',base_url:'http://127.0.0.1:8080/v1',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''}
   ];
  }
  currentPresetIdx=settings.active_provider_idx||0;
@@ -2190,6 +2199,7 @@ function openSettings(){
  renderProviderSlider();
  loadPresetToForm(currentPresetIdx);
  refreshLocalLLMProgress();
+ refreshContextEstimate();
  $('sTemp').value=settings.ai_temperature||0.7;
   var ctxEl=$('sCtxLen');if(ctxEl)ctxEl.value=settings.model_context_length||0;
   $('sAutoC').checked=(settings.ai_auto_comment!==false);
@@ -2508,7 +2518,6 @@ function switchProviderPreset(idx){
   var p=providerPresets[idx];
   if(!p)return;
   if(isLocalPreset()){
-  // 本地模型：清空远程模型的表单字段，避免混淆
   p.base_url='http://127.0.0.1:8080/v1';
   $('sUrl').value='http://127.0.0.1:8080/v1';
   $('sKey').value='';
@@ -2517,7 +2526,6 @@ function switchProviderPreset(idx){
   $('sUseCustomJson').checked=false;
   $('sCustomJson').value='';
   toggleCustomJson();
-  // model 由后端自动同步检测到的第一个 gguf，不做强制覆盖
   }else{
   $('sUrl').value=p.base_url||'';
   $('sKey').value=p.api_key||'';
@@ -2531,6 +2539,8 @@ function switchProviderPreset(idx){
   $('sCustomJson').value=p.custom_json||'';
   toggleCustomJson();
   }
+  var ctxEl=$('sPresetCtxLen');if(ctxEl)ctxEl.value=p.context_length||'';
+  refreshContextEstimate();
  }
 
 function saveFormToPreset(idx){
@@ -2539,7 +2549,6 @@ function saveFormToPreset(idx){
   if(isLocalPreset()){
   p.base_url='http://127.0.0.1:8080/v1';
   p.api_key='';
-  // model 由后端自动同步检测到的第一个 gguf，不做强制覆盖
   p.use_custom_json=false;
   p.custom_json='';
   }else{
@@ -2549,6 +2558,7 @@ function saveFormToPreset(idx){
   p.use_custom_json=$('sUseCustomJson').checked;
   p.custom_json=$('sCustomJson').value;
   }
+  var ctxEl=$('sPresetCtxLen');if(ctxEl)p.context_length=parseInt(ctxEl.value)||0;
  }
 
 function toggleCustomJson(){
@@ -2696,6 +2706,36 @@ document.addEventListener('click',function(e){if(!e.target.closest('.cs-wrap'))c
 function initAllCS(){document.querySelectorAll('.cs-wrap').forEach(function(w){syncCS(w)})}
 
 function fetchModels(){var btn=$('fetchBtn');var prevModel=$('sModel').value;var url=$('sUrl').value;if(!url){toast('请先填写 API URL','warn');return}btn.innerHTML='<span class="sp"></span>获取中';btn.disabled=true;api('POST','/api/fetch-models',{base_url:url,api_key:$('sKey').value},function(d,s){btn.disabled=false;btn.textContent='获取';console.log('fetchModels response:',s,d);if(s===200&&d&&Array.isArray(d.models)){if(d.models.length>0){var opts='<option value="">选择模型</option>';d.models.forEach(function(m){var sel=m===prevModel?' selected':'';opts+='<option value="'+esc(m)+'"'+sel+'>'+esc(m)+'</option>';});$('sModel').innerHTML=opts;syncCSById('sModel');toast('获取到 '+d.models.length+' 个模型','success');}else{toast('未获取到模型，请检查 API URL','warn');}}else if(s===401){toast('请先登录','error');}else{toast('错误: '+(d&&d.error?d.error:'HTTP '+s),'error');}})}
+
+function refreshContextEstimate(){
+ if(!bookId)return;
+ var estEl=$('ctxEstimate');
+ var warnEl=$('ctxWarn');
+ if(estEl)estEl.textContent='计算中...';
+ if(warnEl)warnEl.style.display='none';
+ api('POST','/api/context-estimate',{book_id:bookId},function(d,s){
+  if(s!==200||!d){if(estEl)estEl.textContent='-';return}
+  var ctxVal=parseInt($('sPresetCtxLen')?$('sPresetCtxLen').value:'0')||0;
+  if(!ctxVal)ctxVal=d.model_context||0;
+  var total=d.total_estimated||0;
+  var minReq=d.min_chat_required||0;
+  var srcTok=d.source_tokens||0;
+  var chTok=d.chapter_tokens||0;
+  var histTok=d.history_tokens||0;
+  var sysTok=d.system_prompt_tokens||0;
+  var info='需:'+formatSizeNum(minReq);
+  if(srcTok>0)info+=' | 摘要:'+formatSizeNum(srcTok);
+  if(chTok>0)info+=' | 章节:'+formatSizeNum(chTok);
+  if(histTok>0)info+=' | 历史:'+formatSizeNum(histTok);
+  if(estEl)estEl.textContent=info;
+  if(warnEl&&ctxVal>0&&total>ctxVal)warnEl.style.display='block';else if(warnEl)warnEl.style.display='none';
+ });
+}
+function formatSizeNum(n){
+ if(n>=10000)return Math.round(n/10000)+'万';
+ if(n>=1000)return Math.round(n/1000)+'k';
+ return n;
+}
 
 function openModal(id){$(id).classList.add('open')}function closeModal(id){$(id).classList.remove('open')}
 function toggleBookMenu(bid,btn){var dd=document.getElementById('bmenu_'+bid);var wasOpen=dd.classList.contains('show');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});if(!wasOpen)dd.classList.add('show')}

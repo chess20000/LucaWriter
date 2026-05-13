@@ -20,6 +20,7 @@ from datetime import datetime
 from ipaddress import ip_network, ip_address
 from http.cookies import SimpleCookie
 import html as _html_mod
+import ssl
 
 if not os.environ.get('SSL_CERT_FILE'):
     try:
@@ -29,6 +30,18 @@ if not os.environ.get('SSL_CERT_FILE'):
         _macos_cert = '/etc/ssl/cert.pem'
         if sys.platform == 'darwin' and os.path.exists(_macos_cert):
             os.environ['SSL_CERT_FILE'] = _macos_cert
+
+_default_ssl_context = None
+def _get_ssl_context():
+    global _default_ssl_context
+    if _default_ssl_context is None:
+        _default_ssl_context = ssl.create_default_context()
+        cert_file = os.environ.get('SSL_CERT_FILE')
+        if cert_file and os.path.exists(cert_file):
+            _default_ssl_context.load_verify_locations(cert_file)
+        else:
+            _default_ssl_context.load_default_certs()
+    return _default_ssl_context
 
 try:
     import docx as docx_mod
@@ -112,7 +125,7 @@ RESERVED_FILES = {'settings', 'users', 'messages', 'salt', 'outline', 'sessions'
 
 DEFAULT_PROVIDER_PRESETS = [
     {'name': 'LMStudio', 'base_url': 'http://localhost:1234/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
-    {'name': 'DeepSeek', 'base_url': 'https://api.deepseek.com', 'api_key': '', 'model': 'deepseek-v4-flash', 'use_custom_json': False, 'custom_json': ''},
+    {'name': 'DeepSeek', 'base_url': 'https://api.deepseek.com', 'api_key': '', 'model': 'deepseek-chat', 'use_custom_json': False, 'custom_json': ''},
     {'name': 'MiniMax', 'base_url': 'https://api.minimaxi.com/v1', 'api_key': '', 'model': 'MiniMax-M2.5', 'use_custom_json': False, 'custom_json': ''},
     {'name': '预设4', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
     {'name': '预设5', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
@@ -475,8 +488,58 @@ def check_rate_limit(key, max_requests, window_seconds):
         return True
 
 
+PW_HASH_ITERS = 200000
+
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_MINUTES = 15
+
+def _check_account_lockout(users, u):
+    if u not in users:
+        return False
+    user = users[u]
+    locked_until = user.get('locked_until', 0)
+    if locked_until and time.time() < locked_until:
+        return True
+    return False
+
+def _record_failed_attempt(users, u):
+    if u not in users:
+        return
+    user = users[u]
+    user['failed_attempts'] = user.get('failed_attempts', 0) + 1
+    if user['failed_attempts'] >= MAX_LOGIN_ATTEMPTS:
+        user['locked_until'] = time.time() + LOCKOUT_MINUTES * 60
+        log_action('ACCOUNT_LOCKED', f'{u}: {user["failed_attempts"]} failed attempts')
+    save_json(USERS_FILE, users)
+
+def _reset_failed_attempts(users, u):
+    if u not in users:
+        return
+    user = users[u]
+    user.pop('failed_attempts', None)
+    user.pop('locked_until', None)
+    save_json(USERS_FILE, users)
+
 def hash_password(pw):
-    return hashlib.sha256((pw + _salt).encode()).hexdigest()
+    salt = secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac('sha256', pw.encode('utf-8'), salt.encode(), PW_HASH_ITERS, dklen=32)
+    return f'pbkdf2:{salt}:{dk.hex()}'
+
+def verify_password(pw, stored):
+    if not stored or not pw:
+        return False
+    if stored.startswith('pbkdf2:'):
+        try:
+            _, salt, expected = stored.split(':')
+            dk = hashlib.pbkdf2_hmac('sha256', pw.encode('utf-8'), salt.encode(), PW_HASH_ITERS, dklen=32)
+            return dk.hex() == expected
+        except Exception:
+            return False
+    # 兼容旧版 SHA-256 哈希
+    return hashlib.sha256((pw + _salt).encode()).hexdigest() == stored
+
+def is_old_password_hash(stored):
+    return not stored.startswith('pbkdf2:')
 
 
 def load_json(path, default=dict):
@@ -954,15 +1017,15 @@ def get_cookie_token(headers):
     return cookie['session'].value if 'session' in cookie else None
 
 
-def make_session(username, remember=False):
+def make_session(username, remember=False, device_name=''):
     token = secrets.token_hex(32)
     sessions = load_json(SESSIONS_FILE, list)
     sessions = [s for s in sessions if s.get('expires', 0) > time.time()]
     now = time.time()
     if remember:
-        sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400 * 90})
+        sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400 * 90, 'device_name': device_name})
     else:
-        sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400})
+        sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400, 'device_name': device_name})
     save_json(SESSIONS_FILE, sessions)
     return token
 
@@ -1157,7 +1220,7 @@ def _fetch_url_content(url, max_chars=8000):
         if not url.startswith(('http://', 'https://')):
             return 'URL格式不支持，只支持http/https'
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_get_ssl_context()) as resp:
             raw = resp.read()
             charset = 'utf-8'
             ct = resp.headers.get('Content-Type', '')
@@ -1191,7 +1254,7 @@ def _search_web(query, max_results=5):
                 'X-Subscription-Token': api_key,
                 'Accept': 'application/json',
             })
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=15, context=_get_ssl_context()) as resp:
                 data = json.loads(resp.read().decode('utf-8', errors='ignore'))
                 results = []
                 for r in data.get('web', {}).get('results', [])[:max_results]:
@@ -1211,7 +1274,7 @@ def _search_web(query, max_results=5):
         q = urllib.parse.quote(query)
         url = f'https://lite.duckduckgo.com/lite/?q={q}'
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_get_ssl_context()) as resp:
             html = resp.read().decode('utf-8', errors='ignore')
             results = []
             # 模式 A：DuckDuckGo Lite 经典结构
@@ -1519,10 +1582,16 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, fmt, *args): pass
 
+    def _is_local_origin(self, origin):
+        try:
+            host = urlparse(origin).hostname
+            return host in ('localhost', '127.0.0.1', '::1', '0.0.0.0')
+        except Exception:
+            return False
+
     def send_cors(self):
-        # 获取请求的 origin，用于支持 credentials
         origin = self.headers.get('Origin', '')
-        if origin:
+        if origin and self._is_local_origin(origin):
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Access-Control-Allow-Credentials', 'true')
         else:
@@ -1693,8 +1762,29 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/active-connections':
             self.json_resp(200, {'connections': get_active_connections()}); return
 
+        if path == '/api/settings':
+            gs = get_settings()
+            self.json_resp(200, gs); return
+
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
+
+        if path == '/api/sessions':
+            sessions = load_json(SESSIONS_FILE, list)
+            now = time.time()
+            t = get_cookie_token(self.headers)
+            result = []
+            for s in sessions:
+                if s.get('expires', 0) > now:
+                    result.append({
+                        'token_prefix': s.get('token', '')[:12],
+                        'is_current': s.get('token') == t,
+                        'device_name': s.get('device_name', ''),
+                        'created': s.get('created', 0),
+                        'expires': s.get('expires', 0),
+                    })
+            result.sort(key=lambda x: x.get('created', 0), reverse=True)
+            self.json_resp(200, {'sessions': result}); return
 
         if path == '/api/books':
             books = []
@@ -1861,11 +1951,6 @@ class Handler(BaseHTTPRequestHandler):
                 log_action('EXPORT_ERROR', f'book={bid} fmt={fmt} err={str(e)[:200]}')
                 self.json_resp(500, {'error': f'导出失败: {str(e)[:100]}'}); return
             return
-
-        if path == '/api/settings':
-            gs = get_settings()
-            log_action('SETTINGS_GET', f"return model_context_length={gs.get('model_context_length')}")
-            self.json_resp(200, gs); return
 
         if path == '/api/icon':
             qs = parse_qs(urlparse(self.path).query)
@@ -2182,27 +2267,66 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(429, {'error': '请求过于频繁，请稍后再试'}); return
             u = data.get('username', '').strip()
             p = data.get('password', '')
+            device_name = data.get('device_name', '').strip() or self.headers.get('X-Luca-Device', '')[:50]
             remember = data.get('remember', False)
-            if not u or len(p) < 4: self.json_resp(400, {'error': '用户名不能为空，密码至少4位'}); return
-            save_json(USERS_FILE, {u: {'password': hash_password(p), 'created': time.time()}})
-            token = make_session(u, remember=remember)
+            if not u: self.json_resp(400, {'error': '请输入用户名'}); return
+            # 密码可以为空（不设密码直接登录）
+            pw_hash = hash_password(p) if p else ''
+            save_json(USERS_FILE, {u: {'password': pw_hash, 'created': time.time()}})
+            token = make_session(u, remember=remember, device_name=device_name)
             log_action('SETUP', u)
             max_age = 7776000 if remember else 86400
-            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'}); return
+            cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'
+            if self.headers.get('X-Forwarded-Proto') == 'https':
+                cookie += '; Secure'
+            self.json_resp(200, {'ok': True, 'username': u, 'has_password': bool(p)}, {'Set-Cookie': cookie}); return
 
         if path == '/api/auth/login':
             u = data.get('username', '').strip()
             p = data.get('password', '')
+            device_name = data.get('device_name', '').strip() or self.headers.get('X-Luca-Device', '')[:50]
             remember = data.get('remember', False)
+            if not u: self.json_resp(400, {'error': '请输入用户名'}); return
             if not check_rate_limit(f'login:{self.client_address[0]}', 10, 60):
                 self.json_resp(429, {'error': '请求过于频繁，请稍后再试'}); return
             users = load_json(USERS_FILE)
-            if u not in users or users[u]['password'] != hash_password(p):
-                self.json_resp(401, {'error': '用户名或密码错误'}); return
-            token = make_session(u, remember=remember)
+            if u not in users:
+                self.json_resp(401, {'error': '用户名不存在'}); return
+            if _check_account_lockout(users, u):
+                remaining = int(users[u].get('locked_until', 0) - time.time())
+                self.json_resp(429, {'error': f'账户已锁定，{max(remaining, 0)} 秒后重试'}); return
+            pw_stored = users[u].get('password', '')
+            # 密码为空 → 不设密码，直接放行
+            if not pw_stored:
+                token = make_session(u, remember=remember, device_name=device_name)
+                log_action('LOGIN', u)
+                max_age = 7776000 if remember else 86400
+                cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'
+                if self.headers.get('X-Forwarded-Proto') == 'https':
+                    cookie += '; Secure'
+                self.json_resp(200, {'ok': True, 'username': u, 'has_password': False}, {'Set-Cookie': cookie}); return
+            if not verify_password(p, pw_stored):
+                _record_failed_attempt(users, u)
+                users2 = load_json(USERS_FILE)
+                failed = users2[u].get('failed_attempts', 0)
+                remaining = MAX_LOGIN_ATTEMPTS - failed
+                if remaining > 0:
+                    self.json_resp(401, {'error': f'密码错误，还剩 {remaining} 次机会'}); return
+                else:
+                    self.json_resp(429, {'error': '账户已锁定，请 15 分钟后重试'}); return
+            _reset_failed_attempts(users, u)
+            # 旧格式哈希自动升级为 PBKDF2
+            if pw_stored and is_old_password_hash(pw_stored):
+                users[u]['password'] = hash_password(p)
+                save_json(USERS_FILE, users)
+                log_action('PW_UPGRADE', u)
+            token = make_session(u, remember=remember, device_name=device_name)
             log_action('LOGIN', u)
             max_age = 7776000 if remember else 86400
-            self.json_resp(200, {'ok': True, 'username': u}, {'Set-Cookie': f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'}); return
+            cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'
+            if self.headers.get('X-Forwarded-Proto') == 'https':
+                cookie += '; Secure'
+            self.json_resp(200, {'ok': True, 'username': u, 'has_password': True}, {'Set-Cookie': cookie}); return
 
         if path == '/api/auth/logout':
             t = get_cookie_token(self.headers)
@@ -2213,6 +2337,41 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
+
+        if path == '/api/sessions/revoke':
+            prefix = data.get('token_prefix', '')
+            if not prefix:
+                self.json_resp(400, {'error': '缺少 token_prefix'}); return
+            sessions = load_json(SESSIONS_FILE, list)
+            removed = 0
+            new_sessions = []
+            for s in sessions:
+                if s.get('token', '').startswith(prefix):
+                    removed += 1
+                else:
+                    new_sessions.append(s)
+            save_json(SESSIONS_FILE, new_sessions)
+            self.json_resp(200, {'ok': True, 'removed': removed}); return
+
+        if path == '/api/sessions/revoke-all':
+            t = get_cookie_token(self.headers)
+            sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') == t]
+            save_json(SESSIONS_FILE, sessions)
+            log_action('REVOKE_ALL', f'kept token: {t[:12] if t else "none"}')
+            self.json_resp(200, {'ok': True}); return
+
+        if path == '/api/auth/set-device-name':
+            t = get_cookie_token(self.headers)
+            if not t:
+                self.json_resp(400, {'error': '无活动会话'}); return
+            name = data.get('device_name', '').strip()[:50]
+            sessions = load_json(SESSIONS_FILE, list)
+            for s in sessions:
+                if s.get('token') == t:
+                    s['device_name'] = name
+                    break
+            save_json(SESSIONS_FILE, sessions)
+            self.json_resp(200, {'ok': True, 'device_name': name}); return
 
         if path == '/api/books/create':
             title = data.get('title', '新书本').strip()
@@ -2772,6 +2931,16 @@ class Handler(BaseHTTPRequestHandler):
                             if role and content:
                                 msgs.append({'role': role, 'content': content})
                         msgs.append({'role': 'user', 'content': user_text})
+
+                        ctx_limit = cfg_settings.get('model_context_length', 0)
+                        presets_cfg = cfg_settings.get('provider_presets', [])
+                        idx_cfg = cfg_settings.get('active_provider_idx', 0)
+                        if not ctx_limit and 0 <= idx_cfg < len(presets_cfg):
+                            ctx_limit = presets_cfg[idx_cfg].get('context_length', 0) or 0
+                        if ctx_limit > 0 and _estimate_messages_tokens(msgs) > int(ctx_limit * 0.75):
+                            log_action('AUTO_COMPRESS', f'before={_estimate_messages_tokens(msgs)} limit={ctx_limit}')
+                            msgs = _compress_messages_for_context(msgs, ctx_limit, cfg_settings)
+                            log_action('AUTO_COMPRESS', f'after={_estimate_messages_tokens(msgs)}')
 
                         # 如果浏览器控制已启用，注入浏览器工具提示
                         _browser_enabled_in_settings = cfg_settings.get('browser_enabled', False)
@@ -3808,6 +3977,7 @@ class Handler(BaseHTTPRequestHandler):
                                     'base_url': str(p.get('base_url', '')),
                                     'api_key': str(p.get('api_key', '')),
                                     'model': str(p.get('model', '')),
+                                    'context_length': int(p.get('context_length', 0)) if p.get('context_length') else 0,
                                     'use_custom_json': bool(p.get('use_custom_json', False)),
                                     'custom_json': str(p.get('custom_json', '')),
                                 })
@@ -3910,7 +4080,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     url = f"{bu}/v1/models"
                 req = urllib.request.Request(url, headers=headers, method='GET')
-                with urllib.request.urlopen(req, timeout=30) as resp:
+                with urllib.request.urlopen(req, timeout=30, context=_get_ssl_context()) as resp:
                     raw = resp.read().decode()
                     print('[fetch-models] raw[:500]:', raw[:500])
                     result = json.loads(raw)
@@ -3955,6 +4125,16 @@ class Handler(BaseHTTPRequestHandler):
                     try: err += ' | ' + e.read().decode()[:200]
                     except: pass
                 self.json_resp(500, {'error': err})
+            return
+
+        if path == '/api/context-estimate':
+            bid = data.get('book_id', '')
+            if not is_valid_id(bid): self.json_resp(400, {'error': 'Invalid ID'}); return
+            try:
+                est = get_context_estimate(bid)
+                self.json_resp(200, est)
+            except Exception as e:
+                self.json_resp(500, {'error': str(e)[:200]})
             return
 
         if path == '/api/stop-all-ai':
@@ -5210,7 +5390,7 @@ def _download_with_url(url, dest_path, total_size=0):
     global _DOWNLOAD_STOP_FLAG
     req = urllib.request.Request(url, method='GET')
     req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=60, context=_get_ssl_context()) as resp:
         if total_size == 0:
             total_size = int(resp.headers.get('Content-Length', 0))
             _download_set(total_bytes=total_size)
@@ -5415,18 +5595,19 @@ def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=Fals
     if key:
         headers['Authorization'] = f'Bearer {key}'
     body = {'model': model, 'messages': messages}
-    # MiniMax temperature 范围 (0,1]，默认推荐 1.0
     if is_minimax:
         t = float(temperature) if temperature is not None else 0.7
         body['temperature'] = max(0.01, min(1.0, t))
     else:
-        body['temperature'] = temperature
+        if temperature is not None:
+            body['temperature'] = temperature
     if max_tokens is not None and max_tokens > 0:
         if is_minimax:
-            # MiniMax 上限 2048
             body['max_tokens'] = min(int(max_tokens), 2048)
         else:
             body['max_tokens'] = int(max_tokens)
+    elif not is_minimax:
+        body['max_tokens'] = 4096
     if stream:
         body['stream'] = True
     # 添加 tools 支持
@@ -5457,7 +5638,10 @@ def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_
     _think_closed = False
     try:
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
-        resp = urllib.request.urlopen(req, timeout=timeout)
+        print(f'[call_ai_stream] URL: {url}')
+        print(f'[call_ai_stream] Headers: {headers}')
+        print(f'[call_ai_stream] Body preview: {body_bytes[:500]}')
+        resp = urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context())
         register_ai_connection(tid, resp)
         for raw_line in resp:
             if should_stop_fn and should_stop_fn():
@@ -5627,7 +5811,23 @@ def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_
                 except: pass
         return full_text, None
     except Exception as e:
-        err_msg = f'API错误: {str(e)[:200]}'
+        err_msg = str(e)
+        status = getattr(e, 'code', 0)
+        raw_body = ''
+        if hasattr(e, 'read'):
+            try:
+                raw = e.read()
+                raw_body = raw.decode() if raw else ''
+            except: pass
+        if raw_body:
+            try:
+                ed = json.loads(raw_body)
+                if isinstance(ed, dict) and 'error' in ed:
+                    err_msg = (ed['error'].get('message', str(ed['error'])) if isinstance(ed['error'], dict) else str(ed['error']))
+            except: pass
+        detail = f' (API返回: {raw_body[:300]})' if raw_body else ''
+        err_msg = f'API错误({status}): {err_msg[:200]}{detail}' if status else f'API错误: {err_msg[:200]}{detail}'
+        print(f'[call_ai_stream ERROR] status={status} url={url} err={err_msg}')
         if on_token: on_token(f'\n[{err_msg}]\n')
         return None, err_msg
     finally:
@@ -5680,7 +5880,7 @@ def call_ai_full(settings, messages, max_tokens, temperature, timeout=120):
     tid = threading.current_thread().ident
     try:
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
-        resp = urllib.request.urlopen(req, timeout=timeout)
+        resp = urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context())
         register_ai_connection(tid, resp)
         try:
             raw = resp.read().decode()
@@ -5776,7 +5976,7 @@ def call_ai_with_tools(settings, messages, max_tokens, temperature, tools=None, 
     
     try:
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
-        resp = urllib.request.urlopen(req, timeout=timeout)
+        resp = urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context())
         data = json.loads(resp.read().decode('utf-8', errors='replace'))
         
         choice = data.get('choices', [{}])[0]
@@ -5928,10 +6128,164 @@ def _ai_read_chapter(settings, title, content, prev_context, config=None, on_tok
     ], mx, tmp, timeout=300, on_token=on_token, should_stop_fn=should_stop_fn)
 
 def _estimate_tokens(text):
-    """简易 token 估算：中文小说以字符数近似。"""
     if not text:
         return 0
     return len(text)
+
+def _estimate_messages_tokens(messages):
+    t = 0
+    for m in messages:
+        t += _estimate_tokens(m.get('content', ''))
+        t += 4
+    return t
+
+def _compress_messages_for_context(messages, max_ctx_tokens, settings=None):
+    if not messages or max_ctx_tokens <= 0:
+        return messages
+    reserve_ratio = 0.75
+    budget = int(max_ctx_tokens * reserve_ratio)
+    if _estimate_messages_tokens(messages) <= budget:
+        return messages
+    result = []
+    sys_msg = None
+    hist = []
+    for m in messages:
+        if m.get('role') == 'system':
+            sys_msg = m
+        else:
+            hist.append(m)
+    if sys_msg:
+        result.append(sys_msg)
+    if not hist:
+        return result
+    keep_recent = 6
+    if len(hist) <= keep_recent + 2:
+        recent = hist
+        old = []
+    else:
+        recent = hist[-keep_recent:]
+        old = hist[:-keep_recent]
+    def _truncate_text(text, max_chars):
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + '\n…(内容已截断)'
+    def _summarize_chunk(chunk_msgs):
+        parts = []
+        for m in chunk_msgs:
+            role_label = '用户' if m.get('role') == 'user' else 'Luca'
+            content = m.get('content', '')
+            if len(content) > 200:
+                content = content[:200] + '...'
+            parts.append(f'{role_label}: {content}')
+        body = '\n'.join(parts)
+        return f'[此前对话已压缩，摘要如下]\n{body}'
+    old_budget = budget - _estimate_messages_tokens(result) - _estimate_messages_tokens(recent)
+    if old and old_budget > 100:
+        chunk_size = 4
+        compressed_old = []
+        i = 0
+        while i < len(old):
+            chunk = old[i:i + chunk_size]
+            chunk_tokens = _estimate_messages_tokens(chunk)
+            if chunk_tokens <= old_budget:
+                compressed_old.extend(chunk)
+                old_budget -= chunk_tokens
+            else:
+                sm = _summarize_chunk(chunk)
+                compressed_old.append({'role': 'system', 'content': sm})
+            i += chunk_size
+        result.extend(compressed_old)
+    else:
+        if old:
+            sm = _summarize_chunk(old)
+            result.append({'role': 'system', 'content': sm})
+    current_budget = budget - _estimate_messages_tokens(result)
+    for m in list(recent):
+        mtokens = _estimate_tokens(m.get('content', ''))
+        if mtokens > current_budget:
+            m = dict(m)
+            m['content'] = _truncate_text(m.get('content', ''), max(200, current_budget))
+        current_budget -= _estimate_tokens(m.get('content', ''))
+        result.append(m)
+    return result
+
+def get_context_estimate(book_id, settings=None):
+    if settings is None:
+        settings = get_settings()
+    ctx_len = 0
+    presets = settings.get('provider_presets', [])
+    idx = settings.get('active_provider_idx', 0)
+    if 0 <= idx < len(presets):
+        ctx_len = presets[idx].get('context_length', 0) or settings.get('model_context_length', 0) or 0
+    source_text = get_source(book_id) or ''
+    source_tokens = _estimate_tokens(source_text)
+    bd = get_book_dir(book_id)
+    meta = load_json(os.path.join(bd, 'meta.json'), dict) if os.path.isdir(bd) else {}
+    cid = meta.get('current_chapter_id', '')
+    ch_content = ''
+    if cid:
+        cp = os.path.join(bd, 'chapters', f'{cid}.json')
+        if os.path.exists(cp):
+            ch_data = load_json(cp, dict)
+            ch_content = ch_data.get('content', '') or ''
+    ch_tokens = _estimate_tokens(ch_content)
+    sys_template = """你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
+
+当前时间：2025年01月01日 00:00
+
+【重要】你已经在系统里看到了用户当前正在写的章节正文，不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
+
+【说话方式】
+谨言慎行。温文尔雅，不卑不亢。惜字如金。
+不要列选项，不要反问，不要结构化分析。
+看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
+避免用"呗""啦"结尾，显得轻浮。
+
+【绝对禁止】
+严禁任何身份描述。
+
+这本小说大概是这样的：
+
+{source}
+
+此时，用户正在写最新的一章：
+
+【章节名】章节名
+【现有正文】
+
+"""
+    sys_tokens = _estimate_tokens(sys_template)
+    annotate_tool = """你还有一个"荧光笔"工具，可以在正文中为用户标注重点内容。
+- 添加标注格式：[ANNOTATE_ADD]{"chapter_id":"...","text":"...","note":"...","color":"yellow"}[/ANNOTATE_ADD]
+- 删除标注格式：[ANNOTATE_REMOVE]{"text":"..."}}[/ANNOTATE_REMOVE]
+- 可用颜色：yellow（默认）、green、pink、blue
+
+你还有一个"本章写完"工具（隐藏功能）...
+
+你还有一个"建议通读"工具...
+"""
+    tool_tokens = _estimate_tokens(annotate_tool)
+    min_chat = sys_tokens + tool_tokens + source_tokens + ch_tokens + 500
+    msg_file = os.path.join(os.path.join(bd, 'messages') if os.path.isdir(bd) else '', '')
+    history_tokens = 0
+    import glob as _glob
+    for mf in _glob.glob(os.path.join(get_book_dir(book_id), 'messages', '*.json')):
+        try:
+            msgs = load_json(mf, list)
+            for m in msgs:
+                history_tokens += _estimate_tokens(str(m.get('text', '')))
+        except: pass
+    total_estimated = min_chat + history_tokens
+    return {
+        'model_context': ctx_len,
+        'source_tokens': source_tokens,
+        'chapter_tokens': ch_tokens,
+        'history_tokens': history_tokens,
+        'system_prompt_tokens': sys_tokens + tool_tokens,
+        'min_chat_required': min_chat,
+        'total_estimated': total_estimated,
+        'needs_compression': ctx_len > 0 and total_estimated > ctx_len,
+    }
 
 def _ai_read_chapters_batch(settings, chapters, prev_context, config=None, on_token=None, should_stop_fn=None):
     """批量阅读多章，一次性返回所有章节的摘要。"""
