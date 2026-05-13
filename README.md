@@ -42,6 +42,21 @@ docker run -p 20000:20000 -v $(pwd)/usrdata:/app/usrdata lucawriter
 rm -rf usrdata/*
 ```
 
+**重置密码：**
+
+忘记密码时，删除 `users.json` 文件即可重置：
+
+```bash
+# 停止服务器后执行
+rm usrdata/users.json
+rm usrdata/sessions.json  # 可选，清除登录会话
+
+# 重新启动服务器后，系统会进入首次使用状态，需要重新创建账户
+python backend/main.py
+```
+
+> 注意：重置密码不会影响书籍数据，所有书本内容都安全保存在 `usrdata/books/` 目录中。这种设计是安全的，因为 LucaWriter 是本地单机应用，对数据文件的物理访问权限即代表最高权限。
+
 ## 功能
 
 - **AI 实时写作建议** — 输入时自动触发

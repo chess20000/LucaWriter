@@ -5,38 +5,107 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>LucaWriter</title>
 <link rel="icon" href="icon.ico?v=5">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0b1220;--surface:rgba(13,21,43,.72);--surface2:rgba(18,28,56,.72);--t1:#f8f9ff;--t2:#b5bedb;--t3:#8b98b3;--accent:#E8CC7A;--on-accent:#0b1220;--danger:#f27d7d;--border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.12);--r1:4px;--r4:12px}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Noto Sans SC","Helvetica Neue",sans-serif;background:radial-gradient(circle at 18% 15%, rgba(232,204,122,.12), transparent 18%),radial-gradient(circle at 82% 12%, rgba(240,216,137,.08), transparent 24%),linear-gradient(180deg,#070b15 0%,#0b1220 100%);color:var(--t1);min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
-.login-titlebar{display:none;height:44px;background:var(--surface);border-bottom:1px solid var(--border2);flex-shrink:0;-webkit-app-region:drag;align-items:center;padding:0 14px;justify-content:flex-end}
+:root{
+ --bg:#0b1220;--page-bg:radial-gradient(circle at 18% 15%, rgba(232,204,122,.12), transparent 18%),radial-gradient(circle at 82% 12%, rgba(240,216,137,.08), transparent 24%),linear-gradient(180deg,#070b15 0%,#0b1220 100%);
+ --surface:#0f1b2e;--surface2:#122235;--surface3:#162a42;--surface4:#203a57;
+ --t1:#f8f9ff;--t2:#e6eaf2;--t3:#bfc9dd;
+ --content-font-size:20px;
+ --content-line-height:2.05;
+ --panel-padding:20px;
+ --radius:10px;
+ --panel-border:rgba(255,255,255,.06);
+ --panel-shadow:0 10px 30px rgba(0,0,0,.45);
+ --accent:#E8CC7A;--accent2:#F0D889;
+ --paper-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.06'/></feComponentTransfer></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.06'/></svg>");
+ --card-bg: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+ --accent-a03:rgba(232,204,122,.03);--accent-a12:rgba(232,204,122,.12);
+ --accent-a15:rgba(232,204,122,.15);--accent-a20:rgba(232,204,122,.2);
+ --accent-a25:rgba(232,204,122,.25);--accent-a30:rgba(232,204,122,.3);
+ --accent-a40:rgba(232,204,122,.4);--accent-a70:rgba(232,204,122,.7);
+ --accent-a90:rgba(232,204,122,.9);
+ --accent-dim:rgba(232,204,122,.12);
+ --danger:#f27d7d;--warn:#f6c96d;
+ --border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.12);
+ --r1:4px;--r2:6px;--r3:8px;--r4:12px;
+ --font-mono:"SF Mono","Fira Code",Menlo,monospace;
+ --font-sans:-apple-system,BlinkMacSystemFont,"Noto Sans SC","Helvetica Neue",sans-serif;
+ --font-serif:"Playfair Display","Source Han Serif SC","Noto Serif SC","Songti SC",Georgia,serif;
+ --scrollbar:rgba(255,255,255,.14);--scrollbar-hover:rgba(232,204,122,.22);
+ --t-on-surface:#ffffff;--t-on-surface-weak:rgba(255,255,255,.85);--t-on-surface-muted:rgba(255,255,255,.68);
+}
+[data-theme-mode="light"]{
+ --bg:#f0f0f0;--page-bg:linear-gradient(180deg,#ffffff 0%,#f5f5f5 100%);--surface:#ffffff;--surface2:#f5f5f5;--surface3:#ebebeb;--surface4:#e0e0e0;
+ --t1:#111111;--t2:#333333;--t3:#666666;
+ --panel-border:rgba(0,0,0,.06);
+ --panel-shadow:0 8px 20px rgba(0,0,0,.06);
+ --paper-texture: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.6' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.04'/></feComponentTransfer></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.08'/></svg>");
+ --card-bg: linear-gradient(180deg,#ffffff,#fcfcfb);
+ --t-on-surface:#111111;--t-on-surface-weak:rgba(17,17,17,.85);--t-on-surface-muted:rgba(17,17,17,.6);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+button,input{font-family:inherit}
+body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased}
+::selection{background:var(--accent);color:var(--bg)}
+::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:var(--r1)}::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-hover)}
+
+.login-titlebar{display:none;height:38px;background:rgba(14,23,44,.76);border-bottom:1px solid rgba(255,255,255,.06);backdrop-filter:blur(18px);flex-shrink:0;-webkit-app-region:drag;align-items:center;padding:0 14px;justify-content:flex-end}
 body.electron .login-titlebar{display:flex}
-.login-titlebar .win-controls{display:flex;align-items:stretch;height:44px;-webkit-app-region:no-drag}
-.login-titlebar .win-controls button{background:none;border:none;color:var(--t2);width:46px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;font-size:14px;padding:0}
+.login-titlebar .win-controls{display:flex;align-items:stretch;height:38px;-webkit-app-region:no-drag}
+.login-titlebar .win-controls button{background:none;border:none;color:var(--t2);width:46px;height:38px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;font-size:14px;padding:0}
 .login-titlebar .win-controls button:hover{background:var(--surface3);color:var(--t1)}
 .login-titlebar .win-controls .wc-close:hover{background:var(--danger);color:#fff}
 .login-titlebar .win-controls svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.3;fill:none}
+
 .login-body{flex:1;display:flex;align-items:center;justify-content:center}
 .wrap{width:100%;max-width:380px;padding:20px}
-.card{background:rgba(13,21,43,.72);border:1px solid rgba(255,255,255,.08);backdrop-filter:blur(18px);border-radius:var(--r4);padding:40px 32px}
+.card{
+ background:var(--card-bg);
+ background-image:var(--paper-texture);
+ background-repeat:repeat;
+ background-blend-mode:overlay;
+ border:1px solid var(--panel-border);
+ box-shadow:var(--panel-shadow);
+ border-radius:var(--radius);
+ padding:40px 32px;
+}
 .brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:32px}
 .brand-icon{width:40px;height:40px;flex-shrink:0}
 .brand-icon img{width:100%;height:100%;border-radius:6px}
-.brand h1{font-size:22px;font-weight:700;letter-spacing:-.5px}
+.brand h1{font-family:var(--font-serif);font-size:22px;font-weight:700;letter-spacing:-.5px}
 .fg{margin-bottom:16px}
 .fg label{display:block;font-size:9px;font-weight:700;color:var(--t2);margin-bottom:4px;letter-spacing:.5px;text-transform:uppercase}
-.fg input{width:100%;padding:10px 12px;background:var(--surface2);color:var(--t1);border:1px solid var(--border);border-radius:var(--r1);font-size:14px;outline:none;transition:border-color .1s}
-.fg input:focus{border-color:var(--accent)}
-.fg input::placeholder{color:var(--t3)}
+.fg input{width:100%;padding:10px 12px;background:var(--surface2);color:var(--t1);border:1px solid var(--border);border-radius:var(--r1);font-size:14px;outline:none;transition:border-color .15s}
+.fg input:focus{border-color:var(--accent-a20)}
+.fg input::placeholder{color:var(--t-on-surface-muted)}
 .fg .hint{font-size:11px;color:var(--t3);margin-top:4px}
-.btn{width:100%;padding:11px;background:var(--accent);color:var(--on-accent);border:none;border-radius:var(--r1);font-size:14px;font-weight:600;cursor:pointer;transition:opacity .1s;margin-top:4px}
-.btn:active{opacity:.8}
-.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn{
+ width:100%;padding:11px;
+ background:var(--accent);color:var(--bg);
+ border:1px solid var(--accent);
+ border-radius:var(--radius);
+ font-size:14px;font-weight:700;
+ cursor:pointer;transition:all .15s;
+ margin-top:4px;
+ box-shadow:0 6px 18px rgba(0,0,0,.18);
+}
+.btn:hover{opacity:.92;transform:translateY(-1px)}
+.btn:active{opacity:.8;transform:translateY(0)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .err{color:var(--danger);font-size:12px;margin-top:10px;text-align:center;display:none}
 .setup-mode .brand h1::after{content:' — Setup';font-size:12px;font-weight:400;color:var(--t2);margin-left:6px}
-.remember-toggle{display:block;text-align:center;margin:8px auto;padding:6px 12px;width:fit-content;border:1.5px solid var(--t3);border-radius:var(--r1);cursor:pointer;user-select:none;font-size:13px;color:var(--t3);background:transparent;transition:background .15s,border-color .15s,color .15s;outline:none}
+.remember-toggle{display:block;text-align:center;margin:8px auto;padding:6px 12px;width:fit-content;border:1.5px solid var(--border2);border-radius:var(--r1);cursor:pointer;user-select:none;font-size:13px;color:var(--t3);background:transparent;transition:all .15s;outline:none}
 .remember-toggle:focus-visible{box-shadow:0 0 0 2px var(--accent)}
-.remember-toggle.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.remember-toggle.active{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.forgot-pwd{display:none;text-align:center;margin-top:14px}
+.forgot-pwd button{background:none;border:none;color:var(--t3);font-size:12px;cursor:pointer;transition:color .15s;padding:4px 8px;border-radius:var(--r1)}
+.forgot-pwd button:hover{color:var(--accent)}
+.forgot-pwd button:focus-visible{box-shadow:0 0 0 2px var(--accent)}
+
+.login-theme-toggle{position:fixed;top:16px;right:16px;z-index:200;width:36px;height:36px;background:var(--surface2);border:1px solid var(--border2);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;color:var(--t2);padding:7px}
+.login-theme-toggle:hover{background:var(--surface3);color:var(--accent);border-color:var(--accent-a20)}
+.login-theme-toggle svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
 </style>
 </head>
 <body>
@@ -47,22 +116,85 @@ body.electron .login-titlebar{display:flex}
     <button class="wc-close" onclick="electronAPI.close()" title="关闭"><svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10"/><line x1="10" y1="0" x2="0" y2="10"/></svg></button>
   </div>
 </div>
+<button class="login-theme-toggle" id="themeToggle" onclick="toggleThemeMode()" title="切换深色/浅色模式" aria-label="切换深色/浅色模式">
+  <svg id="tglMoon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+  <svg id="tglSun" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+</button>
 <div class="login-body">
 <div class="wrap">
 <div class="card" id="mainCard">
   <div class="brand"><div class="brand-icon" style="background:var(--accent);border-radius:6px"><img src="icon.png" alt="LucaWriter" style="width:100%;height:100%;display:block;border-radius:6px"></div><h1>LucaWriter</h1></div>
   <form id="authForm">
-    <div class="fg"><label>Username</label><input type="text" id="username" required placeholder="Username" autocomplete="username"></div>
-    <div class="fg"><label>Password</label><input type="password" id="password" required placeholder="Password (min 4)" autocomplete="current-password"><div class="hint" id="pwHint"></div></div>
-    <div class="fg" id="pw2Group" style="display:none"><label>Confirm</label><input type="password" id="password2" placeholder="Re-enter password" autocomplete="new-password"></div>
+    <div class="fg"><label>用户名</label><input type="text" id="username" required placeholder="用户名" autocomplete="username"></div>
+    <div class="fg"><label>密码</label><input type="password" id="password" placeholder="密码" autocomplete="current-password"><div class="hint" id="pwHint"></div></div>
     <div class="remember-toggle" id="rememberToggle" tabindex="0" role="checkbox" aria-checked="false" onclick="toggleRemember()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleRemember()}">记住登录</div>
     <button type="submit" class="btn" id="submitBtn">Login</button>
+    <div class="forgot-pwd" id="forgotPwd"><button type="button" onclick="resetPassword()">忘记密码？</button></div>
     <p class="err" id="errMsg"></p>
   </form>
 </div>
 </div>
 </div>
 <script>
+// 主题色工具函数
+function hexToRgba(hex,alpha){
+ var r=parseInt(hex.slice(1,3),16);
+ var g=parseInt(hex.slice(3,5),16);
+ var b=parseInt(hex.slice(5,7),16);
+ return 'rgba('+r+','+g+','+b+','+alpha+')';
+}
+function applyTheme(hex){
+ var root=document.documentElement;
+ root.style.setProperty('--accent',hex);
+ root.style.setProperty('--accent2',hex);
+ root.style.setProperty('--accent-a03',hexToRgba(hex,.03));
+ root.style.setProperty('--accent-a12',hexToRgba(hex,.12));
+ root.style.setProperty('--accent-a15',hexToRgba(hex,.15));
+ root.style.setProperty('--accent-a20',hexToRgba(hex,.2));
+ root.style.setProperty('--accent-a25',hexToRgba(hex,.25));
+ root.style.setProperty('--accent-a30',hexToRgba(hex,.3));
+ root.style.setProperty('--accent-a40',hexToRgba(hex,.4));
+ root.style.setProperty('--accent-a70',hexToRgba(hex,.7));
+ root.style.setProperty('--accent-a90',hexToRgba(hex,.9));
+ root.style.setProperty('--accent-dim',hexToRgba(hex,.12));
+ root.style.setProperty('--warn',hex);
+ root.style.setProperty('--scrollbar-hover',hexToRgba(hex,.2));
+}
+function applyThemeMode(mode){
+ mode=mode==='light'?'light':'dark';
+ var root=document.documentElement;
+ root.setAttribute('data-theme-mode', mode);
+ var fontColor = mode==='light'? '#000000' : '#ffffff';
+ root.style.setProperty('--t1', fontColor);
+ root.style.setProperty('--t2', fontColor);
+ root.style.setProperty('--t3', fontColor);
+ updateThemeIcon();
+}
+function updateThemeIcon(){
+ var m=document.getElementById('tglMoon'),s=document.getElementById('tglSun');
+ if(!m||!s)return;
+ var isLight=document.documentElement.getAttribute('data-theme-mode')==='light';
+ m.style.display=isLight?'none':'';
+ s.style.display=isLight?'':'none';
+}
+function toggleThemeMode(){
+ var cur=document.documentElement.getAttribute('data-theme-mode')==='light'?'light':'dark';
+ applyThemeMode(cur==='dark'?'light':'dark');
+ try { localStorage.setItem('lw_theme_mode', cur==='dark'?'light':'dark'); } catch(e) {}
+}
+function getSystemTheme(){
+ return window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+}
+function loadTheme(){
+ api('GET','/api/settings',undefined,function(d,s){
+   var accent='#E8CC7A',mode;
+   if(s===200&&d){ accent=d.theme_accent||'#E8CC7A'; mode=d.theme_mode; }
+   applyTheme(accent);
+   // 优先使用保存的偏好，其次系统主题
+   var saved; try { saved=localStorage.getItem('lw_theme_mode'); } catch(e) {}
+   applyThemeMode(mode||saved||getSystemTheme());
+ });
+}
 // 动态加载主题图标
 function loadThemedIcon(){
   api('GET','/api/icon',undefined,function(d){
@@ -75,23 +207,42 @@ function loadThemedIcon(){
 if(window.electronAPI)document.body.classList.add('electron');
 if(window.electronAPI&&window.electronAPI.onMaximizeChange){function _updateMaxBtn(m){var b=document.getElementById('wcMax');if(!b)return;if(m){b.title='还原';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="2.5" y="0.5" width="7" height="7"/><rect x="0.5" y="2.5" width="7" height="7"/></svg>'}else{b.title='最大化';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>'}}window.electronAPI.onMaximizeChange(function(m){_updateMaxBtn(m)});window.electronAPI.isMaximized().then(function(m){_updateMaxBtn(m)});var _tb=document.querySelector('.login-titlebar');if(_tb)_tb.addEventListener('dblclick',function(e){if(e.target.closest('.win-controls')||e.target.closest('button')||e.target.closest('input'))return;window.electronAPI.maximize()})}
 loadThemedIcon();
+loadTheme();
 var isSetup=false;
 var rememberActive=false;
 function toggleRemember(){rememberActive=!rememberActive;var el=$('rememberToggle');el.classList.toggle('active',rememberActive);el.setAttribute('aria-checked',rememberActive)}
 function api(m,p,d,cb){var x=new XMLHttpRequest();x.onload=function(){try{cb(JSON.parse(this.responseText),this.status)}catch(e){cb({error:'err'},this.status)}};x.onerror=function(){cb({error:'err'},0)};x.open(m,p);x.setRequestHeader('Cache-Control','no-cache');x.setRequestHeader('Pragma','no-cache');if(d!==undefined){x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(d))}else x.send()}
 
-api('GET','/api/auth/status',undefined,function(d){if(!d.has_users){isSetup=true;$('mainCard').classList.add('setup-mode');$('submitBtn').textContent='Create Account';$('username').placeholder='Set username';$('password').placeholder='Set password (min 4)';$('pwHint').textContent='Create your admin account';$('pw2Group').style.display='block';return}if(d.logged_in){location.href='/';return}});
+api('GET','/api/auth/status',undefined,function(d){if(!d.has_users){isSetup=true;$('mainCard').classList.add('setup-mode');$('submitBtn').textContent='创建账户';$('username').placeholder='用户名';$('pwHint').textContent='创建你的账户';return}if(d.logged_in){location.href='/';return}$('forgotPwd').style.display='block'});
 
 function $(id){return document.getElementById(id)}
 
 $('authForm').addEventListener('submit',function(e){
-  e.preventDefault();var u=$('username').value.trim(),p=$('password').value,p2=$('password2').value;
-  if(!u||!p){showErr('Fill in username and password');return}
-  if(isSetup){if(p.length<4){showErr('Min 4 characters');return}if(p!==p2){showErr('Passwords do not match');return}$('submitBtn').disabled=true;api('POST','/api/auth/setup',{username:u,password:p,remember:rememberActive},function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Failed')})}
-  else{$('submitBtn').disabled=true;api('POST','/api/auth/login',{username:u,password:p,remember:rememberActive},function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Login failed')})}
+  e.preventDefault();var u=$('username').value.trim(),p=$('password').value;
+  if(!u){showErr('请输入用户名');return}
+  $('submitBtn').disabled=true;
+  var body={username:u,password:p,remember:rememberActive};
+  if(isSetup){api('POST','/api/auth/setup',body,function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Failed')})}
+  else{api('POST','/api/auth/login',body,function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Login failed')})}
 });
 
 function showErr(t){var e=$('errMsg');e.textContent=t;e.style.display='block'}
+
+function resetPassword(){
+  if(!confirm('重置密码需要在服务端终端输入书库中一本书的书名验证身份。\n\n请确保你能看到服务端终端窗口，然后点击确定继续。')){
+    return;
+  }
+  api('POST','/api/auth/reset-password',{},function(d,s){
+    if(s===200&&d.ok){
+      showErr('密码已重置，请重新创建账户');
+      location.reload();
+    }else if(s===400&&d.data_dir){
+      showErr('源码启动模式请手动删除 '+d.data_dir+'/users.json 重置密码');
+    }else{
+      showErr(d.error||'重置失败');
+    }
+  });
+}
 </script>
 </body>
 </html>

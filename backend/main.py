@@ -21,7 +21,6 @@ from ipaddress import ip_network, ip_address
 from http.cookies import SimpleCookie
 import html as _html_mod
 import ssl
-
 if not os.environ.get('SSL_CERT_FILE'):
     try:
         import certifi
@@ -30,6 +29,10 @@ if not os.environ.get('SSL_CERT_FILE'):
         _macos_cert = '/etc/ssl/cert.pem'
         if sys.platform == 'darwin' and os.path.exists(_macos_cert):
             os.environ['SSL_CERT_FILE'] = _macos_cert
+
+import chromadb
+from chromadb import Documents, EmbeddingFunction, Embeddings
+import numpy as np
 
 _default_ssl_context = None
 def _get_ssl_context():
@@ -991,6 +994,68 @@ def has_users():
     return bool(load_json(USERS_FILE))
 
 
+def _get_user_book_titles():
+    """获取用户创建的所有书籍标题（排除内置示例书）"""
+    titles = []
+    if not os.path.isdir(BOOKS_DIR):
+        return titles
+    for bid in os.listdir(BOOKS_DIR):
+        bd = os.path.join(BOOKS_DIR, bid)
+        if not os.path.isdir(bd):
+            continue
+        # 跳过内置示例书
+        if bid.startswith('builtin_'):
+            continue
+        meta_file = os.path.join(bd, 'meta.json')
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+                    title = meta.get('title', '')
+                    if title:
+                        titles.append(title)
+            except:
+                pass
+    return titles
+
+
+def _verify_book_title_in_terminal():
+    """在终端中验证用户输入的书名，返回 (success, message)"""
+    titles = _get_user_book_titles()
+    if not titles:
+        return False, '书库中没有用户创建的书籍，无法验证身份'
+
+    print('\n' + '='*60)
+    print('密码重置请求')
+    print('='*60)
+    print('请输入书库中任意一本书的完整书名以确认身份：')
+    print('（输入错误或留空将取消重置）')
+    print('-'*60)
+    for i, t in enumerate(titles[:10], 1):
+        print(f'  {i}. {t}')
+    if len(titles) > 10:
+        print(f'  ... 还有 {len(titles) - 10} 本书')
+    print('='*60)
+
+    try:
+        user_input = input('\n书名: ').strip()
+    except EOFError:
+        return False, '无法读取输入'
+
+    if not user_input:
+        return False, '未输入书名，已取消重置'
+
+    if user_input in titles:
+        return True, '验证通过'
+    else:
+        return False, f'书名不匹配。您输入的是: {user_input}'
+
+
+def _is_electron_mode():
+    """检查是否在 Electron 桌面版环境中运行"""
+    return bool(os.environ.get('DATA_DIR'))
+
+
 def validate_session(token):
     if not token: return False
     sessions = load_json(SESSIONS_FILE, list)
@@ -1736,21 +1801,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
                 return
 
-        # 静态文件（图片、SVG 等）— 放在认证之前，登录页也需要这些资源
-        if path.endswith(('.png', '.svg', '.ico', '.jpg', '.jpeg', '.gif', '.webp', '.css', '.js')):
-            fp = os.path.join(FRONTEND_DIR, os.path.basename(path))
-            if os.path.isfile(fp):
-                ext_map = {'.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.css':'text/css','.js':'application/javascript'}
-                ct = ext_map.get(os.path.splitext(fp)[1].lower(), 'application/octet-stream')
-                with open(fp, 'rb') as f:
-                    body = f.read()
-                self.send_response(200)
-                self.send_header('Content-Type', ct)
-                self.send_header('Content-Length', str(len(body)))
-                self.send_header('Cache-Control', 'public, max-age=3600')
-                self.end_headers()
-                self.wfile.write(body)
-                return
+        # 静态文件（图片、字体、CSS、JS 等）— 支持子目录，放在认证之前
+        _static_exts = ('.png','.svg','.ico','.jpg','.jpeg','.gif','.webp','.css','.js','.woff2')
+        if path.endswith(_static_exts):
+            rel = path.lstrip('/')
+            if '..' not in rel:
+                fp = os.path.join(FRONTEND_DIR, rel)
+                if os.path.isfile(fp) and os.path.normpath(fp).startswith(os.path.normpath(FRONTEND_DIR)):
+                    ext_map = {'.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.css':'text/css','.js':'application/javascript','.woff2':'font/woff2'}
+                    ct = ext_map.get(os.path.splitext(fp)[1].lower(), 'application/octet-stream')
+                    with open(fp, 'rb') as f:
+                        body = f.read()
+                    self.send_response(200)
+                    self.send_header('Content-Type', ct)
+                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header('Cache-Control', 'public, max-age=3600')
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
 
         if path == '/api/auth/status':
             self.json_resp(200, {'has_users': has_users(), 'logged_in': self.is_authed()})
@@ -2335,6 +2403,25 @@ class Handler(BaseHTTPRequestHandler):
                 save_json(SESSIONS_FILE, sessions)
             self.json_resp(200, {'ok': True}, {'Set-Cookie': 'session=; Path=/; Max-Age=0; SameSite=Lax'}); return
 
+        if path == '/api/auth/reset-password':
+            if not check_rate_limit(f'reset-pwd:{self.client_address[0]}', 3, 300):
+                self.json_resp(429, {'error': '请求过于频繁，请稍后再试'}); return
+            # 桌面版：在终端中验证书名
+            if _is_electron_mode():
+                success, msg = _verify_book_title_in_terminal()
+                if not success:
+                    self.json_resp(403, {'error': f'验证失败: {msg}'}); return
+                # 验证通过，删除用户文件
+                if os.path.exists(USERS_FILE):
+                    os.remove(USERS_FILE)
+                if os.path.exists(SESSIONS_FILE):
+                    os.remove(SESSIONS_FILE)
+                log_action('RESET-PASSWORD', f'from {self.client_address[0]} (verified)')
+                self.json_resp(200, {'ok': True, 'message': '密码已重置，请重新创建账户'}); return
+            else:
+                # 源码启动：提示用户手动删除
+                self.json_resp(400, {'error': '源码启动模式请手动删除 users.json 文件重置密码', 'data_dir': DATA_DIR}); return
+
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
 
@@ -2754,7 +2841,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         mt = None
                         tp = settings.get('ai_temperature', 0.7)
-                        source_text = get_source(bid)
+                        source_ctx = get_smart_context(bid, settings=settings)
                         bd_auto = get_book_dir(bid)
                         meta_auto = load_json(os.path.join(bd_auto, 'meta.json'), dict)
                         cid_auto = meta_auto.get('current_chapter_id', '')
@@ -2764,10 +2851,6 @@ class Handler(BaseHTTPRequestHandler):
                             if os.path.exists(cp_auto):
                                 ch_data_auto = load_json(cp_auto, dict)
                                 ch_title_auto = ch_data_auto.get('title', '未命名章节')
-                        if source_text and len(source_text) > 100:
-                            source_ctx = source_text
-                        else:
-                            source_ctx = '（目前还没有完整的阅读笔记。等作者完成通读后，你就能对全书细节了如指掌了。）'
                         sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
 
 当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
@@ -2830,11 +2913,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         mt = None
                         tp = cfg_settings.get('ai_temperature', 0.7)
-                        source_text = get_source(book_id)
-                        if source_text and len(source_text) > 100:
-                            source_ctx = source_text
-                        else:
-                            source_ctx = '（目前还没有完整的阅读笔记。等作者完成通读后，你就能对全书细节了如指掌了。）'
+                        source_ctx = get_smart_context(book_id, user_query=text, settings=cfg_settings)
 
                         bd_chat = get_book_dir(book_id)
                         meta_chat = load_json(os.path.join(bd_chat, 'meta.json'), dict)
@@ -3034,7 +3113,7 @@ class Handler(BaseHTTPRequestHandler):
                         if re.search(r'\[SUGGEST_READTHROUGH\]', result):
                             needs_rt = True
                         # 兜底：AI 未使用工具但回复中提及需要通读（且 source.md 缺失或极短）
-                        if not needs_rt and (not source_text or len(source_text) <= 100):
+                        if not needs_rt and (not source_ctx or len(source_ctx) <= 100):
                             indicators = ['还没读过', '还没看过', '尚未通读', '没有读过', '不了解全书', '不清楚全书', '需要通读', '我还没看过这本书', '尚未阅读', '没有阅读']
                             if any(ind in result for ind in indicators):
                                 needs_rt = True
@@ -3423,8 +3502,8 @@ class Handler(BaseHTTPRequestHandler):
                 settings = get_settings()
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
-                source_text = get_source(bid)
-                if not source_text:
+                source_text = get_smart_context(bid, settings=settings)
+                if not source_text or source_text.startswith('（目前还没有'):
                     self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
                 existing = bg_task_get_by_book_type(bid, 'prediction')
                 if existing and existing.get('status') == 'running':
@@ -3467,8 +3546,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'timeline-generate':
-                source_text = get_source(bid) or ''
-                if not source_text:
+                source_text = get_smart_context(bid, settings=settings) or ''
+                if not source_text or source_text.startswith('（目前还没有'):
                     self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
                 settings = get_settings()
                 if not settings.get('base_url') or not settings.get('model'):
@@ -4261,8 +4340,8 @@ class Handler(BaseHTTPRequestHandler):
                 settings = get_settings()
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
-                source_text = get_source(bid)
-                if not source_text:
+                source_text = get_smart_context(bid, settings=settings)
+                if not source_text or source_text.startswith('（目前还没有'):
                     self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
                 cfg = get_readthrough_config(bid)
                 outline, err = _ai_outline(settings, source_text, config=cfg)
@@ -4284,8 +4363,8 @@ class Handler(BaseHTTPRequestHandler):
             settings = get_settings()
             if not settings.get('base_url') or not settings.get('model'):
                 self.json_resp(400, {'error': '请先配置API'}); return
-            source_text = get_source(bid)
-            if not source_text:
+            source_text = get_smart_context(bid, settings=settings)
+            if not source_text or source_text.startswith('（目前还没有'):
                 self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
             existing = bg_task_get_by_book_type(bid, gen_type)
             if existing and existing.get('status') == 'running':
@@ -6209,6 +6288,459 @@ def _compress_messages_for_context(messages, max_ctx_tokens, settings=None):
         result.append(m)
     return result
 
+
+class _SimpleEmbedding(EmbeddingFunction):
+    def __call__(self, texts: Documents) -> Embeddings:
+        embs = []
+        for t in texts:
+            if not t or not t.strip():
+                embs.append([0.0] * 64)
+                continue
+            vec = [0.0] * 64
+            chars = list(t.lower())
+            n = len(chars)
+            if n == 0:
+                embs.append(vec); continue
+            for i, c in enumerate(chars):
+                idx = ord(c) % 64
+                weight = 1.0 - (i / (n + 100))
+                vec[idx] += weight * ord(c)
+            norm = sum(v*v for v in vec)**0.5 or 1.0
+            embs.append([v/norm for v in vec])
+        return embs
+
+_chroma_clients = {}
+_chroma_collections = {}
+
+def _get_chroma_client(book_id):
+    key = book_id
+    if key not in _chroma_clients:
+        db_dir = os.path.join(get_book_dir(book_id), '.vector_db')
+        os.makedirs(db_dir, exist_ok=True)
+        _chroma_clients[key] = chromadb.PersistentClient(path=db_dir)
+    return _chroma_clients[key]
+
+def _get_kb_collection(book_id):
+    if book_id in _chroma_collections:
+        return _chroma_collections[book_id]
+    client = _get_chroma_client(book_id)
+    col = client.get_or_create_collection(
+        name='knowledge_base',
+        embedding_function=_SimpleEmbedding(),
+        metadata={'hnsw:space': 'cosine'}
+    )
+    _chroma_collections[book_id] = col
+    return col
+
+def _kb_clear(book_id):
+    try:
+        col = _get_kb_collection(book_id)
+        col.delete(where={'$and': []})
+    except Exception as e:
+        log_action('KB_CLEAR_ERR', str(e)[:100])
+
+def _kb_upsert(book_id, chunks, metadatas=None, ids=None):
+    if not chunks:
+        return
+    col = _get_kb_collection(book_id)
+    safe_ids = ids or [f'kb_{i}_{int(time.time()*1000)}' for i in range(len(chunks))]
+    safe_metas = []
+    for i, m in enumerate((metadatas or []) or [{}]*len(chunks)):
+        sm = {'entity': str(m.get('entity','')), 'chapter': str(m.get('chapter','')),
+              'section': str(m.get('section',''))}
+        safe_metas.append(sm)
+    try:
+        col.upsert(documents=chunks, metadatas=safe_metas, ids=safe_ids[:len(chunks)])
+    except Exception as e:
+        log_action('KB_UPSERT_ERR', str(e)[:100])
+
+def _kb_search(book_id, query_text, top_k=8, where_filter=None):
+    try:
+        col = _get_kb_collection(book_id)
+        kwargs = {'query_texts': [query_text], 'n_results': min(top_k, 50)}
+        if where_filter:
+            kwargs['where'] = where_filter
+        results = col.query(**kwargs)
+        return results
+    except Exception as e:
+        log_action('KB_SEARCH_ERR', str(e)[:100])
+        return None
+
+_SOURCE_DIR_NAME = 'source'
+_ENTITY_DIR = 'entities'
+
+def _get_source_dir(book_id):
+    d = os.path.join(get_book_dir(book_id), _SOURCE_DIR_NAME)
+    os.makedirs(d, exist_ok=True)
+    ed = os.path.join(d, _ENTITY_DIR)
+    os.makedirs(ed, exist_ok=True)
+    return d
+
+def _get_entity_path(book_id, entity_name):
+    safe = re.sub(r'[\\/:*?"<>|]', '_', entity_name.strip())
+    return os.path.join(_get_source_dir(book_id), _ENTITY_DIR, f'{safe}.md')
+
+def _list_entity_files(book_id):
+    ed = os.path.join(_get_source_dir(book_id), _ENTITY_DIR)
+    return sorted(glob.glob(os.path.join(ed, '*.md')))
+
+def _read_entity_file(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except:
+        return ''
+
+def _write_entity_file(path, content):
+    d = os.path.dirname(path)
+    os.makedirs(d, exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+def _append_entity_content(book_id, entity_name, section_title, content):
+    path = _get_entity_path(book_id, entity_name)
+    existing = _read_entity_file(path)
+    marker = f'### {section_title}'
+    if marker in existing and content.strip():
+        idx = existing.find(marker)
+        end_idx = existing.find('\n### ', idx + len(marker))
+        if end_idx == -1:
+            end_idx = len(existing)
+        existing = existing[:idx] + f'{marker}\n{content}\n' + existing[end_idx:]
+    elif content.strip():
+        existing += f'\n\n### {section_title}\n{content}\n'
+    _write_entity_file(path, existing)
+    return path
+
+def _get_all_entities_text(book_id):
+    parts = []
+    for fp in _list_entity_files(book_id):
+        text = _read_entity_file(fp)
+        if text.strip():
+            parts.append(text)
+    return '\n\n---\n\n'.join(parts)
+
+def _rebuild_vector_index(book_id):
+    _kb_clear(book_id)
+    chunks = []
+    metas = []
+    ids = []
+    chunk_counter = [0]
+    def _add_chunks(entity_name, text, chapter='', section=''):
+        if not text or not text.strip():
+            return
+        paras = re.split(r'\n(?=### )', text)
+        for p in paras:
+            p = p.strip()
+            if len(p) < 10:
+                continue
+            cid = f'{entity_name}_{chunk_counter[0]}'
+            chunks.append(p)
+            metas.append({'entity': entity_name, 'chapter': chapter, 'section': section})
+            ids.append(cid)
+            chunk_counter[0] += 1
+    for fp in _list_entity_files(book_id):
+        ename = os.path.splitext(os.path.basename(fp))[0]
+        etext = _read_entity_file(fp)
+        _add_chunks(ename, etext, section='entity')
+    tl_path = os.path.join(_get_source_dir(book_id), 'timeline.md')
+    if os.path.exists(tl_path):
+        _add_chunks('__timeline__', _read_entity_file(tl_path), section='timeline')
+    rules_path = os.path.join(_get_source_dir(book_id), 'rules.md')
+    if os.path.exists(rules_path):
+        _add_chunks('__rules__', _read_entity_file(rules_path), section='rules')
+    fs_path = os.path.join(_get_source_dir(book_id), 'foreshadowing.md')
+    if os.path.exists(fs_path):
+        _add_chunks('__foreshadowing__', _read_entity_file(fs_path), section='foreshadowing')
+    if chunks:
+        _kb_upsert(book_id, chunks, metas, ids)
+    log_action('KB_REBUILT', f'chunks={len(chunks)}, entities={len(_list_entity_files(book_id))}')
+
+def _parse_entities_from_notes(notes_text):
+    entities = {}
+    current_entity = None
+    current_section = None
+    buf = ''
+    for line in notes_text.split('\n'):
+        stripped = line.strip()
+        m = re.match(r'^#{1,3}\s+(.+)$', stripped)
+        if m:
+            heading = m.group(1).strip()
+            if current_entity and buf.strip():
+                key = current_entity
+                if key not in entities:
+                    entities[key] = []
+                entities[key].append(('## ' + (current_section or '信息'), buf.strip()))
+            em = re.match(r'^[\s]*[-*]\s*\*\*(.+?)\*\*', stripped)
+            if em:
+                if current_entity and buf.strip():
+                    if current_entity not in entities:
+                        entities[current_entity] = []
+                    entities[current_entity].append(('## ' + (current_section or '信息'), buf.strip()))
+                current_entity = em.group(1).strip()
+                current_section = None
+                buf = ''
+                continue
+            else:
+                current_entity = None
+            sm = re.match(r'^(?:##\s+)?(.+)', heading)
+            if sm:
+                current_section = sm.group(1).strip()
+            buf = ''
+        else:
+            buf += line + '\n'
+    if current_entity and buf.strip():
+        if current_entity not in entities:
+            entities[current_entity] = []
+        entities[current_entity].append(('## ' + (current_section or '信息'), buf.strip()))
+    return entities
+
+def _save_parsed_entities_to_files(book_id, entities):
+    count = 0
+    for ename, sections in entities.items():
+        if not ename:
+            continue
+        path = _get_entity_path(book_id, ename)
+        existing = _read_entity_file(path)
+        for section_title, content in sections:
+            if not content or not content.strip():
+                continue
+            marker = f'### {section_title}'
+            if marker in existing:
+                continue
+            existing += f'\n\n{marker}\n{content}\n'
+            count += 1
+        if existing != _read_entity_file(path):
+            _write_entity_file(path, existing)
+    return count
+
+def _extract_timeline_from_notes(notes_text):
+    lines = notes_text.split('\n')
+    timeline_parts = []
+    capture = False
+    buf = ''
+    for line in lines:
+        s = line.strip()
+        if re.match(r'^#{1,3}\s.*(事件|时间线|编年|时间)', s):
+            capture = True
+            buf = ''
+            continue
+        if capture:
+            if s.startswith('#') and not s.startswith('###'):
+                break
+            if re.match(r'^#{1,3}\s+', s) and '事件' not in s and '时间' not in s and '编年' not in s:
+                if buf.strip():
+                    timeline_parts.append(buf.strip())
+                buf = ''
+                capture = False
+                continue
+            buf += line + '\n'
+    if buf.strip():
+        timeline_parts.append(buf.strip())
+    return '\n\n'.join(timeline_parts)
+
+def _extract_foreshadowing_from_notes(notes_text):
+    lines = notes_text.split('\n')
+    parts = []
+    capture = False
+    buf = ''
+    for line in lines:
+        s = line.strip()
+        if re.match(r'^#{1,3}\s.*(伏笔|悬念|线索|未解)', s):
+            capture = True
+            buf = ''
+            continue
+        if capture:
+            if s.startswith('#') and not s.startswith('###'):
+                break
+            if re.match(r'^#{1,3}\s+', s) and '伏笔' not in s and '悬念' not in s and '线索' not in s and '未解' not in s:
+                if buf.strip():
+                    parts.append(buf.strip())
+                buf = ''
+                capture = False
+                continue
+            buf += line + '\n'
+    if buf.strip():
+        parts.append(buf.strip())
+    return '\n\n'.join(parts)
+
+def _ai_extract_entities(settings, notes_text, config=None):
+    cfg = config or {}
+    mx = cfg.get('max_tokens', 4096)
+    tmp = cfg.get('temperature', 0.2)
+    prompt = f"""从以下小说阅读笔记中提取所有实体（人物、地点、物品、组织、国家等），并按实体归类整理。
+
+原始笔记：
+{notes_text[:15000]}
+
+【输出格式】（严格 JSON 数组，每个元素一个实体）
+[
+  {{"name": "李云", "type": "人物", "summary": "主角，第1章登场，获得断岳刀..."}},
+  {{"name": "北境国", "type": "国家", "summary": "国土面积约200万平方千米..."}},
+  {{"name": "断岳刀", "type": "物品", "summary": "李云的武器，第50章获得，第180章碎裂..."}}
+]
+
+规则：
+- 只提取有名字、有具体信息的实体（不要"路人甲"这种）
+- summary 要包含关键信息和章节引用
+- 类型可以是：人物、地点、物品、组织、国家、势力、概念
+- 只输出 JSON，不要其他内容"""
+    msgs = [
+        {'role': 'system', 'content': '你是信息抽取专家。只输出JSON数组。'},
+        {'role': 'user', 'content': prompt}
+    ]
+    raw, err = call_ai(settings, msgs, mx, tmp, timeout=120)
+    if err or not raw:
+        return [], err
+    try:
+        json_match = re.search(r'\[.*\]', raw, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
+            if isinstance(data, list):
+                return data, None
+    except:
+        pass
+    return [], f'解析失败: {raw[:200]}'
+
+def _build_source_summary(book_id, max_chars=8000):
+    parts = ['# 全书阅读笔记摘要\n']
+    efiles = _list_entity_files(book_id)
+    if efiles:
+        parts.append('## 实体索引\n')
+        for fp in efiles[:30]:
+            ename = os.path.splitext(os.path.basename(fp))[0]
+            etext = _read_entity_file(fp)
+            first_para = etext.split('\n### ')[0][:200] if etext else ''
+            parts.append(f'- **{ename}**: {first_para}')
+        if len(efiles) > 30:
+            parts.append(f'- ... 共 {len(efiles)} 个实体')
+    tl = os.path.join(_get_source_dir(book_id), 'timeline.md')
+    if os.path.exists(tl):
+        tlt = _read_entity_file(tl)
+        if tlt.strip():
+            parts.append(f'\n## 时间线\n{tlt[:3000]}')
+    fs = os.path.join(_get_source_dir(book_id), 'foreshadowing.md')
+    if os.path.exists(fs):
+        fst = _read_entity_file(fs)
+        if fst.strip():
+            parts.append(f'\n## 伏笔追踪\n{fst[:2000]}')
+    result = '\n'.join(parts)
+    if len(result) > max_chars:
+        result = result[:max_chars-3] + '\n...'
+    return result
+
+def get_smart_context(book_id, user_query='', budget_chars=None, settings=None):
+    if budget_chars is None:
+        settings = settings or get_settings()
+        ctx_len = _get_effective_context_length(settings)
+        budget_chars = int(ctx_len * 0.5) if ctx_len > 0 else 40000
+    efiles = _list_entity_files(book_id)
+    if not efiles:
+        return '（目前还没有阅读笔记。运行「摘要全书」后 Luca 就能掌握全书内容了。）'
+    return _assemble_smart_context_v2(book_id, user_query, budget_chars)
+
+def _assemble_smart_context_v2(book_id, user_query, budget):
+    reserved = 500
+    budget = max(budget - reserved, 2000)
+    pieces = []
+    used = 0
+    efiles = _list_entity_files(book_id)
+    entity_names = [os.path.splitext(os.path.basename(f))[0] for f in efiles]
+    search_results = None
+    if user_query and user_query.strip():
+        sr = _kb_search(book_id, user_query, top_k=min(len(efiles)+4, 15))
+        if sr and sr.get('documents') and sr['documents'][0]:
+            search_results = set(sr['metadatas'][0][i].get('entity','') for i in range(len(sr['documents'][0])) if i < len(sr['metadatas'][0]))
+    priority_entities = []
+    other_entities = []
+    if search_results:
+        for en in entity_names:
+            if en in search_results:
+                priority_entities.append(en)
+            else:
+                other_entities.append(en)
+    else:
+        other_entities = list(entity_names)
+    ordered = priority_entities + other_entities
+    per_entity_budget = max(int(budget * 0.6 / max(len(ordered), 1)), 200)
+    for ename in ordered:
+        if used >= budget * 0.7:
+            break
+        ep = _get_entity_path(book_id, ename)
+        etext = _read_entity_file(ep)
+        if not etext or not etext.strip():
+            continue
+        alloc = per_entity_budget
+        if ename in (priority_entities or []):
+            alloc = min(per_entity_budget * 2, budget - used)
+        if len(etext) <= alloc:
+            piece = etext
+        else:
+            sections = re.split(r'\n(?=### )', etext)
+            piece = ''
+            for sec in sections:
+                if len(piece) + len(sec) > alloc:
+                    remaining = alloc - len(piece)
+                    if remaining > 50:
+                        piece += sec[:remaining] + '\n...(截断)'
+                    break
+                piece += sec
+        pieces.append(piece)
+        used += len(piece)
+    tl_path = os.path.join(sd, 'timeline.md')
+    if os.path.exists(tl_path) and used < budget * 0.85:
+        tlt = _read_entity_file(tl_path)
+        tl_alloc = min(len(tlt), int(budget * 0.15))
+        if tlt:
+            pieces.append(f'\n## 时间线\n{tlt[:tl_alloc]}')
+            used += tl_alloc
+    fs_path = os.path.join(sd, 'foreshadowing.md')
+    if os.path.exists(fs_path) and used < budget * 0.95:
+        fst = _read_entity_file(fs_path)
+        fs_alloc = min(len(fst), int(budget * 0.10))
+        if fst:
+            pieces.append(f'\n## 伏笔与线索\n{fst[:fs_alloc]}')
+            used += fs_alloc
+    result = '# 全书阅读笔记\n\n' + '\n\n---\n\n'.join(pieces)
+    if len(result) > budget:
+        result = result[:budget-3] + '\n...'
+    return result
+
+def _get_effective_context_length(settings=None):
+    if settings is None:
+        settings = get_settings()
+    ctx_len = settings.get('model_context_length', 0) or 0
+    presets = settings.get('provider_presets', [])
+    idx = settings.get('active_provider_idx', 0)
+    if not ctx_len and 0 <= idx < len(presets):
+        ctx_len = presets[idx].get('context_length', 0) or 0
+    return ctx_len
+
+def _ai_compress_source_for_context(source_text, target_chars, settings, config=None):
+    if not source_text or len(source_text) <= target_chars:
+        return source_text
+    cfg = config or {}
+    mx = cfg.get('max_tokens', 4096)
+    tmp = cfg.get('temperature', 0.2)
+    ratio = target_chars / len(source_text)
+    prompt = f"""将以下小说阅读笔记压缩到约 {ratio*100:.0f}% 的长度。
+保留所有：人物名及其核心信息、关键事件、伏笔、数值变化、世界观设定。
+删除：冗余描述、重复内容、过度细节描写。
+保持 markdown 结构不变。
+
+原文：
+{source_text[:20000]}
+
+输出压缩后的完整 markdown（不要省略号，要完整可用的文本）。"""
+    msgs = [
+        {'role': 'system', 'content': '你是资料压缩专家。压缩时保留所有关键信息，删除冗余。输出完整markdown。'},
+        {'role': 'user', 'content': prompt}
+    ]
+    result, err = call_ai(settings, msgs, mx, tmp, timeout=120)
+    if err or not result or not result.strip():
+        return source_text[:target_chars] + '\n...(自动截断)'
+    return result
+
 def get_context_estimate(book_id, settings=None):
     if settings is None:
         settings = get_settings()
@@ -6218,7 +6750,18 @@ def get_context_estimate(book_id, settings=None):
     if 0 <= idx < len(presets):
         ctx_len = presets[idx].get('context_length', 0) or settings.get('model_context_length', 0) or 0
     source_text = get_source(book_id) or ''
-    source_tokens = _estimate_tokens(source_text)
+    raw_source_tokens = _estimate_tokens(source_text)
+
+    sd = _get_source_dir(book_id)
+    efiles = _list_entity_files(book_id)
+    entity_count = len(efiles)
+    has_entities = entity_count > 0
+    smart_ctx = ''
+    if has_entities:
+        budget = int(ctx_len * 0.5) if ctx_len > 0 else 40000
+        smart_ctx = get_smart_context(book_id, user_query='', budget_chars=budget, settings=settings)
+    smart_tokens = _estimate_tokens(smart_ctx) if smart_ctx else 0
+
     bd = get_book_dir(book_id)
     meta = load_json(os.path.join(bd, 'meta.json'), dict) if os.path.isdir(bd) else {}
     cid = meta.get('current_chapter_id', '')
@@ -6265,7 +6808,8 @@ def get_context_estimate(book_id, settings=None):
 你还有一个"建议通读"工具...
 """
     tool_tokens = _estimate_tokens(annotate_tool)
-    min_chat = sys_tokens + tool_tokens + source_tokens + ch_tokens + 500
+    active_source_tokens = smart_tokens if has_entities else raw_source_tokens
+    min_chat = sys_tokens + tool_tokens + active_source_tokens + ch_tokens + 500
     msg_file = os.path.join(os.path.join(bd, 'messages') if os.path.isdir(bd) else '', '')
     history_tokens = 0
     import glob as _glob
@@ -6278,13 +6822,14 @@ def get_context_estimate(book_id, settings=None):
     total_estimated = min_chat + history_tokens
     return {
         'model_context': ctx_len,
-        'source_tokens': source_tokens,
+        'context_tokens': active_source_tokens,
         'chapter_tokens': ch_tokens,
         'history_tokens': history_tokens,
         'system_prompt_tokens': sys_tokens + tool_tokens,
         'min_chat_required': min_chat,
         'total_estimated': total_estimated,
         'needs_compression': ctx_len > 0 and total_estimated > ctx_len,
+        'entity_count': entity_count,
     }
 
 def _ai_read_chapters_batch(settings, chapters, prev_context, config=None, on_token=None, should_stop_fn=None):
@@ -6584,17 +7129,21 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings, text=None):
             bg_task_done(task_id, 'AI 无输出')
             return
         bg_task_update(task_id, progress=70)
-        # 保存章节摘要
         save_chapter_summary(book_id, chapter_id, result)
-        # 更新章节 JSON 中的 readthrough 字段
         ch['readthrough'] = result
         ch['completed_at'] = time.time()
         save_json(cp, ch)
-        # 增量更新 source.md
+
         source = get_source(book_id) or ''
         if not source.strip():
             source = '# 全书阅读笔记\n\n'
-        # 先尝试按章节 ID 注释移除旧记录（最可靠）
+        ctx_len = _get_effective_context_length(cfg_settings)
+        if ctx_len > 0 and len(source) > int(ctx_len * 0.45):
+            target = int(ctx_len * 0.35)
+            source = _ai_compress_source_for_context(source, target, cfg_settings, config=None)
+            save_source(book_id, source)
+            log_action('CHAPTER_COMPLETE_COMPRESS', f'compressed to {len(source)}')
+
         chapter_id_marker = f'<!-- id:{chapter_id} -->'
         if chapter_id_marker in source:
             idx = source.find(chapter_id_marker)
@@ -6617,7 +7166,15 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings, text=None):
         # 追加新记录，带上 ID 注释方便以后按 ID 匹配
         source += f"\n\n### {title} <!-- id:{chapter_id} -->\n{result}"
         save_source(book_id, source)
-        # 更新 outline 中的 chapter_summaries
+
+        bg_task_update(task_id, progress=85)
+        try:
+            parsed = _parse_entities_from_notes(result)
+            _save_parsed_entities_to_files(book_id, parsed)
+            _rebuild_vector_index(book_id)
+        except Exception as ex:
+            log_action('CHAPTER_COMPLETE_KB_ERR', str(ex)[:100])
+
         outline = get_outline(book_id)
         summaries = outline.get('chapter_summaries', {})
         summaries[chapter_id] = result[:500] + ('...' if len(result) > 500 else '')
@@ -6898,6 +7455,38 @@ def do_readthrough(bid, settings, config=None, resume=False):
 
         _rebuild_set(bid, phase='完成', progress=95, stream_buffer='')
         _rebuild_log(bid, '各章笔记已保存')
+
+        ctx_len = _get_effective_context_length(settings)
+        if len(current_source) > 500 and ctx_len > 0:
+            target = int(ctx_len * 0.5)
+            if len(current_source) > target:
+                _rebuild_log(bid, f'压缩 source.md: {len(current_source)} -> 目标 {target}')
+                current_source = _ai_compress_source_for_context(current_source, target, settings, config=config)
+                save_source(bid, current_source)
+                _rebuild_log(bid, f'压缩完成: {len(current_source)} 字符')
+
+        _rebuild_set(bid, phase='提取实体', progress=96)
+        _rebuild_log(bid, '正在从笔记中提取实体...')
+        all_notes = '\n\n'.join(notes)
+        parsed = _parse_entities_from_notes(all_notes)
+        saved_count = _save_parsed_entities_to_files(bid, parsed)
+        _rebuild_log(bid, f'已保存 {saved_count} 个实体段落到文件')
+        timeline_text = _extract_timeline_from_notes(all_notes)
+        if timeline_text.strip():
+            tl_path = os.path.join(_get_source_dir(bid), 'timeline.md')
+            _write_entity_file(tl_path, '# 时间线\n\n' + timeline_text)
+            _rebuild_log(bid, '时间线已保存')
+        fs_text = _extract_foreshadowing_from_notes(all_notes)
+        if fs_text.strip():
+            fs_path = os.path.join(_get_source_dir(bid), 'foreshadowing.md')
+            _write_entity_file(fs_path, '# 伏笔与线索\n\n' + fs_text)
+            _rebuild_log(bid, '伏笔追踪已保存')
+
+        _rebuild_set(bid, phase='构建索引', progress=98)
+        _rebuild_log(bid, '构建向量检索索引...')
+        _rebuild_vector_index(bid)
+        summary = _build_source_summary(bid)
+        save_source(bid, summary)
 
         if os.path.exists(cp_file):
             os.remove(cp_file)

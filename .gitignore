@@ -25,6 +25,7 @@ venv/
 env/
 .venv/
 .claude/
+.chat-history/
 
 _*.py
 demo/

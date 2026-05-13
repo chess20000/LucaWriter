@@ -4,8 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>LucaWriter</title>
-<link rel="icon" href="icon.ico?v=4"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&display=swap" rel="stylesheet">
+<link rel="icon" href="icon.ico?v=4">
 <style>
+@font-face{font-family:'Playfair Display';font-style:normal;font-weight:400 700;font-display:swap;src:url('fonts/PlayfairDisplay-Regular.woff2') format('woff2')}
+@font-face{font-family:'Playfair Display';font-style:italic;font-weight:400 600;font-display:swap;src:url('fonts/PlayfairDisplay-Italic.woff2') format('woff2')}
 :root{
  --bg:#0b1220;--page-bg:radial-gradient(circle at 18% 15%, rgba(232,204,122,.12), transparent 18%),radial-gradient(circle at 82% 12%, rgba(240,216,137,.08), transparent 24%),linear-gradient(180deg,#070b15 0%,#0b1220 100%);
  --surface:#0f1b2e;--surface2:#122235;--surface3:#162a42;--surface4:#203a57;
@@ -161,7 +163,12 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .resize-handle::after{content:'';position:absolute;top:0;bottom:0;left:50%;transform:translateX(-50%);width:1px;background:transparent;transition:background .15s}
 .resize-handle:hover::after,.resize-handle.dragging::after{background:var(--accent)}
 
-.left-sidebar{width:230px;flex-shrink:0;background:var(--surface);display:flex;flex-direction:column;overflow:hidden;border:none}
+.left-sidebar{width:230px;flex-shrink:0;background:var(--surface);display:flex;flex-direction:column;overflow:hidden;border:none;position:relative;transition:width .25s ease,opacity .2s ease}
+.left-sidebar.collapsed{width:0;opacity:0;pointer-events:none;flex:0 0 0;border:none}
+.sidebar-trigger{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:5;background:var(--surface);border-right:1px solid var(--border);transition:background .15s,color .15s;color:var(--t3);position:relative}
+.sidebar-trigger:hover{background:var(--surface2);color:var(--t-on-surface)}
+.sidebar-trigger svg{width:12px;height:12px;transform:rotate(0deg);transition:transform .25s ease}
+.sidebar-trigger.expanded svg{transform:rotate(180deg)}
 .sidebar-header{padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-shrink:0}
 .back-btn{background:var(--accent-a03);border:1px solid var(--accent-a20);color:var(--t-on-surface);font-size:12px;padding:6px 10px;border-radius:var(--r1);cursor:pointer;transition:all .12s;flex-shrink:0;font-weight:700;white-space:nowrap}
 .back-btn:hover{background:var(--accent);color:var(--on-accent)}
@@ -284,10 +291,11 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .rt-warning{color:var(--danger);margin:4px 0;font-weight:600}
 .rt-btn{background:var(--accent);color:var(--on-accent);border:none;padding:4px 10px;border-radius:var(--r1);font-size:11px;font-weight:600;cursor:pointer;margin-top:4px}
 .rt-btn:hover{background:var(--accent2)}
+.ctx-tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--surface2);color:var(--t3);font-size:10px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle}
 
 .bottom-panel{position:absolute;bottom:0;left:0;right:0;z-index:20;background:var(--surface);border-top:1px solid var(--border2);display:flex;flex-direction:column;overflow:hidden;transition:height .2s cubic-bezier(.4,0,.2,1);height:30px;box-shadow:0 -8px 32px rgba(0,0,0,.4)}
-.bottom-panel.collapsed{overflow:hidden;box-shadow:none}
-.bottom-panel:not(.collapsed){max-height:calc(100% - 38px)}
+.bottom-panel.collapsed{overflow:hidden;box-shadow:none;max-height:none}
+.bottom-panel:not(.collapsed){max-height:var(--bp-max-h,calc(100% - 40px))}
 .bottom-handle{display:flex;align-items:center;justify-content:space-between;padding:0 16px;height:30px;flex-shrink:0;gap:0;user-select:none;position:relative}
 .handle-grip{display:flex;align-items:center;position:absolute;left:50%;transform:translateX(-50%);gap:12px;cursor:ns-resize}
 .handle-grip span{display:block;width:20px;height:2px;background:var(--surface4);border-radius:1px;transition:background .15s}
@@ -715,7 +723,10 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
 
  <div class="main-row" id="editorView" style="display:none">
- <div class="left-sidebar" id="leftSidebar">
+ <div class="sidebar-trigger" id="sidebarTrigger" title="展开章节栏">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+ </div>
+ <div class="left-sidebar collapsed" id="leftSidebar">
  <div class="sidebar-header">
  <button class="back-btn" onclick="backToBooks()" title="返回书架">&#8592; 书架</button>
           <span class="sidebar-label" id="sidebarLabel">章节</span>
@@ -731,8 +742,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="chapter-list" id="chapterList"></div>
  <div class="ch-trash-wrap" id="trashList"></div>
  </div>
-
- <div class="resize-handle" id="resizeHandleL" title="拖拽调整左侧栏宽度"></div>
 
  <div class="editor-area">
  <div class="editor-top">
@@ -913,13 +922,13 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="mg"><label>API Key</label><input id="sKey" type="text" class="pw-mask" placeholder="sk-..." autocomplete="off"></div>
  <div style="display:flex;gap:6px"><div class="mg" style="flex:1"><label>Model</label><div class="cs-wrap" id="csWrap_sModel"><button class="cs-trigger" type="button" onclick="toggleCS(this)"><span class="cs-label">选择模型</span><svg class="cs-arrow" viewBox="0 0 10 6"><path d="M0 0l5 6 5-6z"/></svg></button><div class="cs-dropdown"></div><select id="sModel" class="cs-src" style="display:none"><option value="">选择模型</option></select></div></div><button class="topbar-btn accent" style="align-self:flex-end;margin-bottom:12px;padding-top:10px;padding-bottom:10px;font-size:14px" onclick="fetchModels()" id="fetchBtn">获取模型</button></div>
  <div class="mg" id="ctxLenRow">
-  <label>上下文长度（token）</label>
+  <label>上下文长度（token）<span class="ctx-tip" title="设定模型的上下文窗口大小。Luca 会根据此值自动控制注入的实体数量和笔记长度，确保不超限。不知道的话留空即可。">ⓘ</span></label>
   <div style="display:flex;align-items:center;gap:8px">
    <input id="sPresetCtxLen" type="number" min="0" step="1" placeholder="如 128000" style="flex:1">
-   <span id="ctxEstimate" style="font-size:11px;color:var(--t3);white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis">-</span>
-   <button class="topbar-btn" style="padding:6px 10px;font-size:11px;white-space:nowrap" onclick="refreshContextEstimate()" title="刷新上下文估算">📊</button>
+   <span id="ctxEstimate" style="font-size:11px;color:var(--t3);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis">-</span>
+   <button class="topbar-btn" style="padding:6px 10px;font-size:11px;white-space:nowrap" onclick="refreshContextEstimate()" title="刷新估算">📊</button>
   </div>
-  <p id="ctxWarn" style="font-size:11px;color:var(--warn);display:none;margin-top:2px">⚠ 当前内容超出模型上下文窗口，发送消息时将自动压缩</p>
+  <p id="ctxWarn" style="font-size:11px;color:var(--warn);display:none;margin-top:2px"></p>
  </div>
  <div class="mg" style="margin-top:10px">
  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:0;font-size:12px;font-weight:600">
@@ -1153,8 +1162,11 @@ var allChapters=[],chapterOrder=[];
 var aiMessages=[];
 var currentChapter=null;
 var currentBottomTab='summary';
-function _appHeight(){var a=$('app');return(a?a.clientHeight:window.innerHeight)-38}
+function _appHeight(){var a=$('app');return(a?a.clientHeight:window.innerHeight)-40}
+function _syncBpMaxHeight(){var a=$('app');if(a)a.style.setProperty('--bp-max-h',_appHeight()+'px')}
+function syncAIPadding(){var msg=$('aiMessages'),panel=$('bottomPanel');if(msg&&panel){var h=panel.offsetHeight||30;msg.style.paddingBottom=(h>38?h+8:36)+'px'}}
 var bottomPanelOpen=false;
+var _collapseTimer=null;
 var bottomPanelHeight=_appHeight();
 var savedBottomPanelHeight=_appHeight();
 var saveInProgress=false;
@@ -1329,7 +1341,7 @@ function clearAppState(){
  try{localStorage.removeItem('lucawriter_state')}catch(e){}
 }
 
-function init(){initAllCS();loadSettings();loadThemedIcon();_startConnPoll();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
+function init(){initAllCS();loadSettings();loadThemedIcon();_startConnPoll();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
 
 function setupModals(){
  document.querySelectorAll('.modal-bg,.confirm-bg,.prompt-bg').forEach(function(bg){
@@ -1812,12 +1824,14 @@ function _startChatPoll(taskId){
 
 var _thinkingWords=['思考中……','推理中……','正在分析……','处理中……','正在计算……','梳理一下……','酝酿一下……','让我想想……','我来看看……','构思小作文……','对方正在输入……','输入中……','我在打字……','等一下……','智慧的眼神……','注意到……','挠下巴……'];
 var _thinkingTimer=null;
+function _rotateThinkingWord(){
+  var words=document.querySelectorAll('.thinking-word');
+  words.forEach(function(el){el.textContent=_thinkingWords[Math.floor(Math.random()*_thinkingWords.length)]});
+}
 function _startThinkingRotation(){
+  _rotateThinkingWord();
   if(_thinkingTimer)return;
-  _thinkingTimer=setInterval(function(){
-    var words=document.querySelectorAll('.thinking-word');
-    words.forEach(function(el){el.textContent=_thinkingWords[Math.floor(Math.random()*_thinkingWords.length)]});
-  },2000);
+  _thinkingTimer=setInterval(_rotateThinkingWord,2000);
 }
 function _stopThinkingRotation(){if(_thinkingTimer){clearInterval(_thinkingTimer);_thinkingTimer=null;}}
 
@@ -1834,7 +1848,7 @@ function renderAIMessages(){
   var isLive=m._streaming||m._pending;
   var statusText='';
   if(m.reasoning||m._streaming||m._pending){
-  statusText=isLive?'<span class="ai-msg-status thinking-word">思考中</span>':'<span class="ai-msg-status">已完成思考</span>';
+  statusText=isLive?'<span class="ai-msg-status thinking-word"></span>':'<span class="ai-msg-status">已完成思考</span>';
   }
   var hasReasoning=!!m.reasoning;
   var header='<div class="ai-msg-header" onclick="toggleReasoningFromHeader(this)" data-has-reasoning="'+(hasReasoning||isLive?'1':'0')+'"><img class="ai-msg-logo" src="logo-white.png" alt="">'+statusText+'</div>';
@@ -2718,17 +2732,24 @@ function refreshContextEstimate(){
   var ctxVal=parseInt($('sPresetCtxLen')?$('sPresetCtxLen').value:'0')||0;
   if(!ctxVal)ctxVal=d.model_context||0;
   var total=d.total_estimated||0;
-  var minReq=d.min_chat_required||0;
-  var srcTok=d.source_tokens||0;
+  var ctxTok=d.context_tokens||0;
   var chTok=d.chapter_tokens||0;
   var histTok=d.history_tokens||0;
-  var sysTok=d.system_prompt_tokens||0;
-  var info='需:'+formatSizeNum(minReq);
-  if(srcTok>0)info+=' | 摘要:'+formatSizeNum(srcTok);
+  var entCount=d.entity_count||0;
+
+  var info='';
+  if(entCount>0)info+='实体:'+entCount+' | ';
+  info+='上下文:'+formatSizeNum(ctxTok);
   if(chTok>0)info+=' | 章节:'+formatSizeNum(chTok);
   if(histTok>0)info+=' | 历史:'+formatSizeNum(histTok);
   if(estEl)estEl.textContent=info;
-  if(warnEl&&ctxVal>0&&total>ctxVal)warnEl.style.display='block';else if(warnEl)warnEl.style.display='none';
+
+  if(warnEl&&ctxVal>0&&total>ctxVal){
+   warnEl.style.display='block';
+   warnEl.textContent='⚠ 预估 '+formatSizeNum(total)+'/'+formatSizeNum(ctxVal)+' 超限，将自动精简上下文';
+  }else if(warnEl){
+   warnEl.style.display='none';
+  }
  });
 }
 function formatSizeNum(n){
@@ -2897,14 +2918,18 @@ function openBottomPanel(){
  if(saved && saved>60 && saved<full-20){bottomPanelHeight=saved}
  else{bottomPanelHeight=full}
  panel.style.height=bottomPanelHeight+'px';
+ _syncBpMaxHeight();
+ syncAIPadding();
  panel.classList.remove('collapsed');
 }
 
 function closeBottomPanel(){
   bottomPanelOpen=false;
   var panel=$('bottomPanel');
+  clearTimeout(_collapseTimer);
   panel.style.height='30px';
-  panel.classList.add('collapsed');
+  syncAIPadding();
+  _collapseTimer=setTimeout(function(){panel.classList.add('collapsed')},220);
 }
 
 /* === 系列小说 === */
@@ -3605,12 +3630,20 @@ function setupBottomPanelDrag(){
   toggleBottomPanel();
   });
 
+ var grip=handle.querySelector('.handle-grip');
+ if(grip)grip.addEventListener('click',function(e){
+  e.stopPropagation();
+  toggleBottomPanel();
+  });
+
  handle.addEventListener('dblclick',function(e){
  if(e.target.closest('.bottom-tab')||e.target.closest('.bottom-toggle'))return;
  e.stopPropagation();
  localStorage.removeItem('lw_bottom_panel_h');
  var full=_appHeight();
  panel.style.height=full+'px';
+ _syncBpMaxHeight();
+ syncAIPadding();
  bottomPanelHeight=full;
  bottomPanelOpen=true;
  });
@@ -3621,6 +3654,8 @@ function setupBottomPanelDrag(){
  var h=startH+(startY-e.clientY);
  h=Math.max(30,Math.min(_appHeight(),h));
  panel.style.height=h+'px';
+ _syncBpMaxHeight();
+ syncAIPadding();
  panel.classList.remove('collapsed');
  bottomPanelHeight=h;
  bottomPanelOpen=true;
@@ -3648,6 +3683,8 @@ function setupBottomPanelDrag(){
 	  var saved=parseInt(localStorage.getItem('lw_bottom_panel_h')||'0');
 	  var panel=$('bottomPanel');
 	  if(!saved||saved>=full-20){bottomPanelHeight=full;panel.style.height=full+'px'}
+	  _syncBpMaxHeight();
+	  syncAIPadding();
 	 }
 	 syncInputWidth();
 	});
@@ -3700,8 +3737,23 @@ function setupBottomPanelDrag(){
    });
   }
 
-  makeResizable('resizeHandleL','leftSidebar',160,false);
   makeResizable('resizeHandleR','rightSidebar',200,true);
+
+  (function(){
+   var trigger=document.getElementById('sidebarTrigger');
+   var sidebar=document.getElementById('leftSidebar');
+   if(!trigger||!sidebar)return;
+   var expandTimer=null,collapseTimer=null;
+   var DELAY=700,COLLAPSE_DELAY=300;
+   function clearTimers(){clearTimeout(expandTimer);clearTimeout(collapseTimer);expandTimer=null;collapseTimer=null}
+   function doExpand(){sidebar.classList.remove('collapsed');trigger.classList.add('expanded')}
+   function doCollapse(){sidebar.classList.add('collapsed');trigger.classList.remove('expanded')}
+   trigger.addEventListener('mouseenter',function(e){clearTimers();expandTimer=setTimeout(doExpand,DELAY)});
+   sidebar.addEventListener('mouseenter',function(){clearTimers()});
+   trigger.addEventListener('mouseleave',function(e){clearTimers();if(!sidebar.classList.contains('collapsed'))collapseTimer=setTimeout(doCollapse,COLLAPSE_DELAY)});
+   sidebar.addEventListener('mouseleave',function(e){clearTimers();collapseTimer=setTimeout(doCollapse,COLLAPSE_DELAY)});
+   trigger.addEventListener('click',function(e){clearTimers();if(sidebar.classList.contains('collapsed'))doExpand();else doCollapse()});
+  })();
  }
 
  function openSummary(){
