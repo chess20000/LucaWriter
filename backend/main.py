@@ -34,6 +34,9 @@ import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 import numpy as np
 
+import kb_pipeline
+import kb_storage
+
 _default_ssl_context = None
 def _get_ssl_context():
     global _default_ssl_context
@@ -153,6 +156,9 @@ DEFAULT_SETTINGS = {
     'theme_accent': '#E8CC7A',
     'theme_mode': 'dark',
     'ui_scale': 1.0,
+    'embedding_backend': 'local',
+    'local_embedding_model': 'BAAI/bge-small-zh-v1.5',
+    'embedding_model': 'text-embedding-3-small',
 }
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
@@ -2118,18 +2124,31 @@ class Handler(BaseHTTPRequestHandler):
             if sub == 'config':
                 self.json_resp(200, get_readthrough_config(bid)); return
             elif sub == 'status':
-                with _rebuild_lock:
-                    t = _rebuild_tasks.get(bid, {'status': 'idle', 'progress': 0, 'phase': '', 'total_chapters': 0, 'done_chapters': 0, 'logs': [], 'error': ''})
-                    resp = dict(t)
-                    resp['logs'] = resp.get('logs', [])[-30:]
+                try:
+                    st = kb_storage.get_rt_state(bid)
+                except Exception:
+                    kb_storage.init_db(bid)
+                    st = kb_storage.get_rt_state(bid)
+                if not st:
+                    resp = {'status': 'idle', 'phase': '', 'current_idx': -1, 'total': 0, 'stream_buffer': '', 'error': ''}
+                else:
+                    resp = dict(st)
+                    if resp.get('status') == 'running':
+                        t = threading.enumerate()
+                        alive = any(t_.name == f'kb_readthrough_{bid}' for t_ in t if t_.is_alive())
+                        just_started = time.time() - float(resp.get('updated_at') or 0) < 8
+                        if not alive and not just_started:
+                            resp['status'] = 'paused'
+                            resp['phase'] = '进程已退出，可继续'
+                            kb_storage.set_rt_state(bid, status='paused', phase='进程已退出，可继续')
+                resp['recent_logs'] = kb_storage.get_rt_logs(bid, 30)
+                resp['done_count'] = kb_storage.get_done_chapter_count(bid)
+                if not resp.get('total'):
+                    resp['total'] = len((get_book_meta(bid) or {}).get('chapter_order', []) or [])
+                resp['kb_overview'] = kb_storage.get_kb_overview(bid, int(resp.get('current_idx') or -1))
                 resp['has_source'] = bool(get_source(bid))
-                # 从 checkpoint 或 _rebuild_tasks 读取章节索引
-                if resp.get('status') == 'idle' and resp.get('readthrough_chapter_idx') is None:
-                    cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
-                    cp = load_json(cp_file, dict)
-                    resp['readthrough_chapter_idx'] = cp.get('chapter_idx', -1) if cp else -1
-                if 'readthrough_chapter_idx' not in resp:
-                    resp['readthrough_chapter_idx'] = -1
+                if resp.get('current_idx') is None:
+                    resp['current_idx'] = -1
                 self.json_resp(200, resp); return
             elif sub == 'file':
                 ft = qs.get('type', ['source'])[0]
@@ -2322,6 +2341,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._check_access(): return
         if not self._check_csrf(): return
         path = urlparse(self.path).path
+        qs = parse_qs(urlparse(self.path).query)
 
         # 兼容：支持 /summary 作为 /readthrough 的别名
         if '/summary/' in path:
@@ -3189,7 +3209,7 @@ class Handler(BaseHTTPRequestHandler):
                                             existing_cc = bg_task_get_by_book_type(book_id, 'chapter-complete')
                                             if not (existing_cc and existing_cc.get('status') == 'running'):
                                                 tid_cc = bg_task_start('chapter-complete', book_id, f'本章通读')
-                                                threading.Thread(target=_do_chapter_complete, args=(tid_cc, book_id, ccid, settings_cc), daemon=True).start()
+                                                threading.Thread(target=_do_chapter_complete_wrapper, args=(tid_cc, book_id, ccid, settings_cc), daemon=True).start()
                                                 complete_chapter_triggered = True
                             except Exception as e:
                                 log_action('COMPLETE_CHAPTER_ERROR', str(e)[:200])
@@ -3501,7 +3521,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(400, {'error': '已有本章通读任务在进行中'}); return
                 tid = bg_task_start('chapter-complete', bid, f'本章通读')
                 text = data.get('text', None)
-                threading.Thread(target=_do_chapter_complete, args=(tid, bid, cid, settings, text), daemon=True).start()
+                threading.Thread(target=_do_chapter_complete_wrapper, args=(tid, bid, cid, settings, text), daemon=True).start()
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'reader-prediction':
@@ -4266,13 +4286,14 @@ class Handler(BaseHTTPRequestHandler):
             _auto_start_browser_search(bid, query, settings)
             self.json_resp(200, {'success': True}); return
 
-        # 通读 API (POST)
+        # 通读 API (POST) — 新版使用 kb_pipeline + kb_storage
         path_lower = path.lower()
         if '/readthrough' in path_lower and path_lower.startswith('/api/book/'):
             parts = path.split('/')
             bid = unquote(parts[3]) if len(parts) > 3 else ''
             if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
                 self.json_resp(404, {}); return
+            kb_storage.init_db(bid)
             if path.endswith('/start') or path.endswith('/readthrough/start'):
                 settings = get_settings()
                 prov = get_ai_providers()
@@ -4281,11 +4302,9 @@ class Handler(BaseHTTPRequestHandler):
                     if p: settings.update({'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')})
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
-                with _rebuild_lock:
-                    t = _rebuild_tasks.get(bid)
-                    if t and t.get('status') == 'running':
-                        self.json_resp(400, {'error': '通读正在进行中'}); return
-                # 备份旧的 source.md 为 source_YYYYMMDD.md
+                st = kb_storage.get_rt_state(bid)
+                if st and st['status'] == 'running':
+                    self.json_resp(400, {'error': '通读正在进行中'}); return
                 old_source = get_source(bid)
                 if old_source and len(old_source.strip()) > 50:
                     today_str = datetime.now().strftime('%Y%m%d')
@@ -4294,22 +4313,21 @@ class Handler(BaseHTTPRequestHandler):
                     with open(backup_path, 'w', encoding='utf-8') as f:
                         f.write(old_source)
                     save_source(bid, '')
-                    _rebuild_log(bid, f'已备份旧笔记为 {backup_name}')
                 cfg = get_readthrough_config(bid)
                 if cfg.get('model'): settings['model'] = cfg['model']
-                cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
-                if os.path.exists(cp_file): os.remove(cp_file)
-                threading.Thread(target=do_readthrough, args=(bid, settings, cfg), daemon=True).start()
+                total = len((get_book_meta(bid) or {}).get('chapter_order', []) or [])
+                kb_storage.set_rt_state(bid, status='running', phase='启动中', total=total,
+                                        current_idx=-1, active_start_idx=-1, active_end_idx=-1,
+                                        pause_requested=0, stream_buffer='', error='')
+                threading.Thread(target=kb_pipeline.do_readthrough, args=(bid, settings, cfg),
+                                 name=f'kb_readthrough_{bid}', daemon=True).start()
                 self.json_resp(200, {'status': 'started'}); return
-            if path.endswith('/stop') or path.endswith('/readthrough/stop'):
-                with _rebuild_lock:
-                    t = _rebuild_tasks.get(bid)
-                    if t and t.get('status') == 'running':
-                        t['stopped'] = True
-                # 关闭该书本的所有 readthrough 连接
+            if path.endswith('/pause') or path.endswith('/readthrough/pause') or path.endswith('/stop') or path.endswith('/readthrough/stop'):
+                kb_storage.set_rt_state(bid, phase='暂停中')
+                kb_storage.set_pause_requested(bid, True)
                 close_connections_by_book(bid)
-                self.json_resp(200, {'status': 'stopping'}); return
-            if path.endswith('/continue') or path.endswith('/readthrough/continue'):
+                self.json_resp(200, {'status': 'pausing'}); return
+            if path.endswith('/resume') or path.endswith('/readthrough/resume') or path.endswith('/continue') or path.endswith('/readthrough/continue'):
                 settings = get_settings()
                 prov = get_ai_providers()
                 if not settings.get('base_url'):
@@ -4317,25 +4335,45 @@ class Handler(BaseHTTPRequestHandler):
                     if p: settings.update({'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')})
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
-                with _rebuild_lock:
-                    t = _rebuild_tasks.get(bid)
-                    if t and t.get('status') == 'running':
-                        self.json_resp(400, {'error': '通读正在进行中'}); return
+                st = kb_storage.get_rt_state(bid)
+                if st and st['status'] == 'running':
+                    self.json_resp(400, {'error': '通读正在进行中'}); return
                 cfg = get_readthrough_config(bid)
                 if cfg.get('model'): settings['model'] = cfg['model']
-                threading.Thread(target=do_readthrough, args=(bid, settings, cfg, True), daemon=True).start()
-                self.json_resp(200, {'status': 'continued'}); return
-            if path.endswith('/clear') or path.endswith('/readthrough/clear'):
-                cp = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
-                if os.path.exists(cp): os.remove(cp)
-                with _rebuild_lock:
-                    if bid in _rebuild_tasks: del _rebuild_tasks[bid]
+                kb_storage.set_rt_state(bid, status='running', phase='继续中',
+                                        active_start_idx=-1, active_end_idx=-1,
+                                        pause_requested=0)
+                threading.Thread(target=kb_pipeline.do_readthrough, args=(bid, settings, cfg, True),
+                                 name=f'kb_readthrough_{bid}', daemon=True).start()
+                self.json_resp(200, {'status': 'started'}); return
+            if path.endswith('/reset') or path.endswith('/readthrough/reset') or path.endswith('/clear') or path.endswith('/readthrough/clear'):
+                kb_storage.embed_clear(bid)
+                kb_storage.reset_book_kb(bid)
                 save_source(bid, '')
                 save_outline_md(bid, '')
+                shutil.rmtree(os.path.join(get_book_dir(bid), 'source'), ignore_errors=True)
                 meta = get_book_meta(bid) or {}
                 meta.pop('readthrough_at', None)
                 save_json(os.path.join(get_book_dir(bid), 'meta.json'), meta)
-                self.json_resp(200, {'status': 'cleared'}); return
+                kb_storage.init_db(bid)
+                kb_storage.set_rt_state(bid, status='idle', phase='已重置', current_idx=-1, total=0,
+                                        active_start_idx=-1, active_end_idx=-1,
+                                        error='', pause_requested=0, stream_buffer='')
+                self.json_resp(200, {'status': 'ok'}); return
+            if path.endswith('/redo') or path.endswith('/readthrough/redo'):
+                chapter_id = qs.get('chapter_id', [''])[0] or parts[7] if len(parts) > 7 else ''
+                if not chapter_id:
+                    self.json_resp(400, {'error': '缺少 chapter_id'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                threading.Thread(target=kb_pipeline.do_chapter_complete, args=(bid, chapter_id, settings), daemon=True).start()
+                self.json_resp(200, {'status': 'started'}); return
+            if path.endswith('/embedding/rebuild') or path.endswith('/readthrough/embedding/rebuild'):
+                settings = get_settings()
+                kb_storage.embed_clear(bid)
+                threading.Thread(target=kb_pipeline.incremental_embed, args=(bid, settings), daemon=True).start()
+                self.json_resp(200, {'status': 'started'}); return
             if path.endswith('/config') or path.endswith('/readthrough/config'):
                 cfg = get_readthrough_config(bid)
                 for k in ('model', 'max_tokens', 'temperature', 'chunk_size', 'max_input'):
@@ -4348,9 +4386,9 @@ class Handler(BaseHTTPRequestHandler):
                 settings = get_settings()
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
-                source_text = get_smart_context(bid, settings=settings)
-                if not source_text or source_text.startswith('（目前还没有'):
-                    self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
+                source_text, _ = kb_pipeline.qa_context(bid, settings=settings)
+                if not source_text or len(source_text.strip()) < 50:
+                    self.json_resp(400, {'error': '知识库为空，请先通读'}); return
                 cfg = get_readthrough_config(bid)
                 outline, err = _ai_outline(settings, source_text, config=cfg)
                 if err:
@@ -5296,7 +5334,10 @@ def do_series_readthrough(sid, settings):
 3. 标注各书之间的伏笔和呼应
 4. 输出为简洁的 Markdown 格式"""
             msgs = [{'role': 'system', 'content': '你是系列小说大纲整理专家。基于阅读笔记，梳理跨书脉络。'}, {'role': 'user', 'content': outline_prompt}]
-            outline, _, outline_err = call_ai_full(settings, msgs, max_tokens=4096, temperature=0.3, timeout=180)
+            _ctx_for_outline = int(_get_effective_context_length(settings) or 0)
+            _input_chars_outline = len(outline_prompt) + 80
+            _outline_budget = max(8192, _ctx_for_outline - int(_input_chars_outline * 0.55) - 3500) if _ctx_for_outline > 0 else 16384
+            outline, _, outline_err = call_ai_full(settings, msgs, max_tokens=_outline_budget, temperature=0.3, timeout=600)
             if outline and not outline_err:
                 save_outline_md(sid, outline)
                 _series_rt_log(sid, '系列大纲已生成')
@@ -5689,11 +5730,8 @@ def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=Fals
         if temperature is not None:
             body['temperature'] = temperature
     if max_tokens is not None and max_tokens > 0:
-        if is_minimax:
-            body['max_tokens'] = min(int(max_tokens), 2048)
-        else:
-            body['max_tokens'] = int(max_tokens)
-    elif not is_minimax:
+        body['max_tokens'] = int(max_tokens)
+    else:
         body['max_tokens'] = 4096
     if stream:
         body['stream'] = True
@@ -6018,7 +6056,17 @@ def call_ai_full(settings, messages, max_tokens, temperature, timeout=120):
             if not content and reasoning:
                 content = reasoning
                 reasoning = ''
-            log_action('AI_RESULT', f'len={len(content)} reasoning={len(reasoning)}')
+            finish_reason = ''
+            usage = ''
+            try:
+                if choices and isinstance(choices[0], dict):
+                    finish_reason = str(choices[0].get('finish_reason') or '')
+                u = data.get('usage') or {}
+                if isinstance(u, dict):
+                    usage = f"prompt={u.get('prompt_tokens', '?')} completion={u.get('completion_tokens', '?')} total={u.get('total_tokens', '?')}"
+            except Exception:
+                pass
+            log_action('AI_RESULT', f'len={len(content)} reasoning={len(reasoning)} finish={finish_reason} usage={usage}')
             return content, reasoning, None
         finally:
             try: resp.close()
@@ -6298,9 +6346,9 @@ def _compress_messages_for_context(messages, max_ctx_tokens, settings=None):
 
 
 class _SimpleEmbedding(EmbeddingFunction):
-    def __call__(self, texts: Documents) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings:
         embs = []
-        for t in texts:
+        for t in input:
             if not t or not t.strip():
                 embs.append([0.0] * 64)
                 continue
@@ -6638,81 +6686,15 @@ def _build_source_summary(book_id, max_chars=8000):
     return result
 
 def get_smart_context(book_id, user_query='', budget_chars=None, settings=None):
-    if budget_chars is None:
-        settings = settings or get_settings()
-        ctx_len = _get_effective_context_length(settings)
-        budget_chars = int(ctx_len * 0.5) if ctx_len > 0 else 40000
-    efiles = _list_entity_files(book_id)
-    if not efiles:
-        return '（目前还没有阅读笔记。运行「摘要全书」后 Luca 就能掌握全书内容了。）'
-    return _assemble_smart_context_v2(book_id, user_query, budget_chars)
-
-def _assemble_smart_context_v2(book_id, user_query, budget):
-    reserved = 500
-    budget = max(budget - reserved, 2000)
-    pieces = []
-    used = 0
-    efiles = _list_entity_files(book_id)
-    entity_names = [os.path.splitext(os.path.basename(f))[0] for f in efiles]
-    search_results = None
-    if user_query and user_query.strip():
-        sr = _kb_search(book_id, user_query, top_k=min(len(efiles)+4, 15))
-        if sr and sr.get('documents') and sr['documents'][0]:
-            search_results = set(sr['metadatas'][0][i].get('entity','') for i in range(len(sr['documents'][0])) if i < len(sr['metadatas'][0]))
-    priority_entities = []
-    other_entities = []
-    if search_results:
-        for en in entity_names:
-            if en in search_results:
-                priority_entities.append(en)
-            else:
-                other_entities.append(en)
-    else:
-        other_entities = list(entity_names)
-    ordered = priority_entities + other_entities
-    per_entity_budget = max(int(budget * 0.6 / max(len(ordered), 1)), 200)
-    for ename in ordered:
-        if used >= budget * 0.7:
-            break
-        ep = _get_entity_path(book_id, ename)
-        etext = _read_entity_file(ep)
-        if not etext or not etext.strip():
-            continue
-        alloc = per_entity_budget
-        if ename in (priority_entities or []):
-            alloc = min(per_entity_budget * 2, budget - used)
-        if len(etext) <= alloc:
-            piece = etext
-        else:
-            sections = re.split(r'\n(?=### )', etext)
-            piece = ''
-            for sec in sections:
-                if len(piece) + len(sec) > alloc:
-                    remaining = alloc - len(piece)
-                    if remaining > 50:
-                        piece += sec[:remaining] + '\n...(截断)'
-                    break
-                piece += sec
-        pieces.append(piece)
-        used += len(piece)
-    tl_path = os.path.join(sd, 'timeline.md')
-    if os.path.exists(tl_path) and used < budget * 0.85:
-        tlt = _read_entity_file(tl_path)
-        tl_alloc = min(len(tlt), int(budget * 0.15))
-        if tlt:
-            pieces.append(f'\n## 时间线\n{tlt[:tl_alloc]}')
-            used += tl_alloc
-    fs_path = os.path.join(sd, 'foreshadowing.md')
-    if os.path.exists(fs_path) and used < budget * 0.95:
-        fst = _read_entity_file(fs_path)
-        fs_alloc = min(len(fst), int(budget * 0.10))
-        if fst:
-            pieces.append(f'\n## 伏笔与线索\n{fst[:fs_alloc]}')
-            used += fs_alloc
-    result = '# 全书阅读笔记\n\n' + '\n\n---\n\n'.join(pieces)
-    if len(result) > budget:
-        result = result[:budget-3] + '\n...'
-    return result
+    """组装上下文：使用新版 kb_pipeline.qa_context"""
+    if settings is None:
+        settings = get_settings()
+    text, _ = kb_pipeline.qa_context(book_id, user_query=user_query, settings=settings)
+    if not text or len(text.strip()) < 20:
+        return '（目前还没有阅读笔记，请先生成全书摘要）'
+    if budget_chars and len(text) > budget_chars:
+        text = text[:budget_chars]
+    return text
 
 def _get_effective_context_length(settings=None):
     if settings is None:
@@ -7080,116 +7062,26 @@ def _ai_outline(settings, source, config=None):
         {'role': 'user', 'content': prompt}
     ], mx, tmp, timeout=180)
 
-def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings, text=None):
-    """后台线程：单章通读，生成章节摘要并增量更新 source.md"""
+def _do_chapter_complete_wrapper(task_id, book_id, chapter_id, cfg_settings, text=None):
+    """包装器：调用新版 kb_pipeline.do_chapter_complete"""
     set_conn_meta('chapter-complete', '本章通读', book_id)
     log_action('CHAPTER_COMPLETE_START', f'book={book_id}, chapter={chapter_id}')
     try:
-        bg_task_update(task_id, progress=5)
-        cp = os.path.join(get_book_dir(book_id), 'chapters', f"{chapter_id}.json")
-        if not os.path.exists(cp):
-            log_action('CHAPTER_COMPLETE_ERROR', '章节不存在')
-            bg_task_done(task_id, '章节不存在')
-            return
-        with open(cp, 'r', encoding='utf-8') as f:
-            ch = json.load(f)
-        title = ch.get('title', '未命名章节')
-        # 优先使用前端传入的最新文本，否则读磁盘
-        if text is not None:
-            content = text
-        else:
-            content = ch.get('content', '')
-        if _is_content_empty(content):
-            log_action('CHAPTER_COMPLETE_SKIP', '章节无实质正文，跳过')
-            bg_task_done(task_id, '章节无实质正文，跳过')
-            return
         bg_task_update(task_id, progress=10)
-        log_action('CHAPTER_COMPLETE_INFO', f'title={title}, content_len={len(content)}, model={cfg_settings.get("model","")}, base={cfg_settings.get("base_url","")}')
-        # 构建前情索引
-        current_source = get_source(book_id) or ''
-        # 先把本章旧记录从 source 中剔除，避免 AI 被自己的旧摘要诱导
-        chapter_id_marker = f'<!-- id:{chapter_id} -->'
-        if chapter_id_marker in current_source:
-            idx = current_source.find(chapter_id_marker)
-            line_start = current_source.rfind('\n\n### ', 0, idx)
-            if line_start != -1:
-                next_idx = current_source.find('\n\n### ', idx)
-                if next_idx == -1:
-                    current_source = current_source[:line_start]
-                else:
-                    current_source = current_source[:line_start] + current_source[next_idx:]
-        chapter_header = f"\n\n### {title}\n"
-        if chapter_header in current_source:
-            idx = current_source.find(chapter_header)
-            next_idx = current_source.find('\n\n### ', idx + len(chapter_header))
-            if next_idx == -1:
-                current_source = current_source[:idx]
-            else:
-                current_source = current_source[:idx] + current_source[next_idx:]
-        prev_context = _extract_context_summary(current_source)
-        # 调用 AI 生成单章摘要
-        result, err = _ai_read_chapter(cfg_settings, title, content, prev_context, config=None, on_token=None, should_stop_fn=lambda: bg_task_should_stop(task_id))
-        log_action('CHAPTER_COMPLETE_AI_RESULT', f'err={err}, result_len={len(result) if result else 0}')
-        if err:
-            bg_task_done(task_id, err)
-            return
-        if not result or not result.strip():
-            bg_task_done(task_id, 'AI 无输出')
-            return
-        bg_task_update(task_id, progress=70)
-        save_chapter_summary(book_id, chapter_id, result)
-        ch['readthrough'] = result
-        ch['completed_at'] = time.time()
-        save_json(cp, ch)
-
-        source = get_source(book_id) or ''
-        if not source.strip():
-            source = '# 全书阅读笔记\n\n'
-        ctx_len = _get_effective_context_length(cfg_settings)
-        if ctx_len > 0 and len(source) > int(ctx_len * 0.45):
-            target = int(ctx_len * 0.35)
-            source = _ai_compress_source_for_context(source, target, cfg_settings, config=None)
-            save_source(book_id, source)
-            log_action('CHAPTER_COMPLETE_COMPRESS', f'compressed to {len(source)}')
-
-        chapter_id_marker = f'<!-- id:{chapter_id} -->'
-        if chapter_id_marker in source:
-            idx = source.find(chapter_id_marker)
-            line_start = source.rfind('\n\n### ', 0, idx)
-            if line_start != -1:
-                next_idx = source.find('\n\n### ', idx)
-                if next_idx == -1:
-                    source = source[:line_start]
-                else:
-                    source = source[:line_start] + source[next_idx:]
-        # 再尝试按标题移除旧记录（兼容旧格式）
-        chapter_header = f"\n\n### {title}\n"
-        if chapter_header in source:
-            idx = source.find(chapter_header)
-            next_idx = source.find('\n\n### ', idx + len(chapter_header))
-            if next_idx == -1:
-                source = source[:idx]
-            else:
-                source = source[:idx] + source[next_idx:]
-        # 追加新记录，带上 ID 注释方便以后按 ID 匹配
-        source += f"\n\n### {title} <!-- id:{chapter_id} -->\n{result}"
-        save_source(book_id, source)
-
-        bg_task_update(task_id, progress=85)
+        summary = kb_pipeline.do_chapter_complete(book_id, chapter_id, cfg_settings, text=text)
+        bg_task_update(task_id, progress=90, result=summary or '')
         try:
-            parsed = _parse_entities_from_notes(result)
-            _save_parsed_entities_to_files(book_id, parsed)
-            _rebuild_vector_index(book_id)
+            outline = get_outline(book_id)
+            ch = kb_storage.get_chapter(book_id, chapter_id)
+            ch = dict(ch) if ch else None
+            if ch and ch.get('summary'):
+                summaries = outline.get('chapter_summaries', {})
+                summaries[chapter_id] = ch['summary'][:500] + ('...' if len(ch['summary']) > 500 else '')
+                outline['chapter_summaries'] = summaries
+                outline['updated'] = time.time()
+                save_json(os.path.join(get_book_dir(book_id), 'outline.json'), outline)
         except Exception as ex:
-            log_action('CHAPTER_COMPLETE_KB_ERR', str(ex)[:100])
-
-        outline = get_outline(book_id)
-        summaries = outline.get('chapter_summaries', {})
-        summaries[chapter_id] = result[:500] + ('...' if len(result) > 500 else '')
-        outline['chapter_summaries'] = summaries
-        outline['updated'] = time.time()
-        save_json(os.path.join(get_book_dir(book_id), 'outline.json'), outline)
-        bg_task_update(task_id, result=result, progress=100)
+            log_action('CHAPTER_COMPLETE_OUTLINE_ERR', str(ex)[:100])
         bg_task_done(task_id)
         log_action('CHAPTER_COMPLETE_DONE', f'book={book_id}, chapter={chapter_id}')
     except Exception as e:
@@ -7198,316 +7090,9 @@ def _do_chapter_complete(task_id, book_id, chapter_id, cfg_settings, text=None):
 
 
 def do_readthrough(bid, settings, config=None, resume=False):
-    """后台线程：逐章通读，生成 source.md + 大纲"""
-    set_conn_meta('readthrough', '摘要', bid)
-    cfg = config or {}
-    try:
-        _rebuild_set(bid, status='running', progress=0, phase='准备中', total_chapters=0, done_chapters=0,
-                     stream_buffer='', stream_status='', source='', logs=[], stopped=False)
-        _rebuild_log(bid, '开始通读')
-        meta = get_book_meta(bid) or {}
-        order = meta.get('chapter_order', [])
-        ch_dir = os.path.join(get_book_dir(bid), 'chapters')
-        if not os.path.isdir(ch_dir) or not order:
-            _rebuild_set(bid, status='error', progress=100, error='没有章节')
-            return
-        total = len(order)
-        _rebuild_set(bid, total_chapters=total)
-        _rebuild_log(bid, f'全书 {total} 章')
-
-        cp_file = os.path.join(get_book_dir(bid), 'readthrough_checkpoint.json')
-        notes = []
-        done = set()
-        current_source = ''
-
-        if resume:
-            # 从 check point 恢复
-            cp = load_json(cp_file, dict)
-            notes = cp.get('notes', [])
-            done_list = cp.get('done', [])
-            if done_list:
-                # 续表时：重做最后一章（把最后一章从 done 和 notes 里移除，重新构建 source）
-                last_done = done_list[-1]
-                done_list = done_list[:-1]
-                if notes:
-                    notes = notes[:-1]
-                _rebuild_log(bid, f'将继续通读，从第 {len(done_list) + 1} 章开始重做')
-            done = set(done_list)
-            # 从 notes 重建 source.md，确保不含待重做的章节
-            current_source = '# 全书阅读笔记\n\n'
-            for note in notes:
-                current_source += '\n\n' + note
-            save_source(bid, current_source)
-        else:
-            current_source = '# 全书阅读笔记\n\n'
-
-        chapters = []
-        for i, cid in enumerate(order):
-            ch = _read_chapter_file(bid, cid)
-            if ch:
-                chapters.append({'idx': i, 'id': cid, 'title': ch.get('title', f'第{i+1}章'), 'content': ch.get('content', '')})
-
-        pending = [c for c in chapters if c['id'] not in done]
-        done_count = len(chapters) - len(pending)
-        _rebuild_set(bid, phase='逐章阅读', done_chapters=done_count,
-                     progress=5 + int(done_count / total * 70), source=current_source)
-
-        # 读取用户设置的上下文长度（优先手动填写，0 表示关闭批量）
-        context_window = _get_effective_context_length(settings)
-        use_batch = False
-        if isinstance(context_window, int) and context_window > 0:
-            use_batch = True
-            _rebuild_log(bid, f'使用批量模式，上下文限制: {context_window} tokens')
-        else:
-            _rebuild_log(bid, '未设置上下文长度，使用单章模式')
-
-        def mk_handler():
-            def h(tk):
-                with _rebuild_lock:
-                    t = _rebuild_tasks.get(bid, {})
-                    t['stream_buffer'] = t.get('stream_buffer', '') + tk
-            return h
-
-        max_batch_failures = 2
-        batch_failures = 0
-        i = 0
-        while i < len(pending):
-            if _rebuild_should_stop(bid):
-                _rebuild_log(bid, '用户停止，已保存进度')
-                _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
-                return
-
-            # 预检测：无实质正文的章节直接跳过，不调用 AI
-            ch = pending[i]
-            if _is_content_empty(ch['content']):
-                _rebuild_log(bid, f'跳过空章节: {ch["title"]}')
-                skip_result = f'## 剧情摘要\n[本章无实质正文，跳过]\n\n## 资料记录\n[无]\n'
-                notes.append(skip_result)
-                current_source += f'\n\n### {ch["title"]}\n{skip_result}'
-                done.add(ch['id'])
-                done_count += 1
-                save_source(bid, current_source)
-                pct = 5 + int(done_count / total * 70)
-                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source, readthrough_chapter_idx=ch['idx'])
-                save_json(cp_file, {'notes': notes, 'done': list(done), 'chapter_idx': ch['idx']})
-                i += 1
-                continue
-
-            if use_batch:
-                # 构建本批次：尽可能多地压入完整章节，不超过 70% 预算
-                budget = int(context_window * 0.7)
-                reserve = 3000  # 预留 prompt 模板 + 输出空间
-                max_content = max(budget - reserve, 0)
-
-                batch = []
-                batch_tokens = 0
-                while i < len(pending):
-                    ch = pending[i]
-                    ch_tokens = _estimate_tokens(ch['content'])
-                    if batch and batch_tokens + ch_tokens > max_content:
-                        # 已有至少一章，加入本章会超限，结束本批
-                        break
-                    # 即使单章超限，也至少压入一章（必须完整）
-                    batch.append(ch)
-                    batch_tokens += ch_tokens
-                    i += 1
-
-                if not batch:
-                    # 保险：至少一章
-                    ch = pending[i]
-                    batch = [ch]
-                    i += 1
-
-                _rebuild_log(bid, f'批量处理 {len(batch)} 章: ' + ', '.join(c['title'] for c in batch))
-                _rebuild_set(bid, stream_buffer='', stream_status=f'正在读: {batch[0]["title"]} 等 {len(batch)} 章')
-
-                ctx = _extract_context_summary(current_source)
-                max_retries = 3
-                attempt = 0
-                result = ''
-                err = None
-                while attempt < max_retries:
-                    if _rebuild_should_stop(bid):
-                        _rebuild_log(bid, '用户停止，已保存进度')
-                        _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
-                        return
-                    result, err = _ai_read_chapters_batch(settings, batch, ctx,
-                                                           config=cfg, on_token=mk_handler(),
-                                                           should_stop_fn=lambda: _rebuild_should_stop(bid))
-                    if not err and result and result.strip():
-                        break
-                    attempt += 1
-                    _rebuild_log(bid, f'批量第{attempt}次失败，重试中...')
-                    _rebuild_set(bid, stream_buffer='', stream_status=f'批量第{attempt}次重试')
-                    time.sleep(1)
-
-                parsed = None
-                if not err and result and result.strip():
-                    parsed = _parse_batch_result(result, batch)
-
-                if parsed and all(p.strip() for p in parsed):
-                    for ch, note in zip(batch, parsed):
-                        notes.append(note)
-                        current_source += f'\n\n### {ch["title"]}\n{note}'
-                        done.add(ch['id'])
-                        done_count += 1
-                        _rebuild_log(bid, f'完成 {ch["title"]} ({done_count}/{total})')
-                else:
-                    batch_failures += 1
-                    _rebuild_log(bid, f'批量解析失败（第{batch_failures}次），回退到单章处理')
-                    if batch_failures >= max_batch_failures:
-                        use_batch = False
-                        _rebuild_log(bid, '批量模式多次失败，后续使用单章模式')
-                    # fallback 单章
-                    for ch in batch:
-                        if _rebuild_should_stop(bid):
-                            _rebuild_log(bid, '用户停止，已保存进度')
-                            _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
-                            return
-                        ctx = _extract_context_summary(current_source)
-                        _rebuild_set(bid, stream_buffer='', stream_status=f'正在读: {ch["title"]}')
-                        max_retries = 3
-                        attempt = 0
-                        result = ''
-                        err = None
-                        while attempt < max_retries:
-                            if _rebuild_should_stop(bid):
-                                _rebuild_log(bid, '用户停止，已保存进度')
-                                _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
-                                return
-                            result, err = _ai_read_chapter(settings, ch['title'], ch['content'], ctx,
-                                                            config=cfg, on_token=mk_handler(),
-                                                            should_stop_fn=lambda: _rebuild_should_stop(bid))
-                            if not err and result and result.strip():
-                                break
-                            attempt += 1
-                            _rebuild_log(bid, f'{ch["title"]} 第{attempt}次失败，重试中...')
-                            _rebuild_set(bid, stream_buffer='', stream_status=f'{ch["title"]} 第{attempt}次重试')
-                            time.sleep(1)
-                        if err or not result or not result.strip():
-                            _rebuild_log(bid, f'失败: {ch["title"]} 重试{max_retries}次后仍无输出')
-                            result = f'## {ch["title"]}\n[AI转述失败：本章无输出]\n'
-                        notes.append(result)
-                        current_source += f'\n\n### {ch["title"]}\n{result}'
-                        save_source(bid, current_source)
-                        done.add(ch['id'])
-                        done_count += 1
-                        pct = 5 + int(done_count / total * 70)
-                        _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source, readthrough_chapter_idx=ch['idx'])
-                        save_json(cp_file, {'notes': notes, 'done': list(done), 'chapter_idx': ch['idx']})
-                        _rebuild_log(bid, f'完成 {ch["title"]} ({done_count}/{total})')
-
-                save_source(bid, current_source)
-                pct = 5 + int(done_count / total * 70)
-                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source, readthrough_chapter_idx=ch['idx'])
-                save_json(cp_file, {'notes': notes, 'done': list(done), 'chapter_idx': ch['idx']})
-
-                if _rebuild_should_stop(bid):
-                    _rebuild_log(bid, '用户停止，已保存进度')
-                    _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
-                    return
-            else:
-                # 单章模式
-                ch = pending[i]
-                i += 1
-                _rebuild_log(bid, f'[{done_count+1}/{total}] {ch["title"]}')
-                if _rebuild_should_stop(bid):
-                    _rebuild_log(bid, '用户停止，已保存进度')
-                    _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
-                    return
-
-                ctx = _extract_context_summary(current_source)
-                _rebuild_set(bid, stream_buffer='', stream_status=f'正在读: {ch["title"]}')
-
-                max_retries = 3
-                attempt = 0
-                result = ''
-                err = None
-                while attempt < max_retries:
-                    if _rebuild_should_stop(bid):
-                        _rebuild_log(bid, '用户停止，已保存进度')
-                        _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
-                        return
-                    result, err = _ai_read_chapter(settings, ch['title'], ch['content'], ctx,
-                                                    config=cfg, on_token=mk_handler(),
-                                                    should_stop_fn=lambda: _rebuild_should_stop(bid))
-                    if not err and result and result.strip():
-                        break
-                    attempt += 1
-                    _rebuild_log(bid, f'{ch["title"]} 第{attempt}次失败，重试中...')
-                    _rebuild_set(bid, stream_buffer='', stream_status=f'{ch["title"]} 第{attempt}次重试')
-                    time.sleep(1)
-                if err or not result or not result.strip():
-                    _rebuild_log(bid, f'失败: {ch["title"]} 重试{max_retries}次后仍无输出')
-                    result = f'## {ch["title"]}\n[AI转述失败：本章无输出]\n'
-
-                notes.append(result)
-                current_source += f'\n\n### {ch["title"]}\n{result}'
-                save_source(bid, current_source)
-
-                done.add(ch['id'])
-                done_count += 1
-                pct = 5 + int(done_count / total * 70)
-                _rebuild_set(bid, progress=pct, done_chapters=done_count, source=current_source, readthrough_chapter_idx=ch['idx'])
-                save_json(cp_file, {'notes': notes, 'done': list(done), 'chapter_idx': ch['idx']})
-                _rebuild_log(bid, f'完成 {ch["title"]} ({done_count}/{total})')
-
-                if _rebuild_should_stop(bid):
-                    _rebuild_log(bid, '用户停止，已保存进度')
-                    _rebuild_set(bid, status='stopped', progress=100, phase='已保存，可继续')
-                    return
-
-        if not notes:
-            _rebuild_set(bid, status='error', progress=100, error='所有章节失败')
-            return
-
-        _rebuild_set(bid, phase='完成', progress=95, stream_buffer='')
-        _rebuild_log(bid, '各章笔记已保存')
-
-        ctx_len = _get_effective_context_length(settings)
-        if len(current_source) > 500 and ctx_len > 0:
-            target = int(ctx_len * 0.5)
-            if len(current_source) > target:
-                _rebuild_log(bid, f'压缩 source.md: {len(current_source)} -> 目标 {target}')
-                current_source = _ai_compress_source_for_context(current_source, target, settings, config=config)
-                save_source(bid, current_source)
-                _rebuild_log(bid, f'压缩完成: {len(current_source)} 字符')
-
-        _rebuild_set(bid, phase='提取实体', progress=96)
-        _rebuild_log(bid, '正在从笔记中提取实体...')
-        all_notes = '\n\n'.join(notes)
-        parsed = _parse_entities_from_notes(all_notes)
-        saved_count = _save_parsed_entities_to_files(bid, parsed)
-        _rebuild_log(bid, f'已保存 {saved_count} 个实体段落到文件')
-        timeline_text = _extract_timeline_from_notes(all_notes)
-        if timeline_text.strip():
-            tl_path = os.path.join(_get_source_dir(bid), 'timeline.md')
-            _write_entity_file(tl_path, '# 时间线\n\n' + timeline_text)
-            _rebuild_log(bid, '时间线已保存')
-        fs_text = _extract_foreshadowing_from_notes(all_notes)
-        if fs_text.strip():
-            fs_path = os.path.join(_get_source_dir(bid), 'foreshadowing.md')
-            _write_entity_file(fs_path, '# 伏笔与线索\n\n' + fs_text)
-            _rebuild_log(bid, '伏笔追踪已保存')
-
-        _rebuild_set(bid, phase='构建索引', progress=98)
-        _rebuild_log(bid, '构建向量检索索引...')
-        _rebuild_vector_index(bid)
-        summary = _build_source_summary(bid)
-        save_source(bid, summary)
-
-        if os.path.exists(cp_file):
-            os.remove(cp_file)
-        _rebuild_log(bid, '通读完成')
-        _rebuild_set(bid, status='done', progress=100, phase='完成', readthrough_chapter_idx=-1)
-        meta = get_book_meta(bid) or {}
-        meta['readthrough_at'] = time.time()
-        save_json(os.path.join(get_book_dir(bid), 'meta.json'), meta)
-    except Exception as e:
-        import traceback
-        err = f'通读崩溃: {str(e)[:200]}'
-        _rebuild_log(bid, err)
-        _rebuild_set(bid, status='error', progress=100, error=err + '\n' + traceback.format_exc()[-300:])
+    """包装器：调用新版 kb_pipeline.do_readthrough（可能被旧代码引用）"""
+    threading.current_thread().name = f'kb_readthrough_{bid}'
+    kb_pipeline.do_readthrough(bid, settings, config=config, resume=resume)
 
 
 # 兼容别名：summary -> readthrough
@@ -7524,6 +7109,40 @@ def do_summary(bid, settings, config=None, resume=False):
     return do_readthrough(bid, settings, config, resume)
 
 
+def _migrate_old_books():
+    """扫描旧书，迁移到新版 KB 数据库"""
+    if not os.path.isdir(BOOKS_DIR):
+        return
+    for bid in os.listdir(BOOKS_DIR):
+        bd = os.path.join(BOOKS_DIR, bid)
+        if not os.path.isdir(bd) or bid.startswith('builtin_'):
+            continue
+        meta_path = os.path.join(bd, 'meta.json')
+        meta = load_json(meta_path, dict) or {}
+        if meta.get('kb_status') == 'ok':
+            continue
+        source_md = os.path.join(bd, 'source.md')
+        has_old_data = os.path.exists(source_md) and os.path.getsize(source_md) > 500
+        kb_db = os.path.join(bd, 'kb.db')
+        has_new_db = os.path.exists(kb_db)
+        if has_old_data and not has_new_db:
+            today = datetime.now().strftime('%Y%m%d')
+            if os.path.exists(source_md):
+                os.rename(source_md, os.path.join(bd, f'source_legacy_{today}.md'))
+            old_ent_dir = os.path.join(bd, 'source', 'entities')
+            if os.path.isdir(old_ent_dir):
+                os.rename(old_ent_dir, os.path.join(bd, 'source', f'entities_legacy_{today}'))
+            old_vec = os.path.join(bd, '.vector_db')
+            if os.path.isdir(old_vec):
+                shutil.rmtree(old_vec, ignore_errors=True)
+            cp = os.path.join(bd, 'readthrough_checkpoint.json')
+            if os.path.exists(cp):
+                try: os.remove(cp)
+                except: pass
+            meta['kb_status'] = 'needs_rebuild'
+            save_json(meta_path, meta)
+            log_action('MIGRATE_OLD_BOOK', f'{bid}: 旧数据备份完毕，标记 needs_rebuild')
+
 def run():
     bind_host = '127.0.0.1'
     try:
@@ -7533,6 +7152,7 @@ def run():
             bind_host = scope
     except Exception:
         pass
+    _migrate_old_books()
     server = ThreadingHTTPServer((bind_host, PORT), Handler)
     print(f'Server running on http://{bind_host}:{PORT}')
     server.serve_forever()

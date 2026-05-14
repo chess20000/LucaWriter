@@ -5,3 +5,5 @@ modelscope
 DrissionPage
 certifi
 cryptography
+chromadb
+numpy

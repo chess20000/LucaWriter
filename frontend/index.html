@@ -57,7 +57,7 @@
  --accent-a40:rgba(200,170,80,.45);--accent-a70:rgba(200,170,80,.75);
  --accent-a90:rgba(200,170,80,.9);
  --accent-dim:rgba(200,170,80,.1);
- --border:rgba(0,0,0,.08);--border2:rgba(0,0,0,.12);
+ --border:rgba(0,0,0,.15);--border2:rgba(0,0,0,.2);
  --scrollbar:rgba(0,0,0,.14);--scrollbar-hover:rgba(0,0,0,.22);
  --content-font-size:20px;
  --content-line-height:2.0;
@@ -160,7 +160,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .main-row{display:flex;flex:1;overflow:hidden;min-height:0;position:relative}
 
 .resize-handle{width:5px;flex-shrink:0;cursor:col-resize;position:relative;z-index:10;background:transparent;margin:0 -2px}
-.resize-handle::after{content:'';position:absolute;top:0;bottom:0;left:50%;transform:translateX(-50%);width:1px;background:transparent;transition:background .15s}
+.resize-handle::after{content:'';position:absolute;top:0;bottom:0;left:50%;transform:translateX(-50%);width:1px;background:var(--border);transition:background .15s}
 .resize-handle:hover::after,.resize-handle.dragging::after{background:var(--accent)}
 
 .left-stack{width:320px;flex-shrink:0;position:relative;overflow:hidden;height:100%;align-self:stretch}
@@ -459,6 +459,52 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .panel-right-body{flex:1;overflow-y:auto;background:var(--bg)}
 .rt-source{width:100%;height:100%;background:var(--surface);border:none;padding:16px;font-size:14px;line-height:var(--content-line-height);font-family:var(--font-mono);color:var(--t1);resize:none;outline:none;border-radius:8px;box-shadow:var(--panel-shadow)}
 .summary-pane{flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.summary-pane .panel-layout{background:var(--bg)}
+.summary-pane .panel-left{width:44%;min-width:260px;max-width:none;background:var(--bg);border-right:none}
+.summary-pane .panel-right{background:var(--bg)}
+.summary-pane .panel-left-body,.summary-pane .panel-right-body{overflow:hidden;background:var(--bg)}
+.summary-pane .panel-left-head,.summary-pane .panel-right-head{height:34px;color:var(--t2);font-size:11px;letter-spacing:0;background:var(--surface);border-bottom:1px solid var(--border2);justify-content:space-between}
+.rt-head-pill{font-size:10px;color:var(--t3);font-weight:600}
+.rt-console{height:100%;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;background:var(--bg);font-family:var(--font-sans);white-space:normal}
+.rt-dialogue{display:flex;gap:10px;align-items:flex-start;padding-bottom:4px;flex-shrink:0}
+.rt-avatar{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 auto;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:750}
+.rt-message{min-width:0;flex:1}
+.rt-message-name{font-size:11px;font-weight:750;color:var(--t2);margin-bottom:3px}
+.rt-turn-body{font-size:13px;line-height:1.65;color:var(--t1);word-break:break-word;white-space:pre-wrap}
+.rt-thinking{display:none;align-items:center;gap:8px;margin-top:8px;height:8px;color:var(--t3);overflow:visible}
+.rt-thinking.active{display:flex}
+.rt-thinking span{width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:9px 0 0 var(--accent-a40),18px 0 0 var(--accent-a20);animation:rt-pulse 1.2s infinite ease-in-out;flex:0 0 auto}
+@keyframes rt-pulse{0%,80%,100%{opacity:.35;transform:translateY(0)}40%{opacity:1;transform:translateY(-2px)}}
+.rt-action-line{font-size:12px;line-height:1.4;color:var(--t2);padding:8px 0;border-top:1px solid var(--border2);border-bottom:1px solid var(--border2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
+.rt-log-list{display:flex;flex-direction:column;gap:0;margin:0;padding:0}
+.rt-log-line{font-size:12px;line-height:1.45;color:var(--t2);padding:6px 0;border-bottom:1px solid var(--border2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt-log-line .time{color:var(--t3);font-family:var(--font-mono);font-size:10px;margin-right:8px}
+.rt-db{height:100%;display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--bg);overflow:hidden}
+.rt-stats{display:flex;flex-wrap:wrap;gap:4px 11px;padding:6px 0;background:transparent;border:none;border-bottom:1px solid var(--border2);border-radius:0;flex-shrink:0}
+.rt-stat{display:inline-flex;align-items:baseline;gap:4px;min-width:0}
+.rt-stat-value{font-size:12px;font-weight:750;color:var(--t1);line-height:1.2}
+.rt-stat-label{font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rt-db-section{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r1);overflow:hidden;box-shadow:none;flex-shrink:0}
+.rt-db-section.notes{flex:1;min-height:110px;display:flex;flex-direction:column}
+.rt-db-section-head{height:24px;padding:0 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--t2)}
+.rt-db-section-body{padding:7px 10px;font-size:12px;line-height:1.5;color:var(--t2)}
+.rt-db-section.notes .rt-db-section-body{flex:1;min-height:0;padding:0}
+.rt-current-title{font-size:13px;font-weight:700;color:var(--t1)}
+.rt-current-meta{color:var(--t3)}
+.rt-source{height:100%;min-height:0;background:var(--surface2);border:none;border-radius:0;box-shadow:none;font-size:12px;line-height:1.65;padding:10px 12px;overflow:auto}
+.rt-bar{position:relative;height:5px;background:var(--surface3);border-radius:var(--r1);overflow:hidden}
+.rt-buffer,.rt-fill{position:absolute;top:0;left:0;height:100%;width:0%;transition:width .3s ease}
+.rt-buffer{background:var(--border2)}
+.rt-fill{background:var(--accent);z-index:1}
+.rt-controls .ai-send:disabled{opacity:.55;cursor:wait}
+@media (max-width:760px){
+ .summary-pane .panel-left{width:48%;min-width:220px}
+ .rt-console,.rt-db{padding:8px}
+ .rt-stats{gap:4px 9px;padding:7px 8px}
+ .rt-db-section.notes{min-height:96px}
+ .rt-stat-value,.rt-db-section-body,.rt-source{font-size:11px}
+ .rt-stat-label,.rt-db-section-head,.rt-message-name{font-size:10px}
+}
 .timeline-pane,.prediction-pane,.outline-pane{flex-direction:column;flex:1;min-height:0;overflow:hidden}
 
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px) saturate(160%);-webkit-backdrop-filter:blur(6px) saturate(160%);z-index:100;justify-content:center;align-items:center}
@@ -852,16 +898,38 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="bottom-pane active summary-pane" id="summaryPane">
  <div class="panel-layout">
  <div class="panel-left">
-              <div class="panel-left-head">AI 实时输出</div>
+              <div class="panel-left-head"><span>通读运行</span><span class="rt-head-pill">批量快读</span></div>
  <div class="panel-left-body" style="padding:0">
-                <pre id="rtStream" style="margin:0;padding:10px 14px;font-size:11px;line-height:1.7;font-family:var(--font-mono);color:var(--t2);white-space:pre-wrap;word-break:break-word">等待开始...</pre>
- <div id="rtLogs" style="display:none;font-size:11px;line-height:1.6;font-family:var(--font-mono);color:var(--t2);white-space:pre-wrap;word-break:break-word;padding:10px 14px"></div>
+                <div class="rt-console" id="rtConsole">
+                 <div class="rt-dialogue">
+                  <div class="rt-avatar">L</div>
+                  <div class="rt-message">
+                   <div class="rt-message-name">Luca</div>
+                   <div class="rt-turn-body" id="rtStream">等待开始...</div>
+                   <div class="rt-thinking" id="rtThinking"><span></span></div>
+                  </div>
+                 </div>
+                 <div class="rt-action-line" id="rtSystemLine">等待通读任务</div>
+                 <div class="rt-log-list" id="rtLogs"></div>
+                </div>
  </div>
  </div>
  <div class="panel-right">
-              <div class="panel-right-head">阅读笔记 (source.md)</div>
+              <div class="panel-right-head"><span>本书数据库</span><span class="rt-head-pill">聊天检索用</span></div>
  <div class="panel-right-body">
- <textarea class="rt-source" id="rtSource" readonly placeholder="摘要完成后此处显示笔记..." style="flex:1;width:100%;resize:none;border:none;background:transparent;height:100%"></textarea>
+                <div class="rt-db">
+                 <div class="rt-stats" id="rtStats"></div>
+                 <div class="rt-db-section">
+                  <div class="rt-db-section-head"><span>当前状态</span><span id="rtCurrentBadge"></span></div>
+                  <div class="rt-db-section-body" id="rtCurrentInfo">等待通读任务</div>
+                 </div>
+                 <div class="rt-db-section notes">
+                  <div class="rt-db-section-head"><span>笔记预览</span><span id="rtLatestBadge"></span></div>
+                  <div class="rt-db-section-body" style="padding:0">
+                   <textarea class="rt-source" id="rtSource" readonly placeholder="摘要完成后此处显示笔记..." style="width:100%;resize:none;border:none"></textarea>
+                  </div>
+                 </div>
+                </div>
  </div>
  </div>
  </div>
@@ -873,11 +941,11 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
  <div class="rt-controls" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
  <div class="rt-progress-wrap" style="flex:1;display:flex;flex-direction:column;gap:4px">
- <div class="rt-bar" style="height:4px;background:var(--surface3);border-radius:var(--r1);overflow:hidden"><div class="rt-fill" id="rtProgress" style="height:100%;background:var(--accent);width:0%;transition:width .3s"></div></div>
+ <div class="rt-bar"><div class="rt-buffer" id="rtBuffer"></div><div class="rt-fill" id="rtProgress"></div></div>
  <div class="rt-info" style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3)"><span id="rtPhase">准备中...</span><span id="rtChapters">0/0 章</span></div>
  </div>
-            <button class="ai-send" onclick="startRT()" id="rtStartBtn">开始摘要</button>
-            <button class="ai-send" onclick="clearRT()" id="rtClearBtn" style="display:none;background:var(--danger);color:#fff;border:none">清空进度</button>
+            <button class="ai-send" onclick="startRT()" id="rtStartBtn">开始通读</button>
+            <button class="ai-send" onclick="resetRT()" id="rtClearBtn" style="display:none">重通读</button>
  </div>
  </div>
 
@@ -1280,7 +1348,7 @@ function stopAllTasks(){
   // 直接取消后台所有对AI提供商的活跃连接
  api('POST','/api/stop-all-ai',{},function(d){});
   // 停止摘要
- if(_rtTaskId){stopRT();}
+ if(bookId)api('POST','/api/book/'+bookId+'/readthrough/pause',{},function(){});
   // 把本地 pending 的聊天消息标记为已停止
  var last=aiMessages[aiMessages.length-1];
  if(last&&last.type==='ai'&&last._pending){
@@ -1518,9 +1586,9 @@ function openBook(id){
  // Reset summary panel for new book
   $('rtStream').textContent='等待开始...';
  $('rtSource').value='';
-  $('rtProgress').style.width='0%';$('rtPhase').textContent='准备中...';
+  $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='准备中...';
   $('rtChapters').textContent='0/0 章';
- _setRTButton('idle', -1);
+  _setRTButtonUI('idle', -1);
  rtLastDoneChapters=0;
  rtLastChapterIdx=-1;
  updateBreadcrumb();
@@ -1857,7 +1925,7 @@ function saveAIMessages(){if(!bookId)return;api('POST','/api/book/'+bookId+'/mes
 
 function renderAIMessages(){
   var c=$('aiMessages');c.innerHTML='';
-   if(!aiMessages.length){c.innerHTML='<div class="ai-msg ai-msg-ai" style="text-align:center;font-size:10px;background:transparent;border:none;padding:10px;color:var(--t3)">Luca 会随着你写作，为你提供建议</div>';return}
+    if(!aiMessages.length){c.innerHTML='<div style="width:100%;text-align:center;font-size:10px;color:var(--t3);padding:40px 0">Luca 会随着你写作，为你提供建议</div>';return}
   aiMessages.forEach(function(m,idx){
  var d=document.createElement('div');d.className='ai-msg ai-msg-'+m.type;d.dataset.idx=idx;
    if(m.type==='ai'){
@@ -2873,6 +2941,7 @@ function switchBottomTab(tab){
  $('summaryPane').classList.toggle('active',tab==='summary');
  if(!bottomPanelOpen){openBottomPanel()}
  if(tab==='outline'){loadOutlineSource()}
+ if(tab==='summary'){pollRTStatus()}
 }
 
 function clearAIChat(){aiMessages=[];renderAIMessages();saveAIMessages()}
@@ -3820,153 +3889,275 @@ function loadSourceToRT(){
  }
  });
 }
- function startRT(){
- if(!bookId){toast('请先打开一本书','warn');return}
- if(rtLastStatus==='running'){
-  stopRT();
-  return;
+var rtLastChapterIdx=-1;
+var rtLastNotifiedStatus='';
+function _rtChapterTitle(d){
+ var ov=d&&d.kb_overview||{};
+ if(ov.current_chapter&&ov.current_chapter.title)return ov.current_chapter.title;
+ var ph=(d&&d.phase)||'';
+ ph=ph.replace(/^读:\s*/,'').replace(/^跳过:\s*/,'').replace(/^正在读:\s*/,'');
+ if(ph&&ph!==d.status&&ph!=='启动中'&&ph!=='已暂停'&&ph!=='已重置'&&ph!=='完成')return ph;
+ var notes=ov.latest_notes||[];
+ if(notes.length)return notes[0].title||'当前章节';
+ return '当前章节';
+}
+function _rtStatusText(d,st,title,done,total){
+ var sb=((d&&d.stream_buffer)||'').trim();
+ if(sb && sb.length<220 && !/^[\[\{]/.test(sb))return sb;
+ if(st==='starting')return '正在启动通读任务，我会按上下文长度自动合并章节。';
+ if(st==='resuming')return '正在继续通读，马上从断点接上。';
+ if(st==='pausing')return '暂停请求已发送，正在让当前模型请求收尾。';
+ if(st==='resetting')return '正在清空通读笔记和索引。';
+ if(st==='running')return '我正在读《'+title+'》的内容……';
+ if(st==='paused')return '我停在《'+title+'》，继续后会从这里接着读。';
+ if(st==='done')return '我已经读完全书，笔记已写入本书数据库。';
+ if(st==='error')return '我遇到了错误，修正后可以从断点继续。';
+ if(done>0)return '已读到 '+done+'/'+total+'，等待继续。';
+ return '等待开始通读。';
+}
+function _renderRTConsole(d,st,ci,done,total){
+ var title=_rtChapterTitle(d);
+ var model=$('rtStream'),sys=$('rtSystemLine'),logs=$('rtLogs'),thinking=$('rtThinking');
+ if(model)model.textContent=_rtStatusText(d,st,title,done,total);
+ if(thinking)thinking.classList.toggle('active',st==='running'||st==='starting'||st==='resuming'||st==='pausing'||st==='resetting');
+ var chapterNo=ci>=0?ci+1:Math.max(done,0);
+ var sysLine='等待通读任务';
+ if(st==='starting')sysLine='启动请求已发送';
+ else if(st==='resuming')sysLine='继续请求已发送';
+ else if(st==='pausing')sysLine='暂停请求已发送';
+ else if(st==='resetting')sysLine='清空请求已发送';
+ else if(st==='running')sysLine='阅读第 '+chapterNo+' 章 · '+title;
+ else if(st==='paused')sysLine='已暂停在第 '+chapterNo+' 章 · 已保存进度';
+ else if(st==='done')sysLine='全书通读完成 · '+done+'/'+total;
+ else if(st==='error')sysLine='通读出错 · 可继续重试';
+ else if(done>0)sysLine='已读取 '+done+'/'+total+' · 等待继续';
+ if(sys)sys.textContent=sysLine;
+ if(logs){
+  logs.style.display='';
+  var recent=(d.recent_logs||[]).slice(-18);
+  logs.innerHTML=recent.map(function(l){
+   return '<div class="rt-log-line"><span class="time">'+esc(l.time||'')+'</span>'+esc(l.msg||'')+'</div>';
+  }).join('');
  }
- $('rtStream').textContent='';$('rtLogs').textContent='';$('rtLogs').style.display='none';
- _setRTButton('running');
- api('POST','/api/book/'+bookId+'/readthrough/start',{},function(d,s){
-    if(s!==200){
-     toast(d.error||'启动失败','error');
-     pollRTStatus();
-     return;
-    }
-    pollRTStatus();
- });
+ var con=$('rtConsole');if(con)con.scrollTop=con.scrollHeight;
 }
-function startRTContinue(){
- if(!bookId){toast('请先打开一本书','warn');return}
- if(rtLastStatus==='running'){
-  stopRT();
-  return;
+function _renderRTOverview(d,st,ci,done,total){
+ var ov=d&&d.kb_overview||{};
+ var stats=[
+  ['已读', done+'/'+total],
+  ['实体', ov.entities||0],
+  ['事实', ov.mentions||0],
+  ['事件', ov.events||0],
+  ['伏笔', ov.foreshadowing_open||0],
+  ['规则', ov.rules||0],
+  ['向量', ov.embedding_chunks||0],
+  ['失败', ov.failed_chapters||0]
+ ];
+ var statEl=$('rtStats');
+ if(statEl){
+  statEl.innerHTML=stats.map(function(x){
+   return '<div class="rt-stat"><div class="rt-stat-value">'+esc(String(x[1]))+'</div><div class="rt-stat-label">'+esc(x[0])+'</div></div>';
+  }).join('');
  }
- $('rtStream').textContent='';$('rtLogs').textContent='';$('rtLogs').style.display='none';
- _setRTButton('running');
- api('POST','/api/book/'+bookId+'/readthrough/continue',{},function(d,s){
-    if(s!==200){
-     toast(d.error||'继续失败','error');
-     pollRTStatus();
-     return;
-    }
-    pollRTStatus();
- });
+ var cur=ov.current_chapter||null;
+ var title=cur&&cur.title?_rtChapterTitle(d):_rtChapterTitle(d);
+ var badge=$('rtCurrentBadge');
+ if(badge)badge.textContent=st==='idle'?'待开始':(st||'');
+ var curEl=$('rtCurrentInfo');
+ if(curEl){
+  var summary=cur&&cur.summary?cur.summary:'';
+  var chapterLabel=ci>=0?('第 '+(ci+1)+' 章'):(done>0?('已读 '+done+' 章'):'未开始');
+  var displayTitle=(ci>=0||summary)?title:'等待通读任务';
+  curEl.innerHTML='<div><span class="rt-current-title">'+esc(displayTitle)+'</span>'
+   +'<span class="rt-current-meta"> · '+chapterLabel+' · '+esc(d.phase||st||'')+'</span></div>'
+   +(summary?'<div style="margin-top:8px">'+esc(summary.slice(0,260))+(summary.length>260?'...':'')+'</div>':'');
+ }
+ var latest=ov.latest_notes||[];
+ var latestBadge=$('rtLatestBadge');
+ if(latestBadge)latestBadge.textContent=latest.length?latest.length+' 条':'';
+ var sourceEl=$('rtSource');
+ if(sourceEl && latest.length){
+  sourceEl.value=latest.map(function(n){
+   var idx=(n.idx!==undefined&&n.idx!==null)?('第 '+(n.idx+1)+' 章'):'章节';
+   return idx+' · '+(n.title||'')+'\n'+(n.summary||'');
+  }).join('\n\n---\n\n');
+ }
 }
-function stopRT(){
- api('POST','/api/book/'+bookId+'/readthrough/stop',{},function(d){
-  toast('正在停止...','warn');
- });
-}
-function _setRTButton(status, chapterIdx){
- var b=$('rtStartBtn'),c=$('rtClearBtn');
- if(status==='running'){
-  b.textContent='停止';
-  b.style.background='var(--danger)';b.style.color='#fff';b.style.border='none';
-  c.style.display='none';
+function startRT(){
+ if(!bookId){toast('请先打开一本书','warn');return}
+ var st=rtLastStatus;
+ if(st==='paused'||st==='error'||(st==='idle'&&rtLastChapterIdx>=0)){
+  // resume
+  rtLastStatus='resuming';
+  $('rtStream').textContent='正在继续通读...';$('rtSystemLine').textContent='继续请求已发送';$('rtLogs').textContent='';
+  if($('rtThinking'))$('rtThinking').classList.add('active');
+  _setRTButtonUI('resuming',rtLastChapterIdx,rtLastDoneChapters);
+  api('POST','/api/book/'+bookId+'/readthrough/resume',{},function(d,s){
+   if(s!==200){toast(d.error||'继续失败','error');_setRTButtonUI(rtLastStatus,rtLastChapterIdx,rtLastDoneChapters);pollRTStatus();return}
+   pollRTStatus();
+  });
+ }else if(st==='running'){
+  // pause
+  rtLastStatus='pausing';
+  $('rtStream').textContent='暂停请求已发送，正在让当前模型请求收尾。';$('rtSystemLine').textContent='暂停请求已发送';
+  if($('rtThinking'))$('rtThinking').classList.add('active');
+  _setRTButtonUI('pausing',rtLastChapterIdx,rtLastDoneChapters);
+  if(rtPollTimer===null)pollRTStatus();
+  api('POST','/api/book/'+bookId+'/readthrough/pause',{},function(d,s){
+   if(s!==200){toast(d.error||'暂停失败','error');pollRTStatus();return}
+   toast('暂停请求已发送','warn');
+  });
  }else{
-  b.style.background='';b.style.color='';b.style.border='';
-  if(chapterIdx===undefined||chapterIdx===null) chapterIdx=-1;
-  if(chapterIdx===-1){
-   // 已完成摘要：显示重新开始
-   b.textContent='重新开始';
-   b.onclick=function(){startRT();};
-   c.style.display='none';
-  }else if(chapterIdx>=0){
-   // 有进度：继续+清空进度
-   b.textContent='继续摘要';
-   b.onclick=function(){startRTContinue();};
-   c.style.display='';
-  }else{
-   // 无进度无 source
-   b.textContent='开始摘要';
-   b.onclick=function(){startRT();};
-   c.style.display='none';
-  }
+  // start fresh
+  rtLastStatus='starting';
+  rtLastNotifiedStatus='';
+  $('rtStream').textContent='正在启动通读...';$('rtSystemLine').textContent='启动请求已发送';$('rtLogs').textContent='';
+  if($('rtThinking'))$('rtThinking').classList.add('active');
+  _setRTButtonUI('starting',-1,0);
+  api('POST','/api/book/'+bookId+'/readthrough/start',{},function(d,s){
+   if(s!==200){toast(d.error||'启动失败','error');pollRTStatus();return}
+   pollRTStatus();
+  });
  }
 }
-function clearRT(){
-  if(!bookId)return;
-  if(!confirm('确定清空所有摘要笔记并重新开始？'))return;
- api('POST','/api/book/'+bookId+'/readthrough/clear',{},function(d,s){
+function resetRT(){
+ if(!bookId)return;
+ if(!confirm('确定清空所有摘要笔记并重新开始？'))return;
+ clearInterval(rtPollTimer);rtPollTimer=null;
+ rtLastStatus='resetting';
+ rtLastDoneChapters=0;
+ rtLastChapterIdx=-1;
+ rtLastNotifiedStatus='';
+ $('rtStream').textContent='正在清空通读笔记和索引。';
+ $('rtSystemLine').textContent='清空请求已发送';
+ if($('rtThinking'))$('rtThinking').classList.add('active');
+ $('rtLogs').textContent='';
+ $('rtSource').value='';
+ $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='清空中...';
+ $('rtChapters').textContent='0/0 章';
+ _setRTButtonUI('resetting',-1,0,0);
+ api('POST','/api/book/'+bookId+'/readthrough/reset',{},function(d,s){
  if(s===200){
- $('rtStream').textContent='...';
+ $('rtStream').textContent='通读笔记已清空，可以重新开始。';
+ $('rtSystemLine').textContent='已清空';
+ if($('rtThinking'))$('rtThinking').classList.remove('active');
  $('rtSource').value='';
  loadSourceToRT();
- $('rtProgress').style.width='0%';$('rtPhase').textContent='...';
+ $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='准备中...';
  $('rtChapters').textContent='0/0 章';
- _setRTButton('idle', -1);
-  toast('摘要笔记已清空','success');
+ _setRTButtonUI('idle',-1);
+ toast('摘要笔记已清空','success');
  rtLastStatus='idle';
  rtLastDoneChapters=0;
  rtLastChapterIdx=-1;
-    }else toast(d.error||'清空失败','error');
+ }else{toast(d.error||'重置失败','error');pollRTStatus();}
  });
 }
-var rtLastChapterIdx=-1;
+function _setRTButtonUI(status, currentIdx, doneCount, totalCount){
+ var b=$('rtStartBtn'),c=$('rtClearBtn');
+ var total=totalCount;
+ if(total===undefined||total===null){
+  total=$('rtChapters').textContent.split('/')[1]||'0';
+  total=parseInt(total);
+ }
+ var done=doneCount;
+ if(done===undefined||done===null)done=Math.max(0,(currentIdx||0));
+ b.disabled=false;c.disabled=false;
+ b.onclick=function(){startRT()};
+ b.style.background='';b.style.color='';b.style.border='';
+ c.style.display='inline-block';
+ c.textContent='重通读';
+ c.onclick=function(){resetRT()};
+ c.style.background='';c.style.color='';c.style.border='';
+ if(status==='starting'){
+  b.textContent='启动中...';
+  b.disabled=true;
+  c.style.display='none';
+ }else if(status==='resuming'){
+  b.textContent='继续中...';
+  b.disabled=true;
+  c.style.display='none';
+ }else if(status==='pausing'){
+  b.textContent='暂停中...';
+  b.disabled=true;
+  c.style.display='none';
+ }else if(status==='resetting'){
+  b.textContent='清空中...';
+  b.disabled=true;c.disabled=true;
+  c.style.display='none';
+ }else if(status==='running'){
+  b.textContent='暂停';
+  b.style.background='var(--danger)';b.style.color='#fff';b.style.border='none';
+  c.style.display='none';
+ }else if(status==='paused'||(status==='idle' && currentIdx>=0)){
+  b.textContent='继续 ('+Math.min(done,total)+'/'+total+')';
+  b.onclick=function(){startRT()};
+ }else if(status==='done'){
+  b.textContent='重通读';
+  b.onclick=function(){resetRT()};
+  c.style.display='none';
+ }else if(status==='error'){
+  b.textContent='继续';
+  b.onclick=function(){startRT()};
+ }else{
+  b.textContent='开始通读';
+  b.onclick=function(){startRT()};
+  c.style.display='none';
+ }
+}
 function pollRTStatus(){
  clearInterval(rtPollTimer);
  rtPollTimer=setInterval(function(){api('GET','/api/book/'+bookId+'/readthrough/status',undefined,updateRTUI);},400);
  api('GET','/api/book/'+bookId+'/readthrough/status',undefined,updateRTUI);
 }
+function _setRTProgressBars(d,st,done,total){
+ var donePct=0,bufferPct=0,buffered=done;
+ var start=d.active_start_idx,end=d.active_end_idx;
+ if(start===undefined||start===null)start=-1;
+ if(end===undefined||end===null)end=-1;
+ if(st==='done'||(done>=total&&total>0)){
+  donePct=100;bufferPct=100;buffered=total;
+ }else if(total>0){
+  donePct=Math.round(done/total*100);
+  if(end>=0)buffered=Math.max(done,Math.min(total,end+1));
+  bufferPct=Math.round(buffered/total*100);
+  if(bufferPct<donePct)bufferPct=donePct;
+ }
+ $('rtProgress').style.width=donePct+'%';
+ if($('rtBuffer'))$('rtBuffer').style.width=bufferPct+'%';
+ return buffered;
+}
 function updateRTUI(d,s){
  if(s!==200)return;
  var st=d.status||'idle';
- rtLastStatus=st;
- var doneCh=d.done_chapters||0;
- var totalCh=d.total_chapters||0;
- var chapterIdx=d.readthrough_chapter_idx;
- if(chapterIdx===undefined||chapterIdx===null) chapterIdx=-1;
- rtLastChapterIdx=chapterIdx;
- // 进度条：运行中用后端给的进度，空闲时用 chapter_idx 计算
- if(st==='running'){
-  $('rtProgress').style.width=(d.progress||0)+'%';
- }else if(chapterIdx>=0 && totalCh>0){
-  $('rtProgress').style.width=Math.round((chapterIdx+1)/totalCh*100)+'%';
- }else if(chapterIdx===-1 && totalCh>0){
-  $('rtProgress').style.width='100%';
- }else{
-  $('rtProgress').style.width='0%';
+ var effectiveStatus=st;
+ if(st==='running' && (rtLastStatus==='pausing'||String(d.phase||'').indexOf('暂停')>=0))effectiveStatus='pausing';
+ rtLastStatus=effectiveStatus;
+ var ci=d.current_idx;
+ if(ci===undefined||ci===null) ci=-1;
+ rtLastChapterIdx=ci;
+ var total=d.total||0;
+ var done=d.done_count;
+ if(done===undefined||done===null){
+  done=(st==='done'&&total>0)?total:Math.max(0,ci);
  }
+ var buffered=_setRTProgressBars(d,st,done,total);
  $('rtPhase').textContent=d.phase||st;
-  $('rtChapters').textContent=doneCh+'/'+totalCh+' 章';
- if(d.stream_buffer!==undefined){
- var sc=$('rtStream');sc.textContent=d.stream_buffer||'';sc.parentElement.scrollTop=sc.parentElement.scrollHeight;
- }
- if(d.logs && d.logs.length){
- $('rtLogs').textContent=d.logs.join('\n');
- var lw=$('rtLogs');lw.parentElement.scrollTop=lw.parentElement.scrollHeight;
+ if(buffered>done&&total>0)$('rtChapters').textContent=done+'/'+total+' 章 · 已送入 '+buffered;
+ else $('rtChapters').textContent=done+'/'+total+' 章';
+ _renderRTConsole(d,effectiveStatus,ci,done,total);
+ _renderRTOverview(d,effectiveStatus,ci,done,total);
+ if(done!==rtLastDoneChapters){
+  rtLastDoneChapters=done;
  }
  if(st==='running'){
-  _setRTButton('running');
- if(doneCh>rtLastDoneChapters){
- rtLastDoneChapters=doneCh;
- loadSourceToRT();
- }
- }else if(st==='done'){
- clearInterval(rtPollTimer);rtPollTimer=null;
- _setRTButton('idle', chapterIdx);
- $('rtPhase').textContent='完成';toast('摘要完成！','success');
- rtLastDoneChapters=doneCh;
- loadSourceToRT();
- }else if(st==='idle'){
- clearInterval(rtPollTimer);rtPollTimer=null;
- _setRTButton('idle', chapterIdx);
- rtLastDoneChapters=doneCh;
- loadSourceToRT();
- }else if(st==='stopped'){
- clearInterval(rtPollTimer);rtPollTimer=null;
- _setRTButton('idle', chapterIdx);
- rtLastDoneChapters=doneCh;
- loadSourceToRT();
- toast('摘要已保存进度','warn');
- }else if(st==='error'){
- clearInterval(rtPollTimer);rtPollTimer=null;
- _setRTButton('idle', chapterIdx);
- toast(d.error||'摘要失败','error');
- rtLastDoneChapters=doneCh;
- loadSourceToRT();
+  _setRTButtonUI(effectiveStatus,ci,done,total);
+ }else{
+  clearInterval(rtPollTimer);rtPollTimer=null;
+  _setRTButtonUI(st,ci,done,total);
+  if(st==='done'&&rtLastNotifiedStatus!=='done'){toast('通读完成！','success');rtLastNotifiedStatus='done'}
+  else if(st==='paused'&&rtLastNotifiedStatus!=='paused'){toast('已暂停','warn');rtLastNotifiedStatus='paused'}
+  else if(st==='error'&&rtLastNotifiedStatus!=='error'){toast(d.error||'通读失败','error');rtLastNotifiedStatus='error'}
  }
 }
 
