@@ -1943,6 +1943,45 @@ class Handler(BaseHTTPRequestHandler):
             o['memory'] = get_core_memory(bid)
             self.json_resp(200, o); return
 
+        if path.startswith('/api/book/') and path.endswith('/chapter-kb'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            cid = qs.get('chapter_id', [''])[0]
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            if not is_valid_id(cid):
+                self.json_resp(400, {'error': '缺少章节'}); return
+            try:
+                kb_storage.init_db(bid)
+                self.json_resp(200, kb_pipeline.chapter_outline(bid, cid)); return
+            except Exception as e:
+                self.json_resp(500, {'error': str(e)[:200]}); return
+
+        if path.startswith('/api/book/') and path.endswith('/timeline-map'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            cid = qs.get('chapter_id', [''])[0]
+            zoom = qs.get('zoom', ['1'])[0]
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            if cid and not is_valid_id(cid):
+                self.json_resp(400, {'error': '章节无效'}); return
+            try:
+                kb_storage.init_db(bid)
+                self.json_resp(200, kb_pipeline.timeline_map(bid, focus_chapter_id=cid or None, zoom=zoom)); return
+            except Exception as e:
+                self.json_resp(500, {'error': str(e)[:200]}); return
+
+        if path.startswith('/api/book/') and path.endswith('/prediction-current'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            text = get_prediction_md(bid)
+            p = os.path.join(get_book_dir(bid), 'prediction.md')
+            updated = os.path.getmtime(p) if os.path.isfile(p) else 0
+            self.json_resp(200, {'text': text, 'exists': bool(text), 'updated': updated}); return
+
         if path.startswith('/api/book/') and path.endswith('/trash'):
             parts = path.split('/')
             bid = parts[3] if len(parts) > 3 else ''
@@ -2664,6 +2703,57 @@ class Handler(BaseHTTPRequestHandler):
             os.makedirs(ch_dir, exist_ok=True)
             os.makedirs(trash_dir, exist_ok=True)
 
+            if action == 'consistency-check':
+                cid = data.get('chapter_id') or data.get('id') or ''
+                if not is_valid_id(cid):
+                    self.json_resp(400, {'error': '缺少章节'}); return
+                settings = get_settings()
+                try:
+                    result = kb_pipeline.consistency_check(bid, cid, data.get('text', ''), settings)
+                    self.json_resp(200, result); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)[:200], 'alerts': []}); return
+
+            if action == 'consistency-alert':
+                aid = data.get('alert_id', '')
+                status = data.get('status', 'dismissed')
+                if not aid:
+                    self.json_resp(400, {'error': '缺少提醒ID'}); return
+                if status not in ('dismissed', 'confirmed', 'open'):
+                    status = 'dismissed'
+                try:
+                    kb_storage.update_consistency_alert_status(bid, aid, status)
+                    self.json_resp(200, {'ok': True}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)[:200]}); return
+
+            if action == 'kb-reread':
+                chapter_ids = data.get('chapter_ids') or []
+                if isinstance(chapter_ids, str):
+                    chapter_ids = [chapter_ids]
+                if data.get('chapter_id'):
+                    chapter_ids.append(data.get('chapter_id'))
+                chapter_ids = [c for c in chapter_ids if is_valid_id(c)]
+                correction = data.get('correction', '')
+                focus_texts = data.get('focus_texts') or []
+                if isinstance(focus_texts, str):
+                    focus_texts = [focus_texts]
+                if data.get('focus_text'):
+                    focus_texts.append(data.get('focus_text'))
+                if not chapter_ids or not correction:
+                    self.json_resp(400, {'error': 'chapter_ids/correction 必填'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                existing_rr = bg_task_get_by_book_type(bid, 'kb-reread')
+                if existing_rr and existing_rr.get('status') == 'running':
+                    self.json_resp(400, {'error': '已有局部重读任务在进行中'}); return
+                tid = bg_task_start('kb-reread', bid, '局部重读')
+                threading.Thread(target=_do_kb_reread_task,
+                                 args=(tid, bid, chapter_ids, correction, focus_texts, settings),
+                                 daemon=True).start()
+                self.json_resp(200, {'status': 'started', 'task_id': tid}); return
+
             if action == 'chapter' and data.get('id'):
                 cid = data['id']
                 if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
@@ -2952,6 +3042,7 @@ class Handler(BaseHTTPRequestHandler):
                                 ch_data_chat = load_json(cp_chat, dict)
                                 ch_title_chat = ch_data_chat.get('title', '未命名章节')
                                 ch_content_chat = ch_data_chat.get('content', '')
+                        kb_tool_context = _build_chat_kb_tool_context(book_id, user_text, cid_chat)
 
                         annotate_tool = """你还有一个"荧光笔"工具，可以在正文中为用户标注重点内容。
 - 添加标注格式：[ANNOTATE_ADD]{{"chapter_id":"当前章ID","text":"要标注的原文片段（需精确匹配）","note":"批注内容","color":"yellow"}}[/ANNOTATE_ADD]
@@ -2967,6 +3058,27 @@ class Handler(BaseHTTPRequestHandler):
 - 调用格式：[SUGGEST_READTHROUGH][/SUGGEST_READTHROUGH]
 - 适用场景：用户问的问题明显超出当前掌握范围、你不得不回复"我不确定/不了解/还没看过"等内容时。
 - 注意：不要滥用，仅在确实需要通读笔记才能回答时调用。每次对话最多调用一次。
+
+你还有"知识库引用"和"知识库修改提议"工具，用于和用户核对设定信息：
+- 引用格式：[CITE]{{"table_name":"表名(entities/mentions/events/foreshadowing/rules)","record_id":"记录ID","field":"字段名","brief":"简短说明"}}[/CITE]
+  用途：当你提到知识库中的某个设定时，附上引用卡片，方便用户跳转到原文核实。
+- 修改提议格式：[PROPOSE_KB_EDIT]{{"table_name":"表名","record_id":"记录ID","field":"字段名","new_value":"新值","reason":"修改原因"}}[/PROPOSE_KB_EDIT]
+  用途：提出修改提议，用户确认后才会真正修改数据库。
+- 局部重读格式：[REREAD_KB]{{"chapter_ids":["章节ID"],"focus_texts":["用户指出有误的原文片段"],"correction":"用户说，实际上……不是……而是……"}}[/REREAD_KB]
+  用途：当用户指出你对某个段落的理解整体有误、不是单个字段能改完时，调用局部重读。系统会只重读相关段落，并替换知识库里由这段误读产生的记录。
+
+当前章ID：{cid_chat or '未知'}
+
+【主动提议规则——非常重要】
+你必须在以下情况主动使用[PROPOSE_KB_EDIT]或[REREAD_KB]，不要等用户要求，也不要只口头说“我记住了/我会改”：
+1. 用户说的内容和你知识库中的记录有矛盾（例如：你记得是李四杀的，用户说是王五杀的）
+2. 用户明确纠正你的回答（"你记错了""不是这样的""应该是XX"）
+3. 你自己发现知识库中的信息可能过时或有误
+4. 用户提到某个设定细节，和你掌握的不一致
+
+如果下面给出了可编辑记录ID，优先使用这些ID。单个字段错了，用[CITE]引用出处，再用[PROPOSE_KB_EDIT]提议修改；同一轮最多提议3个最关键修改。
+如果你无法确定具体字段，或用户纠正的是一段话的整体理解、时间线关系、叙事视角、倒叙/插叙、复杂因果，请优先使用[REREAD_KB]局部重读。
+工具标签写完后，再用一句很短的话告诉用户你正在处理。
 
 """
 
@@ -3000,6 +3112,9 @@ class Handler(BaseHTTPRequestHandler):
 
 {source_ctx}
 
+【可用于知识库工具调用的记录ID】
+{kb_tool_context}
+
 此时，用户正在写最新的一章：
 
 【章节名】{ch_title_chat}
@@ -3025,6 +3140,9 @@ class Handler(BaseHTTPRequestHandler):
 这本小说大概是这样的：
 
 {source_ctx}
+
+【可用于知识库工具调用的记录ID】
+{kb_tool_context}
 
 请继续和用户对话。
 
@@ -3143,8 +3261,13 @@ class Handler(BaseHTTPRequestHandler):
                             indicators = ['还没读过', '还没看过', '尚未通读', '没有读过', '不了解全书', '不清楚全书', '需要通读', '我还没看过这本书', '尚未阅读', '没有阅读']
                             if any(ind in result for ind in indicators):
                                 needs_rt = True
+                        tool_calls = []
+                        if needs_rt:
+                            tool_calls.append({'type': 'suggest_readthrough', 'label': '建议通读', 'status': 'ready'})
 
                         annotation_changes = False
+                        annotation_add_count = 0
+                        annotation_remove_count = 0
                         ann_path = os.path.join(get_book_dir(book_id), 'annotations.json')
 
                         for m in re.finditer(r'\[ANNOTATE_ADD\](.*?)\[/ANNOTATE_ADD\]', result, re.S):
@@ -3172,6 +3295,7 @@ class Handler(BaseHTTPRequestHandler):
                                         })
                                         save_json(ann_path, {'annotations': anns})
                                         annotation_changes = True
+                                        annotation_add_count += 1
                             except Exception as e:
                                 log_action('ANNOTATE_ADD_ERROR', str(e)[:200])
 
@@ -3192,8 +3316,13 @@ class Handler(BaseHTTPRequestHandler):
                                 if len(new_anns) != len(anns):
                                     save_json(ann_path, {'annotations': new_anns})
                                     annotation_changes = True
+                                    annotation_remove_count += len(anns) - len(new_anns)
                             except Exception as e:
                                 log_action('ANNOTATE_REMOVE_ERROR', str(e)[:200])
+                        if annotation_add_count:
+                            tool_calls.append({'type': 'annotate_add', 'label': f'标注正文 x{annotation_add_count}', 'status': 'done'})
+                        if annotation_remove_count:
+                            tool_calls.append({'type': 'annotate_remove', 'label': f'删除标注 x{annotation_remove_count}', 'status': 'done'})
 
                         # 解析 COMPLETE_CHAPTER 隐藏工具调用
                         complete_chapter_triggered = False
@@ -3211,13 +3340,130 @@ class Handler(BaseHTTPRequestHandler):
                                                 tid_cc = bg_task_start('chapter-complete', book_id, f'本章通读')
                                                 threading.Thread(target=_do_chapter_complete_wrapper, args=(tid_cc, book_id, ccid, settings_cc), daemon=True).start()
                                                 complete_chapter_triggered = True
+                                                tool_calls.append({'type': 'complete_chapter', 'label': '本章通读', 'status': 'running'})
                             except Exception as e:
                                 log_action('COMPLETE_CHAPTER_ERROR', str(e)[:200])
+
+                        kb_reread_started = False
+                        for m_rr in re.finditer(r'\[REREAD_KB\](.*?)\[/REREAD_KB\]', result, re.S):
+                            try:
+                                cmd = json.loads(m_rr.group(1).strip())
+                                chapter_ids = cmd.get('chapter_ids') or []
+                                if isinstance(chapter_ids, str):
+                                    chapter_ids = [chapter_ids]
+                                single_cid = cmd.get('chapter_id') or ''
+                                if single_cid:
+                                    chapter_ids.append(single_cid)
+                                if not chapter_ids and cid_chat:
+                                    chapter_ids = [cid_chat]
+                                chapter_ids = [c for c in chapter_ids if is_valid_id(c)]
+                                focus_texts = cmd.get('focus_texts') or []
+                                if isinstance(focus_texts, str):
+                                    focus_texts = [focus_texts]
+                                if cmd.get('focus_text'):
+                                    focus_texts.append(cmd.get('focus_text'))
+                                correction = cmd.get('correction') or user_text
+                                if chapter_ids and correction:
+                                    settings_rr = get_settings()
+                                    if settings_rr.get('base_url') and settings_rr.get('model'):
+                                        existing_rr = bg_task_get_by_book_type(book_id, 'kb-reread')
+                                        if not (existing_rr and existing_rr.get('status') == 'running'):
+                                            tid_rr = bg_task_start('kb-reread', book_id, '局部重读')
+                                            threading.Thread(
+                                                target=_do_kb_reread_task,
+                                                args=(tid_rr, book_id, chapter_ids, correction, focus_texts, settings_rr),
+                                                daemon=True,
+                                            ).start()
+                                            kb_reread_started = True
+                                            tool_calls.append({'type': 'kb_reread', 'label': '局部重读', 'status': 'running'})
+                            except Exception as e:
+                                log_action('REREAD_KB_ERROR', str(e)[:200])
+
+                        kb_citations = []
+                        for m_cite in re.finditer(r'\[CITE\](.*?)\[/CITE\]', result, re.S):
+                            try:
+                                cmd = json.loads(m_cite.group(1).strip())
+                                tn = cmd.get('table_name', '')
+                                rid = cmd.get('record_id', '')
+                                field = cmd.get('field', '')
+                                brief = cmd.get('brief', '')
+                                if tn and rid:
+                                    kb_storage.init_db(book_id)
+                                    rec = kb_storage.get_kb_record(book_id, tn, rid)
+                                    chapter_id = ''
+                                    chapter_title = ''
+                                    snippet = ''
+                                    if rec:
+                                        chapter_id = rec.get('chapter_id', '') or ''
+                                        chapter_title = rec.get('chapter_title', '') or ''
+                                        snippet = rec.get('snippet', '') or rec.get('fact', '') or ''
+                                        if not chapter_id:
+                                            chapter_id = rec.get('first_chapter_id', '') or rec.get('hint_chapter_id', '') or ''
+                                    kb_citations.append({
+                                        'table_name': tn, 'record_id': rid,
+                                        'field': field, 'brief': brief,
+                                        'chapter_id': chapter_id, 'chapter_title': chapter_title,
+                                        'snippet': snippet[:200] if snippet else '',
+                                    })
+                            except Exception as e:
+                                log_action('CITE_PARSE_ERROR', str(e)[:200])
+                        if kb_citations:
+                            tool_calls.append({'type': 'kb_cite', 'label': f'引用知识库 x{len(kb_citations)}', 'status': 'done'})
+
+                        kb_proposals = []
+                        for m_prop in re.finditer(r'\[PROPOSE_KB_EDIT\](.*?)\[/PROPOSE_KB_EDIT\]', result, re.S):
+                            try:
+                                cmd = json.loads(m_prop.group(1).strip())
+                                tn = cmd.get('table_name', '')
+                                rid = cmd.get('record_id', '')
+                                field = cmd.get('field', '')
+                                new_val = cmd.get('new_value', '')
+                                reason = cmd.get('reason', '')
+                                if tn and rid and field:
+                                    kb_storage.init_db(book_id)
+                                    pid = kb_storage.create_proposal(book_id, tn, rid, field, new_val, reason=reason, source_message=user_text[:200])
+                                    old_val = ''
+                                    rec = kb_storage.get_kb_record(book_id, tn, rid)
+                                    if rec and field in rec:
+                                        old_val = str(rec[field] or '')
+                                    kb_proposals.append({
+                                        'proposal_id': pid, 'table_name': tn,
+                                        'record_id': rid, 'field': field,
+                                        'old_value': old_val, 'new_value': new_val,
+                                        'reason': reason,
+                                    })
+                            except Exception as e:
+                                log_action('PROPOSE_KB_EDIT_PARSE_ERROR', str(e)[:200])
+                        if kb_proposals:
+                            tool_calls.append({'type': 'kb_proposal', 'label': f'提议修改 x{len(kb_proposals)}', 'status': 'waiting'})
+
+                        kb_reread_fallback = False
+                        if (not kb_reread_started) and (not kb_proposals) and _looks_like_kb_correction(user_text):
+                            try:
+                                chapter_ids = [cid_chat] if cid_chat else []
+                                settings_rr = get_settings()
+                                if chapter_ids and settings_rr.get('base_url') and settings_rr.get('model'):
+                                    existing_rr = bg_task_get_by_book_type(book_id, 'kb-reread')
+                                    if not (existing_rr and existing_rr.get('status') == 'running'):
+                                        tid_rr = bg_task_start('kb-reread', book_id, '局部重读')
+                                        threading.Thread(
+                                            target=_do_kb_reread_task,
+                                            args=(tid_rr, book_id, chapter_ids, user_text, [], settings_rr),
+                                            daemon=True,
+                                        ).start()
+                                        kb_reread_started = True
+                                        kb_reread_fallback = True
+                                        tool_calls.append({'type': 'kb_reread', 'label': '局部重读（自动兜底）', 'status': 'running'})
+                            except Exception as e:
+                                log_action('REREAD_KB_FALLBACK_ERROR', str(e)[:200])
 
                         result = re.sub(r'\[ANNOTATE_ADD\].*?\[/ANNOTATE_ADD\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[ANNOTATE_REMOVE\].*?\[/ANNOTATE_REMOVE\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[COMPLETE_CHAPTER\].*?\[/COMPLETE_CHAPTER\]', '', result, flags=re.S).strip()
+                        result = re.sub(r'\[REREAD_KB\].*?\[/REREAD_KB\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[SUGGEST_READTHROUGH\].*?\[/SUGGEST_READTHROUGH\]', '', result, flags=re.S).strip()
+                        result = re.sub(r'\[CITE\].*?\[/CITE\]', '', result, flags=re.S).strip()
+                        result = re.sub(r'\[PROPOSE_KB_EDIT\].*?\[/PROPOSE_KB_EDIT\]', '', result, flags=re.S).strip()
                         # 清理已废弃的工具标记（后端不再执行这些工具，但 AI 可能仍输出）
                         result = re.sub(r'\[FETCH_URL\].*?\[/FETCH_URL\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[SEARCH\].*?\[/SEARCH\]', '', result, flags=re.S).strip()
@@ -3250,8 +3496,21 @@ class Handler(BaseHTTPRequestHandler):
                             bg_task_update(task_id, result=result, reasoning=reason, progress=50)
                             threading.Thread(target=_do_browser_search_launch, args=(task_id, book_id, _browse_query or '', cfg_settings, _browse_link or None), daemon=True).start()
                         else:
-                            _replace_pending_chat_msg(book_id, task_id, result, reason)
-                            bg_task_update(task_id, result=result, reasoning=reason, progress=100, needs_readthrough=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered)
+                            if kb_reread_started and not result:
+                                result = '我会重读这段。'
+                            elif kb_reread_fallback and result and '重读' not in result:
+                                result = result.rstrip() + '\n\n我会重读这段。'
+                            meta = {
+                                'needs_summary': needs_rt,
+                                'annotations_changed': annotation_changes,
+                                'complete_chapter': complete_chapter_triggered,
+                                'kb_reread_started': kb_reread_started,
+                                'kb_citations': kb_citations,
+                                'kb_proposals': kb_proposals,
+                                'tool_calls': tool_calls,
+                            }
+                            _replace_pending_chat_msg(book_id, task_id, result, reason, meta=meta)
+                            bg_task_update(task_id, result=result, reasoning=reason, progress=100, needs_readthrough=needs_rt, needs_summary=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered, kb_reread_started=kb_reread_started, kb_citations=kb_citations, kb_proposals=kb_proposals, tool_calls=tool_calls)
                             bg_task_done(task_id)
                     except Exception as e:
                         err_str = str(e)
@@ -3325,6 +3584,68 @@ class Handler(BaseHTTPRequestHandler):
                         save_json(ann_path, {'annotations': new_anns})
                     self.json_resp(200, {'removed': len(anns) - len(new_anns)}); return
                 self.json_resp(400, {'error': '未知操作'}); return
+
+            if action == 'kb-proposal-list':
+                try:
+                    kb_storage.init_db(bid)
+                    rows = kb_storage.list_proposals(bid, status=data.get('status', 'pending'), limit=int(data.get('limit', 50)))
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)}); return
+                self.json_resp(200, {'proposals': rows}); return
+
+            if action == 'kb-proposal-confirm':
+                pid = data.get('proposal_id', '')
+                if not pid: self.json_resp(400, {'error': 'proposal_id 必填'}); return
+                try:
+                    kb_storage.init_db(bid)
+                    p = kb_storage.confirm_proposal(bid, pid)
+                    _schedule_timeline_after_kb_edit(bid, p.get('table_name'), p.get('field'))
+                except ValueError as e:
+                    self.json_resp(400, {'error': str(e)}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)}); return
+                self.json_resp(200, {'ok': True, 'proposal': p}); return
+
+            if action == 'kb-proposal-reject':
+                pid = data.get('proposal_id', '')
+                if not pid: self.json_resp(400, {'error': 'proposal_id 必填'}); return
+                try:
+                    kb_storage.init_db(bid)
+                    kb_storage.reject_proposal(bid, pid)
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)}); return
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'kb-edit-apply':
+                table_name = data.get('table_name', '')
+                record_id = data.get('record_id', '')
+                field = data.get('field', '')
+                new_value = data.get('new_value', '')
+                if not (table_name and record_id and field):
+                    self.json_resp(400, {'error': 'table_name/record_id/field 必填'}); return
+                try:
+                    kb_storage.init_db(bid)
+                    result = kb_storage.apply_kb_edit(bid, table_name, record_id, field, new_value,
+                        reason=data.get('reason', ''), source=data.get('source', 'user'))
+                    _schedule_timeline_after_kb_edit(bid, table_name, field)
+                except ValueError as e:
+                    self.json_resp(400, {'error': str(e)}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)}); return
+                self.json_resp(200, {'ok': True, 'log_id': result['log_id'], 'old_value': result['old_value']}); return
+
+            if action == 'kb-edit-undo':
+                log_id = data.get('log_id', '')
+                if not log_id: self.json_resp(400, {'error': 'log_id 必填'}); return
+                try:
+                    kb_storage.init_db(bid)
+                    undone = kb_storage.undo_edit(bid, int(log_id))
+                    _schedule_timeline_after_kb_edit(bid, undone.get('table_name'), undone.get('field'))
+                except ValueError as e:
+                    self.json_resp(400, {'error': str(e)}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)}); return
+                self.json_resp(200, {'ok': True}); return
 
             if action == 'outline-update':
                 content = data.get('content', '')
@@ -4319,7 +4640,7 @@ class Handler(BaseHTTPRequestHandler):
                 kb_storage.set_rt_state(bid, status='running', phase='启动中', total=total,
                                         current_idx=-1, active_start_idx=-1, active_end_idx=-1,
                                         pause_requested=0, stream_buffer='', error='')
-                threading.Thread(target=kb_pipeline.do_readthrough, args=(bid, settings, cfg),
+                threading.Thread(target=_do_readthrough_wrapper, args=(bid, settings, cfg, False),
                                  name=f'kb_readthrough_{bid}', daemon=True).start()
                 self.json_resp(200, {'status': 'started'}); return
             if path.endswith('/pause') or path.endswith('/readthrough/pause') or path.endswith('/stop') or path.endswith('/readthrough/stop'):
@@ -4343,7 +4664,7 @@ class Handler(BaseHTTPRequestHandler):
                 kb_storage.set_rt_state(bid, status='running', phase='继续中',
                                         active_start_idx=-1, active_end_idx=-1,
                                         pause_requested=0)
-                threading.Thread(target=kb_pipeline.do_readthrough, args=(bid, settings, cfg, True),
+                threading.Thread(target=_do_readthrough_wrapper, args=(bid, settings, cfg, True),
                                  name=f'kb_readthrough_{bid}', daemon=True).start()
                 self.json_resp(200, {'status': 'started'}); return
             if path.endswith('/reset') or path.endswith('/readthrough/reset') or path.endswith('/clear') or path.endswith('/readthrough/clear'):
@@ -4637,21 +4958,110 @@ def bg_task_cleanup_old():
         for k in old:
             del _bg_tasks[k]
 
-def _replace_pending_chat_msg(book_id, task_id, text, reasoning=''):
+def _looks_like_kb_correction(text):
+    t = str(text or '').strip()
+    if len(t) < 4:
+        return False
+    strong = [
+        r'不是.+而是', r'并不是.+而是', r'实际上.+不是', r'其实.+不是',
+        r'你.*(记|理解|搞|弄).*错', r'(记|理解|搞|弄).*错了',
+        r'(时间线|设定|知识库|数据库|记录).*错',
+        r'(更正|纠正|修正|改一下|改成|更新).*(设定|知识库|数据库|记录|时间线)',
+        r'(应该是|应当是|正确的是|实际是|事实上是)',
+    ]
+    if any(re.search(p, t) for p in strong):
+        return True
+    return False
+
+def _build_chat_kb_tool_context(book_id, user_text='', current_chapter_id=''):
+    """给聊天模型一小块带 record_id 的资料，降低它“想改但没ID”的概率。"""
+    try:
+        kb_storage.init_db(book_id)
+        lines = []
+        seen = set()
+
+        def add_line(kind, rid, text):
+            if not rid:
+                return
+            key = (kind, rid)
+            if key in seen:
+                return
+            seen.add(key)
+            text = re.sub(r'\s+', ' ', str(text or '')).strip()
+            if text:
+                lines.append(f'- {kind} id={rid}: {text[:260]}')
+
+        if current_chapter_id:
+            try:
+                ch_kb = kb_pipeline.chapter_outline(book_id, current_chapter_id)
+                for ent in ch_kb.get('entities', [])[:10]:
+                    for f in ent.get('facts', [])[:3]:
+                        add_line('mentions', f.get('id'), f'{ent.get("name","")} fact={f.get("fact","")} snippet={f.get("snippet","")}')
+                for ev in ch_kb.get('events', [])[:10]:
+                    add_line('events', ev.get('id'), f'story_time={ev.get("story_time","")} who={ev.get("who","")} what={ev.get("what","")} where={ev.get("where_loc","")} consequence={ev.get("consequence","")}')
+                for rule in ch_kb.get('rules', [])[:8]:
+                    add_line('rules', rule.get('id'), f'name={rule.get("name","")} body={rule.get("body","")}')
+                for f in ch_kb.get('foreshadowing', [])[:8]:
+                    add_line('foreshadowing', f.get('id'), f'hint={f.get("hint","")} status={f.get("status","")} resolution={f.get("resolution","")}')
+            except Exception as e:
+                log_action('CHAT_KB_TOOL_CONTEXT_CHAPTER_ERROR', str(e)[:160])
+
+        query = str(user_text or '').strip()
+        names = []
+        try:
+            for ent in kb_storage.match_entities_by_name(book_id, query)[:8]:
+                n = ent.get('canonical_name')
+                if n:
+                    names.append(n)
+        except Exception:
+            pass
+        query_terms = []
+        if query:
+            query_terms.append(query[:80])
+        query_terms.extend(names)
+        for term in query_terms[:8]:
+            try:
+                for hit in kb_storage.lookup_kb(book_id, term, limit=8):
+                    kind = hit.get('kind')
+                    rid = hit.get('id')
+                    if kind == 'mention':
+                        add_line('mentions', rid, f'{hit.get("entity_name","")} fact={hit.get("fact","")} snippet={hit.get("snippet","")}')
+                    elif kind == 'event':
+                        add_line('events', rid, f'story_time={hit.get("story_time","")} who={hit.get("who","")} what={hit.get("what","")} where={hit.get("where_loc","")}')
+                    elif kind == 'rule':
+                        add_line('rules', rid, f'name={hit.get("name","")} body={hit.get("body","")}')
+                    elif kind == 'foreshadowing':
+                        add_line('foreshadowing', rid, f'hint={hit.get("hint","")} status={hit.get("status","")} resolution={hit.get("resolution","")}')
+                    elif kind == 'entity':
+                        add_line('entities', rid, f'name={hit.get("canonical_name","")} type={hit.get("type","")} aliases={hit.get("aliases",[])}')
+            except Exception as e:
+                log_action('CHAT_KB_TOOL_CONTEXT_LOOKUP_ERROR', str(e)[:160])
+
+        if not lines:
+            return '（没有匹配到具体记录ID；如果用户在纠正当前章节的整体理解，请用 REREAD_KB。）'
+        return '\n'.join(lines[:32])
+    except Exception as e:
+        log_action('CHAT_KB_TOOL_CONTEXT_ERROR', str(e)[:160])
+        return '（知识库记录ID读取失败；必要时用 REREAD_KB。）'
+
+def _replace_pending_chat_msg(book_id, task_id, text, reasoning='', meta=None):
     """替换 messages 文件中指定 task_id 的 pending AI 消息。"""
     try:
         today = datetime.now().strftime('%Y-%m-%d')
         msg_file = os.path.join(get_book_dir(book_id), 'messages', f'{today}.json')
         messages = load_json(msg_file, list)
         replaced = False
+        item = {'text': text, 'type': 'ai', 'reasoning': reasoning}
+        if isinstance(meta, dict):
+            item.update(meta)
         for i in range(len(messages) - 1, -1, -1):
             m = messages[i]
             if m.get('type') == 'ai' and m.get('_pending') and m.get('task_id') == task_id:
-                messages[i] = {'text': text, 'type': 'ai', 'reasoning': reasoning}
+                messages[i] = item
                 replaced = True
                 break
         if not replaced:
-            messages.append({'text': text, 'type': 'ai', 'reasoning': reasoning})
+            messages.append(item)
         save_json(msg_file, messages)
     except Exception as e:
         log_action('CHAT_REPLACE_ERROR', f'{book_id}/{task_id}: {str(e)[:100]}')
@@ -7062,6 +7472,90 @@ def _ai_outline(settings, source, config=None):
         {'role': 'user', 'content': prompt}
     ], mx, tmp, timeout=180)
 
+def _run_timeline_arrange_task(task_id, book_id, cfg_settings):
+    try:
+        bg_task_update(task_id, progress=10)
+        result = kb_pipeline.arrange_timeline_ai(book_id, cfg_settings)
+        bg_task_update(task_id, progress=100, result=json.dumps(result, ensure_ascii=False))
+        bg_task_done(task_id)
+    except Exception as e:
+        bg_task_done(task_id, str(e))
+
+
+def _run_prediction_update_task(task_id, book_id, cfg_settings):
+    try:
+        bg_task_update(task_id, progress=10)
+        result, err = kb_pipeline.generate_short_prediction(book_id, cfg_settings)
+        if err:
+            bg_task_done(task_id, err)
+            return
+        bg_task_update(task_id, progress=100, result=result)
+        bg_task_done(task_id)
+    except Exception as e:
+        bg_task_done(task_id, str(e))
+
+
+def _do_kb_reread_task(task_id, book_id, chapter_ids, correction, focus_texts, cfg_settings):
+    try:
+        set_conn_meta('kb-reread', '局部重读', book_id)
+        bg_task_update(task_id, progress=8, stream_buffer='正在准备局部重读...')
+        result = kb_pipeline.reread_passages(book_id, chapter_ids, correction, focus_texts, cfg_settings)
+        bg_task_update(task_id, progress=100, result=json.dumps(result, ensure_ascii=False))
+        bg_task_done(task_id)
+    except Exception as e:
+        bg_task_done(task_id, str(e))
+
+
+_TIMELINE_EDIT_FIELDS = {
+    'chapter_id', 'story_time', 'who', 'what', 'where_loc', 'why', 'consequence'
+}
+
+
+def _schedule_timeline_arrange(book_id, cfg_settings):
+    existing = bg_task_get_by_book_type(book_id, 'timeline-arrange')
+    if existing and existing.get('status') == 'running':
+        return False
+    tid_tl = bg_task_start('timeline-arrange', book_id, '时间线编排')
+    threading.Thread(target=_run_timeline_arrange_task, args=(tid_tl, book_id, cfg_settings), daemon=True).start()
+    return True
+
+
+def _schedule_timeline_after_kb_edit(book_id, table_name, field):
+    if table_name != 'events' or field not in _TIMELINE_EDIT_FIELDS:
+        return False
+    try:
+        return _schedule_timeline_arrange(book_id, get_settings())
+    except Exception as e:
+        log_action('TIMELINE_EDIT_SCHEDULE_ERR', str(e)[:120])
+        return False
+
+
+def _schedule_kb_after_write_jobs(book_id, cfg_settings, include_prediction=True):
+    try:
+        _schedule_timeline_arrange(book_id, cfg_settings)
+    except Exception as e:
+        log_action('TIMELINE_ARRANGE_SCHEDULE_ERR', str(e)[:120])
+    if include_prediction:
+        try:
+            existing = bg_task_get_by_book_type(book_id, 'prediction')
+            if not existing or existing.get('status') != 'running':
+                tid_pr = bg_task_start('prediction', book_id, '更新预言')
+                threading.Thread(target=_run_prediction_update_task, args=(tid_pr, book_id, cfg_settings), daemon=True).start()
+        except Exception as e:
+            log_action('PREDICTION_SCHEDULE_ERR', str(e)[:120])
+
+
+def _do_readthrough_wrapper(book_id, cfg_settings, config=None, resume=False):
+    threading.current_thread().name = f'kb_readthrough_{book_id}'
+    kb_pipeline.do_readthrough(book_id, cfg_settings, config=config, resume=resume)
+    try:
+        st = kb_storage.get_rt_state(book_id)
+        if st and st.get('status') == 'done':
+            _schedule_kb_after_write_jobs(book_id, cfg_settings, include_prediction=False)
+    except Exception as e:
+        log_action('RT_POST_JOBS_ERR', str(e)[:120])
+
+
 def _do_chapter_complete_wrapper(task_id, book_id, chapter_id, cfg_settings, text=None):
     """包装器：调用新版 kb_pipeline.do_chapter_complete"""
     set_conn_meta('chapter-complete', '本章通读', book_id)
@@ -7083,6 +7577,7 @@ def _do_chapter_complete_wrapper(task_id, book_id, chapter_id, cfg_settings, tex
         except Exception as ex:
             log_action('CHAPTER_COMPLETE_OUTLINE_ERR', str(ex)[:100])
         bg_task_done(task_id)
+        _schedule_kb_after_write_jobs(book_id, cfg_settings, include_prediction=True)
         log_action('CHAPTER_COMPLETE_DONE', f'book={book_id}, chapter={chapter_id}')
     except Exception as e:
         log_action('CHAPTER_COMPLETE_EXCEPTION', str(e))
@@ -7091,8 +7586,7 @@ def _do_chapter_complete_wrapper(task_id, book_id, chapter_id, cfg_settings, tex
 
 def do_readthrough(bid, settings, config=None, resume=False):
     """包装器：调用新版 kb_pipeline.do_readthrough（可能被旧代码引用）"""
-    threading.current_thread().name = f'kb_readthrough_{bid}'
-    kb_pipeline.do_readthrough(bid, settings, config=config, resume=resume)
+    _do_readthrough_wrapper(bid, settings, config=config, resume=resume)
 
 
 # 兼容别名：summary -> readthrough

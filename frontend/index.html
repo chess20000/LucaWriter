@@ -157,18 +157,18 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 }
 
 .main{display:flex;flex:1;flex-direction:column;overflow:hidden}
-.main-row{display:flex;flex:1;overflow:hidden;min-height:0;position:relative}
+.main-row{display:flex;flex:1;overflow:visible;min-height:0;position:relative;z-index:40;padding-left:18px}
 
 .resize-handle{width:5px;flex-shrink:0;cursor:col-resize;position:relative;z-index:10;background:transparent;margin:0 -2px}
 .resize-handle::after{content:'';position:absolute;top:0;bottom:0;left:50%;transform:translateX(-50%);width:1px;background:var(--border);transition:background .15s}
 .resize-handle:hover::after,.resize-handle.dragging::after{background:var(--accent)}
 
 .left-stack{width:320px;flex-shrink:0;position:relative;overflow:hidden;height:100%;align-self:stretch}
-.left-sidebar{position:absolute;left:18px;top:0;bottom:0;width:fit-content;min-width:180px;max-width:320px;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;z-index:15;border:none;color:var(--t-on-surface);background:transparent;box-shadow:none;isolation:isolate}
+.left-sidebar{position:fixed;left:18px;top:38px;bottom:0;width:fit-content;min-width:180px;max-width:320px;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;z-index:90;border:none;color:var(--t-on-surface);background:transparent;box-shadow:none;isolation:isolate}
 .left-sidebar::before{content:'';position:absolute;inset:0;z-index:-1;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);-webkit-mask-image:linear-gradient(to right,#000 0%,#000 75%,transparent 100%);mask-image:linear-gradient(to right,#000 0%,#000 75%,transparent 100%);pointer-events:none}
 .left-sidebar::after{content:'';position:absolute;top:14px;bottom:14px;right:0;width:1px;background:linear-gradient(to bottom,transparent 0%,var(--border) 22%,var(--border) 78%,transparent 100%);opacity:.25;pointer-events:none}
 .left-sidebar.collapsed{opacity:0;pointer-events:none}
-.sidebar-trigger{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:5;background:var(--surface);border-right:1px solid var(--border);color:var(--t3);position:relative}
+.sidebar-trigger{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:90;background:var(--surface);border-right:1px solid var(--border);color:var(--t3);position:absolute;left:0;top:38px;bottom:0}
 .sidebar-trigger:hover{background:var(--surface2);color:var(--t-on-surface)}
 .sidebar-trigger svg{width:12px;height:12px;transform:rotate(0deg);transition:transform .25s ease}
 .sidebar-trigger.expanded svg{transform:rotate(180deg)}
@@ -292,19 +292,79 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .ai-dismiss{font-size:9px;color:var(--t3);background:none;border:1px solid var(--border);padding:1px 6px;border-radius:var(--r1);cursor:pointer;margin-left:3px}
 .ai-dismiss:hover{color:var(--danger);border-color:var(--danger)}
 
-.editor-highlight-layer{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}
-.editor-highlight-content{padding:24px 40px;font-family:var(--font-serif);line-height:2.1;font-size:17px;letter-spacing:.3px;white-space:pre-wrap;word-wrap:break-word;color:transparent}
-.editor-highlight-content mark{background:transparent;color:transparent;border-bottom:2px solid var(--accent);border-radius:0}
-.editor-highlight-content mark.green{background:transparent;border-bottom:2px solid #5fb878}
-.editor-highlight-content mark.pink{background:transparent;border-bottom:2px solid #d46b8b}
-.editor-highlight-content mark.blue{background:transparent;border-bottom:2px solid #5a9fd4}
+.editor-highlight-layer{position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:none}
+.editor-highlight-content{padding:24px 36px;font-family:var(--font-serif);line-height:var(--content-line-height);font-size:var(--content-font-size);letter-spacing:.3px;white-space:pre-wrap;word-wrap:break-word;color:transparent}
+.editor-highlight-content mark{background:rgba(232,204,122,.24);color:transparent;border-bottom:2px solid var(--accent);border-radius:2px}
+.editor-highlight-content mark.green{background:rgba(95,184,120,.22);border-bottom-color:#5fb878}
+.editor-highlight-content mark.pink{background:rgba(212,107,139,.24);border-bottom-color:#d46b8b}
+.editor-highlight-content mark.blue{background:rgba(90,159,212,.22);border-bottom-color:#5a9fd4}
+.editor-highlight-content mark.search-match{background:rgba(232,204,122,.18);border-bottom:2px solid var(--accent-a70);border-radius:2px;color:transparent}
+.editor-highlight-content mark.search-current{background:rgba(232,204,122,.45);border-bottom:2px solid var(--accent);border-radius:2px;color:transparent}
+[data-theme-mode="light"] .editor-highlight-content mark.search-match{background:rgba(200,170,80,.15);border-bottom-color:rgba(200,170,80,.5)}
+[data-theme-mode="light"] .editor-highlight-content mark.search-current{background:rgba(200,170,80,.35);border-bottom-color:rgba(200,170,80,.9)}
+.search-bar{position:absolute;top:8px;right:8px;z-index:5;display:none;flex-direction:column;gap:6px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--r3);padding:10px 12px;box-shadow:var(--glass-shadow);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);min-width:300px;max-width:420px}
+.search-bar.open{display:flex}
+.search-row{display:flex;align-items:center;gap:5px}
+.search-input{flex:1;min-width:0;height:28px;padding:0 10px;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r1);color:var(--t1);outline:none;transition:border-color .15s}
+.search-input:focus{border-color:var(--accent)}
+.search-count{font-size:11px;color:var(--t3);white-space:nowrap;min-width:50px;text-align:center}
+.search-btn{min-width:26px;height:26px;display:flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:var(--r1);color:var(--t2);cursor:pointer;font-size:12px;padding:0 4px;transition:all .15s}
+.search-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-a03)}
+.search-btn:active{background:var(--accent-a12)}
+.search-btn.active{background:var(--accent-a12);border-color:var(--accent);color:var(--accent)}
+.search-replace-row{display:none;align-items:center;gap:5px}
+.search-bar.has-replace .search-replace-row{display:flex}
+.search-close{width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;background:none;border:none;color:var(--t3);cursor:pointer;font-size:14px;border-radius:var(--r1);line-height:1;flex-shrink:0;transition:all .15s}
+.search-close:hover{color:var(--danger);background:var(--surface3)}
+.kb-find-btn{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:var(--r1);color:var(--t3);cursor:pointer;font-size:10px;padding:0;margin-left:auto;flex-shrink:0;transition:all .1s}
+.kb-find-btn:hover{border-color:var(--accent);color:var(--accent)}
 .ai-summary-card{margin-top:6px;padding:8px 10px;background:var(--accent-dim);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5}
 .rt-warning{color:var(--danger);margin:4px 0;font-weight:600}
 .rt-btn{background:var(--accent);color:var(--on-accent);border:none;padding:4px 10px;border-radius:var(--r1);font-size:11px;font-weight:600;cursor:pointer;margin-top:4px}
 .rt-btn:hover{background:var(--accent2)}
+.kb-citation-card{margin-top:6px;padding:6px 10px;background:var(--surface2);border-left:3px solid var(--accent);border-radius:var(--r1);font-size:11px;line-height:1.5;display:flex;align-items:flex-start;gap:8px}
+.kb-citation-card .cite-body{flex:1;min-width:0}
+.kb-citation-card .cite-meta{color:var(--t3);font-size:10px;margin-bottom:2px}
+.kb-citation-card .cite-snippet{color:var(--t2);font-style:italic;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.kb-citation-card .cite-jump{background:transparent;border:1px solid var(--border);color:var(--t2);padding:3px 8px;border-radius:var(--r1);font-size:10px;cursor:pointer;flex-shrink:0;transition:all .15s ease}
+.kb-citation-card .cite-jump:hover{border-color:var(--accent-a25);color:var(--accent)}
+.kb-proposal-card{margin-top:6px;padding:8px 10px;background:var(--surface2);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5}
+.kb-proposal-card .prop-title{font-weight:600;color:var(--t1);margin-bottom:4px}
+.kb-proposal-card .prop-reason{color:var(--t3);font-size:10px;margin-bottom:6px}
+.kb-proposal-card .prop-diff{font-family:ui-monospace,SFMono-Regular,monospace;font-size:10px;background:var(--surface);padding:6px 8px;border-radius:var(--r1);margin-bottom:6px;white-space:pre-wrap;word-break:break-all}
+.kb-proposal-card .prop-diff .old{color:var(--danger);text-decoration:line-through}
+.kb-proposal-card .prop-diff .new{color:var(--accent)}
+.kb-proposal-card .prop-actions{display:flex;gap:6px}
+.kb-proposal-card .prop-btn{padding:4px 10px;border-radius:var(--r1);font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--t2);transition:all .15s ease}
+.kb-proposal-card .prop-btn:hover{border-color:var(--accent-a25)}
+.kb-proposal-card .prop-btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.kb-proposal-card .prop-btn.primary:hover{background:var(--accent2)}
+.kb-proposal-card.resolved{opacity:.7}
+.kb-proposal-card.resolved .prop-actions{display:none}
+.kb-proposal-card .prop-status{font-size:10px;color:var(--t3);margin-top:4px;display:none}
+.kb-proposal-card.resolved .prop-status{display:block}
+.ai-tool-strip{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 6px}
+.ai-tool-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;border:1px solid var(--border2);background:var(--surface2);color:var(--t3);font-size:10px;font-weight:600;line-height:1.5}
+.ai-tool-pill::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--t3);flex-shrink:0}
+.ai-tool-pill.running{border-color:var(--accent-a40);color:var(--accent)}
+.ai-tool-pill.running::before{background:var(--accent);animation:tdPulse 1.2s infinite}
+.ai-tool-pill.done::before{background:#5fb878}
+.ai-tool-pill.waiting{border-color:var(--warn);color:var(--warn)}
+.ai-tool-pill.waiting::before{background:var(--warn)}
+.ai-msg-ai.radar{border-color:rgba(212,107,139,.6);background:rgba(212,107,139,.06)}
+.radar-chat-card{margin-top:6px;padding:8px 10px;background:rgba(212,107,139,.08);border:1px solid rgba(212,107,139,.28);border-radius:var(--r1);font-size:11px;line-height:1.5}
+.radar-chat-card .radar-title{font-weight:700;color:var(--t1);margin-bottom:4px}
+.radar-chat-card .radar-meta{color:var(--t3);font-size:10px;margin-top:4px}
+.radar-chat-card .radar-actions{display:flex;gap:6px;margin-top:6px}
+.toast{display:inline-flex;align-items:center;gap:10px;white-space:normal!important}
+.toast .toast-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:50vw}
+.toast-action{background:transparent;border:1px solid currentColor;color:inherit;padding:2px 8px;border-radius:var(--r1);font-size:11px;cursor:pointer;font-weight:600;opacity:.85;flex-shrink:0}
+.toast-action:hover{opacity:1}
+.kb-jump-highlight{background:var(--accent-a25)!important;animation:kbJumpFlash 1.6s ease-out}
+@keyframes kbJumpFlash{0%{background:var(--accent)}100%{background:var(--accent-a25)}}
 .ctx-tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--surface2);color:var(--t3);font-size:10px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle}
 
-.bottom-panel{z-index:20;display:flex;flex-direction:column;overflow:hidden;transition:height .2s cubic-bezier(.4,0,.2,1);height:30px}
+.bottom-panel{z-index:20;display:flex;flex-direction:column;overflow:hidden;transition:height .2s cubic-bezier(.4,0,.2,1);height:30px;padding-left:18px}
 .bottom-panel.collapsed{overflow:hidden;box-shadow:none;max-height:none}
 .bottom-handle{display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 0;height:30px;flex-shrink:0;gap:0;user-select:none;position:relative}
 .handle-grip{display:flex;align-items:center;position:absolute;left:50%;transform:translateX(-50%);gap:12px;cursor:ns-resize}
@@ -314,7 +374,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .bottom-panel.collapsed .handle-hint::after{content:'点击展开'}
 .bottom-panel:not(.collapsed) .handle-hint::after{content:'点击收起'}
 .bottom-tabs{display:flex;gap:0;flex-shrink:0;overflow-x:auto}
-#aiInputZone{width:280px;flex:none;display:flex;align-items:stretch;margin-left:18px}
+#aiInputZone{width:280px;flex:none;display:flex;align-items:stretch;margin-left:0}
 .bottom-panel:not(.collapsed) #aiInputZone{display:none!important}
 .bottom-tab{background:none;border:none;color:var(--t3);font-size:12px;font-weight:600;padding:1px 12px 5px;border-radius:var(--r1);cursor:pointer;transition:all .1s;white-space:nowrap}
 .bottom-tab:hover{color:var(--t2)}
@@ -435,6 +495,43 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .tl-child{font-size:9px;color:var(--t2);background:var(--surface2);padding:1px 6px;border-radius:var(--r1);cursor:pointer;border:1px solid var(--border)}
 .tl-child:hover{color:var(--accent);border-color:var(--accent)}
 .tl-empty{text-align:center;padding:24px;color:var(--t3);font-size:11px}
+.kb-view{height:100%;overflow:auto;padding:12px 14px;color:var(--t2);font-size:12px;line-height:1.65;background:var(--bg)}
+.kb-muted{color:var(--t3);font-size:11px}
+.kb-section{padding:10px 0;border-bottom:1px solid var(--border)}
+.kb-section:last-child{border-bottom:none}
+.kb-section-title{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;color:var(--t1);margin-bottom:7px}
+.kb-pill{font-size:10px;color:var(--accent);background:var(--accent-dim);border:1px solid var(--accent-a20);border-radius:var(--r1);padding:1px 6px}
+.kb-item{padding:7px 8px;border:1px solid var(--border);background:var(--surface);border-radius:var(--r1);margin-bottom:6px}
+.kb-item-head{display:flex;gap:6px;align-items:center;font-weight:700;color:var(--t1);font-size:12px}
+.kb-item-body{margin-top:4px;color:var(--t2);font-size:11px;white-space:pre-wrap}
+.kb-sub{margin-top:5px;color:var(--t3);font-size:10px}
+.kb-fact{margin-top:4px;padding-left:8px;border-left:2px solid var(--accent-a30)}
+.radar-alert{border-color:var(--accent-a30);background:var(--accent-a03)}
+.radar-alert.high{border-color:var(--danger)}
+.radar-actions{display:flex;gap:6px;margin-top:6px}
+.mini-btn{background:var(--surface2);color:var(--t2);border:1px solid var(--border);border-radius:var(--r1);font-size:10px;padding:2px 7px;cursor:pointer}
+.mini-btn:hover{border-color:var(--accent);color:var(--accent)}
+.timeline-map{height:100%;display:flex;flex-direction:column;background:var(--bg)}
+.timeline-map-head{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);flex-shrink:0}
+.timeline-zoom{display:flex;gap:4px}
+.timeline-zoom button{width:24px;height:22px;background:var(--surface2);border:1px solid var(--border);color:var(--t2);border-radius:var(--r1);cursor:pointer;font-size:11px}
+.timeline-zoom button.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.timeline-canvas{flex:1;overflow:auto;padding:16px 18px 28px}
+.timeline-seg{position:relative;margin:12px 0 22px;min-width:max-content;padding-top:18px}
+.timeline-seg-title{position:absolute;top:0;left:0;font-size:11px;color:var(--t3);font-weight:700}
+.timeline-line{display:flex;align-items:flex-start;gap:0;min-width:max-content;padding-top:18px}
+.timeline-event{width:150px;min-height:82px;position:relative;padding:0 8px;flex-shrink:0}
+.timeline-event::before{content:"";position:absolute;top:6px;left:0;right:0;height:1px;background:var(--surface4)}
+.timeline-event:last-child::before{right:50%}
+.timeline-event:first-child::before{left:50%}
+.timeline-dot{position:absolute;top:1px;left:50%;width:10px;height:10px;background:var(--accent);border:2px solid var(--bg);transform:translateX(-50%) rotate(45deg);z-index:1}
+.timeline-event.focus .timeline-dot{background:var(--danger);box-shadow:0 0 0 4px var(--accent-a20)}
+.timeline-card{margin-top:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r1);padding:7px 8px}
+.timeline-event.focus .timeline-card{border-color:var(--accent)}
+.timeline-card-title{font-size:11px;font-weight:700;color:var(--t1);line-height:1.35}
+.timeline-card-meta{font-size:10px;color:var(--t3);margin-top:3px}
+.timeline-card-detail{font-size:10px;color:var(--t2);margin-top:4px;line-height:1.45}
+.timeline-uncertain{color:var(--warn);font-size:10px;margin-left:4px}
 .prediction-pane{flex-direction:column;height:100%;position:relative}
 .prediction-idle{flex:1;overflow-y:auto}
 .prediction-loading{position:absolute;inset:0;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:5}
@@ -720,7 +817,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
  </div>
  <div class="topbar-sep"></div>
-    <button class="topbar-btn" id="topbarSummaryBtn" onclick="openSummary()" style="display:none">摘要</button>
+    <button class="topbar-btn" id="topbarSummaryBtn" onclick="toggleBottomPanel()" style="display:none">摘要</button>
     <button class="topbar-btn theme-toggle-btn" id="themeToggleBtn" onclick="toggleThemeMode()" title="切换深色/浅色模式" aria-label="切换深色/浅色模式">
       <svg id="tglMoon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <svg id="tglSun" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -763,7 +860,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
   <div class="series-chat" id="seriesChatPanel">
    <div class="series-chat-header"><span>Luca</span><button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="clearSeriesAIChat()">清空</button></div>
    <div class="series-chat-messages" id="seriesAIMessages"></div>
-   <div class="series-chat-input-row"><input class="ai-input" id="seriesAIInput" placeholder="问 Luca 关于系列规划、世界观..." style="flex:1" onkeydown="if(event.key==='Enter')sendSeriesAI()"><button class="ai-send" onclick="sendSeriesAI()">发送</button></div>
+   <div class="series-chat-input-row"><input class="ai-input" id="seriesAIInput" placeholder="问 Luca 关于系列规划、世界观..." autocomplete="off" data-form-type="other" style="flex:1" onkeydown="if(event.key==='Enter')sendSeriesAI()"><button class="ai-send" onclick="sendSeriesAI()">发送</button></div>
   </div>
   <div class="series-summary" id="seriesRT" style="display:none">
    <div class="series-rt-header"><span>系列摘要</span><button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="toggleSeriesSummary()">&#10005;</button></div>
@@ -779,20 +876,31 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
  </div>
 
- <div class="main-row" id="editorView" style="display:none">
  <div class="sidebar-trigger" id="sidebarTrigger" title="展开章节栏">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
  </div>
 
+ <div class="main-row" id="editorView" style="display:none">
+
  <div class="left-stack" id="leftStack">
 
  <div class="right-sidebar" id="rightSidebar">
-  <div class="right-sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0">
+  <div class="right-sidebar-section" style="flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;position:relative">
   <div class="right-sidebar-header" style="display:flex;justify-content:space-between;align-items:center">
   <span>Luca</span>
             <button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="clearAIChat()" title="清空对话">清空</button>
   </div>
   <div class="right-content" id="aiMessages" style="gap:6px;padding:8px 14px 36px 14px"></div>
+  <div id="kbProposalModal" style="position:absolute;inset:0;background:rgba(0,0,0,.35);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:10;justify-content:center;align-items:center;display:none;border-radius:var(--r2)" onclick="if(event.target===this)this.style.display='none'">
+  <div style="background:var(--surface);border:1px solid var(--border2);border-radius:var(--r3);padding:18px 16px;width:92%;max-width:340px;box-shadow:0 8px 30px rgba(0,0,0,.4)">
+  <div style="font-size:14px;font-weight:700;margin-bottom:12px">知识库修改提议</div>
+  <div id="kbProposalContent"></div>
+  <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+  <button class="prompt-cancel" onclick="kbModalReject()">拒绝</button>
+  <button class="prompt-ok" onclick="kbModalConfirm()" style="min-width:80px">确认修改</button>
+  </div>
+  </div>
+  </div>
   </div>
  </div>
 
@@ -822,6 +930,21 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
  <div class="editor-body">
  <div class="editor-highlight-layer" id="highlightLayer"><div class="editor-highlight-content" id="highlightContent"></div></div>
+ <div class="search-bar" id="searchBar">
+  <div class="search-row">
+   <button class="search-close" onclick="closeSearch()" title="关闭">&#215;</button>
+   <input class="search-input" id="searchInput" placeholder="搜索..." autocomplete="off" data-form-type="other">
+   <span class="search-count" id="searchCount"></span>
+   <button class="search-btn" id="searchPrev" onclick="searchNav(-1)" title="上一个 (↑)">&#8593;</button>
+   <button class="search-btn" id="searchNext" onclick="searchNav(1)" title="下一个 (↓)">&#8595;</button>
+   <button class="search-btn" id="searchToggleReplace" onclick="toggleSearchReplace()" title="替换">&#8693;</button>
+  </div>
+  <div class="search-replace-row">
+   <input class="search-input" id="searchReplaceInput" placeholder="替换为..." autocomplete="off" data-form-type="other">
+   <button class="search-btn" onclick="searchReplaceOne()" title="替换当前" style="font-size:10px;letter-spacing:.3px">替换</button>
+   <button class="search-btn" onclick="searchReplaceAll()" title="替换全部" style="font-size:10px;letter-spacing:.3px">全部</button>
+  </div>
+ </div>
  <textarea id="editorArea" placeholder="开始写作..." oninput="onContentChange()"></textarea>
  </div>
  </div>
@@ -830,8 +953,8 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
   <div class="bottom-panel" id="bottomPanel">
   <div class="bottom-handle" id="bottomHandle">
     <div class="handle-grip"><span></span><span></span><span></span></div>
-    <div id="aiInputZone" style="width:280px;flex:none;display:flex;align-items:stretch;margin-left:18px">
-    <input class="ai-input" id="aiInput" placeholder="问 Luca" style="flex:1;min-width:0;height:30px;padding:0 10px;font-size:12px;border-radius:0;border:none;background:var(--surface2);color:var(--t1);outline:none" onkeydown="if(event.key==='Enter')sendAI()">
+    <div id="aiInputZone" style="width:280px;flex:none;display:flex;align-items:stretch">
+    <input class="ai-input" id="aiInput" placeholder="问 Luca" autocomplete="off" data-form-type="other" style="flex:1;min-width:0;height:30px;padding:0 10px;font-size:12px;border-radius:0;border:none;background:var(--surface2);color:var(--t1);outline:none" onkeydown="if(event.key==='Enter')sendAI()">
     </div>
     <div class="bottom-tabs" style="margin-left:auto">
           <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')">时间线</button>
@@ -844,37 +967,23 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 
         <!-- 时间线 -->
  <div class="bottom-pane timeline-pane" id="timelinePane">
- <div class="panel-layout">
- <div class="panel-left">
-              <div class="panel-left-head">生成日志</div>
- <div class="panel-left-body" id="tlLog">点击"生成时间线"开始...</div>
- </div>
- <div class="panel-right">
-              <div class="panel-right-head">故事时间线</div>
- <div class="panel-right-body" id="timelineResult">
-                <div class="tl-empty">从上方生成故事时间线</div>
- </div>
- </div>
+ <div class="timeline-map">
+  <div class="timeline-map-head">
+   <span id="timelineMeta">本书唯一时间线</span>
+   <div class="timeline-zoom">
+    <button data-z="0" onclick="setTimelineZoom(0)" title="全书视角">远</button>
+    <button data-z="1" onclick="setTimelineZoom(1)" title="章节簇视角">中</button>
+    <button data-z="2" onclick="setTimelineZoom(2)" title="事件细节视角">近</button>
+   </div>
+  </div>
+  <div class="timeline-canvas" id="timelineResult"><div class="tl-empty">通读后会显示本书时间线</div></div>
  </div>
  </div>
 
  <!-- -->
  <div class="bottom-pane prediction-pane" id="predictionPane">
- <div class="panel-layout">
- <div class="panel-left">
- <div class="panel-left-head"></div>
- <div class="panel-left-body" id="predLog">点击"生成预言"开始...</div>
- </div>
- <div class="panel-right">
- <div class="panel-right-head"></div>
- <div class="panel-right-body" id="predictionResultBody">
- <div style="text-align:center;padding:40px 20px">
- <div style="font-size:28px;margin-bottom:12px">&#128302;</div>
-                  <h3 style="font-size:15px;color:var(--t1);margin-bottom:8px">读者预言</h3>
- <p style="font-size:12px;color:var(--t2);max-width:420px;margin:0 auto 20px;line-height:1.6">点击上方"预言"按钮生成。生成后此处会显示结果。</p>
- </div>
- </div>
- </div>
+ <div class="kb-view" id="predictionResultBody">
+  <div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>
  </div>
  </div>
 
@@ -882,13 +991,13 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="bottom-pane outline-pane" id="outlinePane">
  <div class="panel-layout">
  <div class="panel-left">
- <div class="panel-left-head"></div>
- <div class="panel-left-body" id="outlineLog">点击"生成大纲"开始...</div>
+ <div class="panel-left-head"><span>吃书雷达</span><span class="rt-head-pill">只提醒</span></div>
+ <div class="panel-left-body" id="outlineLog">当前没有提醒。</div>
  </div>
  <div class="panel-right">
- <div class="panel-right-head"></div>
- <div class="panel-right-body">
- <textarea class="rt-source" id="outlineSource" readonly placeholder="大纲内容..." style="flex:1;width:100%;resize:none;border:none;background:transparent;height:100%"></textarea>
+ <div class="panel-right-head"><span>本章有用信息</span><span id="outlineChapterBadge" class="rt-head-pill"></span></div>
+ <div class="panel-right-body" style="padding:0">
+ <div class="kb-view" id="outlineSource">打开章节后显示本章相关人物、设定、事件和伏笔。</div>
  </div>
  </div>
  </div>
@@ -934,10 +1043,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
  </div>
  <div class="rt-generate-bar" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
-            <span style="font-size:11px;color:var(--t2);white-space:nowrap">基于笔记生成：</span>
-            <button class="ai-send" style="padding:6px 14px;font-size:12px" onclick="generateTimeline()">时间线</button>
-            <button class="ai-send" style="padding:6px 14px;font-size:12px" onclick="startPrediction()">预言</button>
-            <button class="ai-send" style="padding:6px 14px;font-size:12px" onclick="generateOutlineFromSource()">大纲</button>
+            <span style="font-size:11px;color:var(--t2);white-space:nowrap">通读入库后，时间线和本章大纲会自动从数据库刷新；预言在“本章写完”后更新。</span>
  </div>
  <div class="rt-controls" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
  <div class="rt-progress-wrap" style="flex:1;display:flex;flex-direction:column;gap:4px">
@@ -1264,6 +1370,12 @@ var coverUploadBookId=null;
 var rtLastDoneChapters=0;
 var rtLastStatus='idle';
 var bookAnnotations={};
+var timelineZoom=1;
+var _radarTimer=null;
+var _radarPending=false;
+var _radarLastLen=0;
+var _latestRadarAlerts=[];
+var _radarChatKeys=new Set();
 
 /* === 活跃连接实时追踪 === */
 var _rtTaskId=null;
@@ -1274,8 +1386,10 @@ var _connTypeMap={
   chat:{label:'聊',color:'#5a9fd4',name:'AI对话'},
   summary:{label:'读',color:'#E8CC7A',name:'摘要全书'},
   timeline:{label:'时',color:'#8b7fd9',name:'生成时间线'},
+  'timeline-arrange':{label:'线',color:'#8b7fd9',name:'时间线编排'},
   outline:{label:'纲',color:'#5fb878',name:'生成大纲'},
   prediction:{label:'预',color:'#d46b6b',name:'生成预言'},
+  'kb-reread':{label:'重',color:'#d46b6b',name:'局部重读'},
   auto_comment:{label:'自',color:'#9e9e9e',name:'自动建议'},
   memory:{label:'忆',color:'#9e9e9e',name:'记忆更新'},
   'chapter-complete':{label:'章',color:'#E8CC7A',name:'本章摘要'},
@@ -1420,7 +1534,7 @@ function clearAppState(){
  try{localStorage.removeItem('lucawriter_state')}catch(e){}
 }
 
-function init(){initAllCS();loadSettings();loadThemedIcon();_startConnPoll();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
+function init(){initAllCS();loadSettings();loadThemedIcon();_startConnPoll();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
 
 function setupModals(){
  document.querySelectorAll('.modal-bg,.confirm-bg,.prompt-bg').forEach(function(bg){
@@ -1586,6 +1700,9 @@ function openBook(id){
  // Reset summary panel for new book
   $('rtStream').textContent='等待开始...';
  $('rtSource').value='';
+ $('outlineSource').innerHTML='打开章节后显示本章相关人物、设定、事件和伏笔。';
+ $('outlineLog').textContent='当前没有提醒。';
+ $('predictionResultBody').innerHTML='<div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>';
   $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='准备中...';
   $('rtChapters').textContent='0/0 章';
   _setRTButtonUI('idle', -1);
@@ -1597,6 +1714,7 @@ function openBook(id){
  loadChapters();
  loadAIMessages();
  loadTimeline();
+ loadPredictionCurrent();
  loadSourceToRT();
  loadAnnotations();
 }
@@ -1727,7 +1845,9 @@ function loadChapterData(ch){
  setEditorLoading(false);
  updateBreadcrumb();
  renderChapterList();
+ if($('searchBar').classList.contains('open'))_refreshSearchMatches();
  syncHighlights();
+ refreshChapterKnowledge();
  if(_focusTitleAfterLoad){
   _focusTitleAfterLoad=false;
   setTimeout(function(){$('chTitleInput').focus();$('chTitleInput').select();},50);
@@ -1800,6 +1920,7 @@ function onContentChange(){
  var newLen=$('editorArea').value.length;var diff=newLen-charCount;charCount=newLen;
  $('wordCount').textContent=charCount;
  scheduleSave();
+ if($('searchBar').classList.contains('open'))_refreshSearchMatches();
  syncHighlights();
  // 
  var addedSinceAuto=charCount-_autoCommentLastLen;
@@ -1816,6 +1937,7 @@ function onContentChange(){
  _sourceUpdatePending=false;
  triggerSourceUpdate();
  }
+ scheduleConsistencyRadar();
 }
 
 var lastSummaryLen={};
@@ -1841,6 +1963,60 @@ function triggerSourceUpdate(){
  var title=$('chTitleInput').value||'';
  api('POST','/api/book/'+bookId+'/update-source',{text:text,chapter_title:title},function(d,s){
  if(s===200&&d.status==='started'){toast('背景更新已启动','success');}
+ });
+}
+
+function scheduleConsistencyRadar(){
+ if(!bookId||!chapterId)return;
+ if(settings.ai_auto_comment===false)return;
+ var len=$('editorArea').value.length;
+ if(len<120||len-_radarLastLen<500)return;
+ clearTimeout(_radarTimer);
+ _radarTimer=setTimeout(function(){runConsistencyRadar()},12000);
+}
+
+function runConsistencyRadar(){
+ if(!bookId||!chapterId||_radarPending)return;
+ var text=$('editorArea').value;
+ if(text.length<120)return;
+ _radarPending=true;
+ api('POST','/api/book/'+bookId+'/consistency-check',{chapter_id:chapterId,text:text},function(d,s){
+  _radarPending=false;
+  _radarLastLen=$('editorArea').value.length;
+  if(s===200){
+   _latestRadarAlerts=(d&&d.alerts)||[];
+   renderRadarAlerts(_latestRadarAlerts);
+   if(_latestRadarAlerts.length){
+    var high=_latestRadarAlerts.some(function(a){return a.severity==='high'});
+    toast(high?'Luca 发现一个高风险吃书点':'Luca 发现一个可能吃书点',high?'error':'warn',3500);
+   }
+  }
+ });
+}
+
+function renderRadarAlerts(alerts){
+ var el=$('outlineLog');if(!el)return;
+ alerts=alerts||[];
+ if(!alerts.length){el.textContent='当前没有提醒。';return}
+ var html='';
+ alerts.forEach(function(a){
+  html+='<div class="kb-item radar-alert '+esc(a.severity||'')+'"><div class="kb-item-head"><span>'+esc(a.severity||'medium')+'</span><span>'+esc(a.kind||'continuity')+'</span></div>';
+  html+='<div class="kb-item-body">'+esc(a.message||'')+'</div>';
+  if(a.evidence)html+='<div class="kb-sub">依据：'+esc(a.evidence)+'</div>';
+  if(a.suggestion)html+='<div class="kb-sub">建议：'+esc(a.suggestion)+'</div>';
+  if(a.id)html+='<div class="radar-actions"><button class="mini-btn" onclick="setRadarAlertStatus(\''+esc(a.id)+'\',\'confirmed\')">确认</button><button class="mini-btn" onclick="setRadarAlertStatus(\''+esc(a.id)+'\',\'dismissed\')">忽略</button></div>';
+  html+='</div>';
+ });
+ el.innerHTML=html;
+}
+
+function setRadarAlertStatus(id,status){
+ if(!bookId)return;
+ api('POST','/api/book/'+bookId+'/consistency-alert',{alert_id:id,status:status},function(d,s){
+  if(s===200){
+   _latestRadarAlerts=_latestRadarAlerts.filter(function(a){return a.id!==id});
+   renderRadarAlerts(_latestRadarAlerts);
+  }
  });
 }
 
@@ -1959,6 +2135,28 @@ function renderAIMessages(){
  card.innerHTML='<div>AI 建议摘要全书</div><div class="rt-warning">可能会消耗很多token哦</div><button class="rt-btn" onclick="startRTFromChat()">开始摘要</button>';
  c.appendChild(card);
  }
+ if(m.type==='ai' && m.kb_citations){
+ m.kb_citations.forEach(function(cite){
+ var card=document.createElement('div');
+ card.className='kb-citation-card';
+ var meta=cite.table_name+'/'+cite.field;
+ if(cite.chapter_title)meta+=' · '+esc(cite.chapter_title);
+ var jumpBtn='';
+ if(cite.chapter_id)jumpBtn='<button class="cite-jump" onclick="kbJumpToChapter(\''+esc(cite.chapter_id)+'\')">跳转</button>';
+ card.innerHTML='<div class="cite-body"><div class="cite-meta">'+esc(meta)+'</div><div class="cite-snippet">'+esc(cite.brief||cite.snippet||'')+'</div></div>'+jumpBtn;
+ c.appendChild(card);
+ });
+ }
+ if(m.type==='ai' && m.kb_proposals && m.kb_proposals.length){
+ var card=document.createElement('div');
+ card.className='kb-proposal-card';
+ card.innerHTML='<div class="prop-title">知识库修改提议</div><div class="prop-reason">AI 发现设定信息可能需要更新，请查看弹窗</div>';
+ c.appendChild(card);
+ if(!m._kbModalShown){
+ m._kbModalShown=true;
+ kbShowProposalModal(m.kb_proposals);
+ }
+ }
  if(m.type==='ai' && (m._streaming||m._pending)){
  var rb=d.querySelector('.ai-reasoning-body');
   if(rb) rb.scrollTop=rb.scrollHeight;
@@ -1970,6 +2168,88 @@ function renderAIMessages(){
   c.scrollTop=c.scrollHeight;
   var hasLive=aiMessages.some(function(x){return x._streaming||x._pending});
   if(hasLive)_startThinkingRotation();else _stopThinkingRotation();
+}
+
+function kbJumpToChapter(chId){
+ if(!bookId||!chId)return;
+ loadChapter(chId);
+ var ta=$('editorArea');
+ if(ta){
+ ta.focus();
+ ta.classList.add('kb-jump-highlight');
+ setTimeout(function(){ta.classList.remove('kb-jump-highlight')},1600);
+ }
+}
+
+function kbConfirmProposal(pid,btnEl){
+ if(!bookId||!pid)return;
+ var card=btnEl?btnEl.closest('.kb-proposal-card'):null;
+ api('POST','/api/book/'+bookId+'/kb-proposal-confirm',{proposal_id:pid},function(d,s){
+ if(s===200&&d.ok){
+ if(card)card.classList.add('resolved');
+ toast('已确认修改','success');
+ refreshChapterKnowledge();
+ setTimeout(function(){loadTimeline()},2500);
+ }else{
+ toast(d.error||'操作失败','error');
+ }
+ });
+}
+
+function kbRejectProposal(pid,btnEl){
+ if(!bookId||!pid)return;
+ var card=btnEl?btnEl.closest('.kb-proposal-card'):null;
+ api('POST','/api/book/'+bookId+'/kb-proposal-reject',{proposal_id:pid},function(d,s){
+ if(s===200&&d.ok){
+ if(card)card.classList.add('resolved');
+ toast('已拒绝','success');
+ }else{
+ toast(d.error||'操作失败','error');
+ }
+ });
+}
+
+var _kbModalProposals=[];
+var _kbModalIdx=0;
+function kbShowProposalModal(proposals){
+ if(!proposals||!proposals.length)return;
+ _kbModalProposals=proposals;
+ _kbModalIdx=0;
+ _kbRenderModalProposal();
+ $('kbProposalModal').style.display='flex';
+}
+function _kbRenderModalProposal(){
+ var prop=_kbModalProposals[_kbModalIdx];
+ if(!prop)return;
+ var el=$('kbProposalContent');
+ var diffHtml='<span class="old">'+esc(prop.old_value||'(空)')+'</span> → <span class="new">'+esc(prop.new_value||'(空)')+'</span>';
+ var html='<div style="margin-bottom:8px;font-size:12px;color:var(--t3)">修改目标：'+esc(prop.table_name)+'.'+esc(prop.field)+'</div>';
+ if(prop.reason)html+='<div style="margin-bottom:10px;font-size:13px;color:var(--t2)">'+esc(prop.reason)+'</div>';
+ html+='<div class="prop-diff" style="font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;background:var(--surface2);padding:10px 12px;border-radius:var(--r1);white-space:pre-wrap;word-break:break-all">'+diffHtml+'</div>';
+ if(_kbModalProposals.length>1)html+='<div style="margin-top:8px;font-size:11px;color:var(--t3)">('+(_kbModalIdx+1)+'/'+_kbModalProposals.length+')</div>';
+ el.innerHTML=html;
+}
+function kbModalConfirm(){
+ var prop=_kbModalProposals[_kbModalIdx];
+ if(!prop)return;
+ kbConfirmProposal(prop.proposal_id,null);
+ _kbModalNext();
+}
+function kbModalReject(){
+ var prop=_kbModalProposals[_kbModalIdx];
+ if(!prop)return;
+ kbRejectProposal(prop.proposal_id,null);
+ _kbModalNext();
+}
+function _kbModalNext(){
+ _kbModalIdx++;
+ if(_kbModalIdx>=_kbModalProposals.length){
+ $('kbProposalModal').style.display='none';
+ _kbModalProposals=[];
+ _kbModalIdx=0;
+ }else{
+ _kbRenderModalProposal();
+ }
 }
 
 function toggleReasoningFromHeader(el){
@@ -2019,6 +2299,8 @@ function sendAI(){
  if(st.status==='done'){
  clearInterval(pollTimer);
  toast('本章摘要已生成','success');
+ refreshChapterKnowledge();
+ setTimeout(function(){loadPredictionCurrent();loadTimeline();},2500);
  var summary=st.result||'';
  if(summary){
  var card=document.createElement('div');
@@ -2068,9 +2350,10 @@ function _doSendAI(text){
  var m=aiMessages[msgIdx];
  if(st.status==='done'){
  clearInterval(pollTimer);
- if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;}
+ if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;m.kb_reread_started=st.kb_reread_started;m.kb_citations=st.kb_citations||[];m.kb_proposals=st.kb_proposals||[];}
  renderAIMessages();saveAIMessages();
  if(st.annotations_changed){loadAnnotations();}
+ if(st.kb_reread_started){toast('已开始局部重读','success');setTimeout(function(){refreshChapterKnowledge();loadTimeline()},3500);}
  if(st.complete_chapter){
  toast('AI ','success');
  }
@@ -2094,18 +2377,98 @@ function _doSendAI(text){
 }
 
 
-function loadTimeline(){if(!bookId)return;api('GET','/api/book/'+bookId+'/outline',undefined,function(d){renderTimeline((d&&d.timeline_nodes)||[])})}
+function refreshChapterKnowledge(){
+ if(!bookId||!chapterId)return;
+ loadChapterOutline();
+ loadTimeline();
+ if(currentBottomTab==='prediction')loadPredictionCurrent();
+}
 
-function renderTimeline(nodes){
-  var c=$('timelineResult');if(!nodes||!nodes.length){c.innerHTML='<div class="tl-empty">从 AI 生成故事时间线</div>';return}
- var html='<div class="timeline-track">';
- nodes.forEach(function(n){
-    html+='<div class="tl-node" onclick="expandTimelineNode(\''+esc(n.id)+'\')" title="'+esc(n.detail_hint||'')+'"><div class="tl-dot"></div><div class="tl-line"></div><div class="tl-label">'+esc(n.title||'事件')+'</div>';
- if(n.detail_hint)html+='<div class="tl-hint">'+esc(n.detail_hint)+'</div>';
- if(n.children&&n.children.length){html+='<div class="tl-children">';n.children.forEach(function(ch){html+='<div class="tl-child" onclick="event.stopPropagation()">'+esc(ch.title||'')+'</div>'});html+='</div>'}
- html+='</div>';
+function loadChapterOutline(){
+ if(!bookId||!chapterId)return;
+ api('GET','/api/book/'+bookId+'/chapter-kb?chapter_id='+encodeURIComponent(chapterId),undefined,function(d,s){
+  if(s!==200){$('outlineSource').innerHTML='<div class="tl-empty">'+esc((d&&d.error)||'本章知识库读取失败')+'</div>';return}
+  renderChapterOutline(d||{});
+  renderRadarAlerts((d&&d.alerts)||_latestRadarAlerts||[]);
  });
- html+='</div>';c.innerHTML=html;
+}
+
+function renderChapterOutline(d){
+ var el=$('outlineSource');if(!el)return;
+ var ch=d.chapter||currentChapter||{};
+ var html='';
+ if($('outlineChapterBadge'))$('outlineChapterBadge').textContent=ch&&ch.idx!==undefined?'第 '+(ch.idx+1)+' 章':'';
+ if(d.summary){
+  html+='<div class="kb-section"><div class="kb-section-title"><span>章节摘要</span></div><div class="kb-muted">'+esc(d.summary)+'</div></div>';
+ }
+ var ents=d.entities||[];
+ html+='<div class="kb-section"><div class="kb-section-title"><span>本章实体</span><span class="kb-pill">'+ents.length+'</span></div>';
+ if(!ents.length)html+='<div class="kb-muted">本章暂无已入库实体。通读或“本章写完”后会补齐。</div>';
+ ents.forEach(function(e){
+  var eName=esc(e.name||'未命名');
+  html+='<div class="kb-item"><div class="kb-item-head"><span>'+esc(e.initial||'#')+'</span><span>'+eName+'</span><span class="kb-muted">'+esc(e.type||'')+'</span><button class="kb-find-btn" onclick="findEntity(\''+eName.replace(/'/g,"\\'")+'\')" title="在正文中查找">&#128269;</button></div>';
+  (e.facts||[]).forEach(function(f){html+='<div class="kb-fact">'+esc(f.fact||'')+(f.snippet?'<div class="kb-sub">'+esc(f.snippet)+'</div>':'')+'</div>'});
+  if(e.recent_before&&e.recent_before.length){
+   html+='<div class="kb-sub">前文最近记录：'+e.recent_before.map(function(r){return '第 '+((r.chapter_idx||0)+1)+' 章 '+(r.fact||'')}).map(esc).join(' / ')+'</div>';
+  }
+  html+='</div>';
+ });
+ html+='</div>';
+ var rules=d.rules||[];
+ html+='<div class="kb-section"><div class="kb-section-title"><span>本章设定</span><span class="kb-pill">'+rules.length+'</span></div>';
+ if(!rules.length)html+='<div class="kb-muted">本章暂无单独记录的设定引用。</div>';
+ rules.forEach(function(r){var rName=esc(r.name||'设定');html+='<div class="kb-item"><div class="kb-item-head"><span>'+esc(r.initial||'#')+'</span><span>'+rName+'</span><button class="kb-find-btn" onclick="findEntity(\''+rName.replace(/'/g,"\\'")+'\')" title="在正文中查找">&#128269;</button></div><div class="kb-item-body">'+esc(r.body||'')+'</div>'+(r.evidence?'<div class="kb-sub">'+esc(r.evidence)+'</div>':'')+'</div>'});
+ html+='</div>';
+ var evs=d.events||[];
+ html+='<div class="kb-section"><div class="kb-section-title"><span>本章事件</span><span class="kb-pill">'+evs.length+'</span></div>';
+ if(!evs.length)html+='<div class="kb-muted">本章暂无事件记录。</div>';
+ evs.forEach(function(ev){var evWho=esc(ev.who||'');html+='<div class="kb-item"><div class="kb-item-head"><span>'+esc(ev.story_time||'时间未定')+'</span><span>'+evWho+'</span>'+(evWho?'<button class="kb-find-btn" onclick="findEntity(\''+evWho.replace(/'/g,"\\'")+'\')" title="在正文中查找">&#128269;</button>':'')+'</div><div class="kb-item-body">'+esc(ev.what||'')+'</div>'+(ev.consequence?'<div class="kb-sub">后果：'+esc(ev.consequence)+'</div>':'')+'</div>'});
+ html+='</div>';
+ var fs=d.foreshadowing||[];
+ html+='<div class="kb-section"><div class="kb-section-title"><span>伏笔</span><span class="kb-pill">'+fs.length+'</span></div>';
+ if(!fs.length)html+='<div class="kb-muted">本章暂无伏笔记录。</div>';
+ fs.forEach(function(f){html+='<div class="kb-item"><div class="kb-item-head"><span>'+esc(f.status==='resolved'?'已回收':'未解')+'</span></div><div class="kb-item-body">'+esc(f.hint||'')+'</div>'+(f.resolution?'<div class="kb-sub">回收：'+esc(f.resolution)+'</div>':'')+'</div>'});
+ html+='</div>';
+ el.innerHTML=html||'<div class="tl-empty">本章暂无知识库信息</div>';
+}
+
+function loadTimeline(){
+ if(!bookId)return;
+ var url='/api/book/'+bookId+'/timeline-map?zoom='+timelineZoom+(chapterId?'&chapter_id='+encodeURIComponent(chapterId):'');
+ api('GET',url,undefined,function(d,s){
+  if(s!==200){$('timelineResult').innerHTML='<div class="tl-empty">'+esc((d&&d.error)||'时间线读取失败')+'</div>';return}
+  renderTimelineMap(d||{});
+ });
+}
+
+function setTimelineZoom(z){timelineZoom=z;loadTimeline()}
+
+function renderTimelineMap(d){
+ document.querySelectorAll('.timeline-zoom button').forEach(function(b){b.classList.toggle('active',parseInt(b.dataset.z)===timelineZoom)});
+ var meta=$('timelineMeta');
+ if(meta)meta.textContent='本书唯一时间线 · '+(d.visible_total||0)+'/'+(d.events_total||0)+' 个事件'+(d.uncertain_count?' · '+d.uncertain_count+' 个不确定':'')+(d.has_ai_layout?'':' · 暂按章节顺序');
+ var c=$('timelineResult'),segs=d.segments||[];
+ if(!segs.length){c.innerHTML='<div class="tl-empty">通读后会显示本书时间线</div>';return}
+ var focus={};(d.focus_event_ids||[]).forEach(function(id){focus[id]=true});
+ var html='';
+ segs.forEach(function(seg){
+  html+='<div class="timeline-seg" data-seg="'+esc(seg.id||'')+'"><div class="timeline-seg-title">'+esc(seg.title||'时间段')+'</div><div class="timeline-line">';
+  (seg.events||[]).forEach(function(ev){
+   var cls='timeline-event'+(focus[ev.id]?' focus':'');
+   html+='<div class="'+cls+'" data-event="'+esc(ev.id||'')+'"><div class="timeline-dot"></div><div class="timeline-card">';
+   html+='<div class="timeline-card-title">'+esc(ev.what||'事件')+(ev.uncertain?'<span class="timeline-uncertain">?</span>':'')+'</div>';
+   html+='<div class="timeline-card-meta">第 '+(((ev.chapter_idx||0)+1))+' 章 · '+esc(ev.story_time||'时间未定')+'</div>';
+   var detail=[ev.who,ev.where_loc].filter(Boolean).join(' · ');
+   if(detail)html+='<div class="timeline-card-detail">'+esc(detail)+'</div>';
+   if(ev.timeline_reason)html+='<div class="timeline-card-detail">'+esc(ev.timeline_reason)+'</div>';
+   html+='</div></div>';
+  });
+  html+='</div></div>';
+ });
+ c.innerHTML=html;
+ if(d.focus_event_ids&&d.focus_event_ids.length){
+  setTimeout(function(){var key=(window.CSS&&CSS.escape)?CSS.escape(d.focus_event_ids[0]):String(d.focus_event_ids[0]).replace(/"/g,'');var n=c.querySelector('[data-event="'+key+'"]');if(n)n.scrollIntoView({block:'nearest',inline:'center'});},50);
+ }
 }
 
 function _streamGenerate(type,logEl,onDone){
@@ -2144,17 +2507,8 @@ function _streamGenerate(type,logEl,onDone){
  });
 }
 
- function generateTimeline(){
- if(!bookId)return;
- toast('正在生成时间线...','success');
- _streamGenerate('timeline',$('tlLog'),function(fullText){
- loadTimeline();
-    if(fullText){toast('时间线已生成','success');$('tlLog').textContent='时间线生成完成';}
-    else{toast('时间线生成失败','error');}
- });
-}
-
-function expandTimelineNode(nodeId){if(!bookId)return;api('POST','/api/book/'+bookId+'/timeline-detail',{node_id:nodeId},function(d,s){if(s===200){loadTimeline()}else{toast(d.error||'展开失败','error')}})}
+function generateTimeline(){loadTimeline();toast('时间线已刷新','success')}
+function expandTimelineNode(nodeId){loadTimeline()}
 
 function toggleTrash(){
  inTrash=!inTrash;var trashEl=$('trashList');var btn=$('trashToggleBtn');
@@ -2940,7 +3294,9 @@ function switchBottomTab(tab){
  $('outlinePane').classList.toggle('active',tab==='outline');
  $('summaryPane').classList.toggle('active',tab==='summary');
  if(!bottomPanelOpen){openBottomPanel()}
- if(tab==='outline'){loadOutlineSource()}
+ if(tab==='outline'){loadChapterOutline()}
+ if(tab==='timeline'){loadTimeline()}
+ if(tab==='prediction'){loadPredictionCurrent()}
  if(tab==='summary'){pollRTStatus()}
 }
 
@@ -2948,27 +3304,25 @@ function clearAIChat(){aiMessages=[];renderAIMessages();saveAIMessages()}
 
 var predicting=false;
 function startPrediction(){
-  if(!bookId){toast('请先打开一本书','warn');return}
- if(predicting)return;
- predicting=true;
- toast('正在生成预言...','success');
- _streamGenerate('prediction',$('predLog'),function(fullText){
- predicting=false;
- if(fullText){
- var html='<div style="padding:10px 14px;font-size:12px;line-height:1.7;color:var(--t2);">';
- html+=_mdToHtml(fullText);
- html+='</div>';
- $('predictionResultBody').innerHTML=html;
-       $('predLog').textContent='预言生成完成';
- toast('预言生成完成','success');
- }else{
-      $('predictionResultBody').innerHTML='<div style="text-align:center;padding:40px 20px"><div style="font-size:28px;margin-bottom:12px">&#128302;</div><h3 style="font-size:15px;color:var(--t1);margin-bottom:8px">生成失败</h3><p style="font-size:12px;color:var(--t2);max-width:420px;margin:0 auto 20px;line-height:1.6">生成失败，请重试</p></div>';
-      toast('预言生成失败','error');
- }
- });
+ loadPredictionCurrent();
+ toast('预言已刷新','success');
 }
 function resetPrediction(){
- $('predictionResultBody').innerHTML='<div style="text-align:center;padding:40px 20px"><div style="font-size:28px;margin-bottom:12px">&#128302;</div><h3 style="font-size:15px;color:var(--t1);margin-bottom:8px">读者预言</h3><p style="font-size:12px;color:var(--t2);max-width:420px;margin:0 auto 20px;line-height:1.6">点击上方"预言"按钮生成。生成后此处会显示结果。</p></div>';
+ loadPredictionCurrent();
+}
+
+function loadPredictionCurrent(){
+ if(!bookId)return;
+ api('GET','/api/book/'+bookId+'/prediction-current',undefined,function(d,s){
+  var el=$('predictionResultBody');if(!el)return;
+  if(s!==200){el.innerHTML='<div class="tl-empty">'+esc((d&&d.error)||'预言读取失败')+'</div>';return}
+  if(d.exists&&d.text){
+   var when=d.updated?new Date(d.updated*1000).toLocaleString('zh-CN',{hour12:false}):'';
+   el.innerHTML='<div class="kb-section"><div class="kb-section-title"><span>读者预言</span><span class="kb-pill">'+esc(when)+'</span></div><div class="prediction-text">'+_mdToHtml(d.text)+'</div></div><div class="kb-muted">预言只在“本章写完”后自动更新。</div>';
+  }else{
+   el.innerHTML='<div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>';
+  }
+ });
 }
 
 function _mdToHtml(md){
@@ -3008,6 +3362,12 @@ function openBottomPanel(){
  else{bottomPanelHeight=Math.round(full*0.6)}
  panel.style.height=bottomPanelHeight+'px';
  panel.classList.remove('collapsed');
+ if(bookId){
+  if(currentBottomTab==='summary')pollRTStatus();
+  else if(currentBottomTab==='timeline')loadTimeline();
+  else if(currentBottomTab==='prediction')loadPredictionCurrent();
+  else if(currentBottomTab==='outline')loadChapterOutline();
+ }
 }
 
 function closeBottomPanel(){
@@ -3711,7 +4071,7 @@ function setupBottomPanelDrag(){
   handle.addEventListener('click',function(e){
   if(didDrag)return;
   if(e.target.closest('.bottom-tab')||e.target.closest('.bottom-toggle')||e.target.closest('#aiInputZone input'))return;
-  openSummary();
+  toggleBottomPanel();
  });
 
  handle.addEventListener('dblclick',function(e){
@@ -3851,30 +4211,10 @@ function setupBottomPanelDrag(){
   })();
  }
 
- function openSummary(){
- if(!bookId){toast('请先打开一本书','warn');return}
- if(bottomPanelOpen && currentBottomTab==='summary'){
- closeBottomPanel();
- return;
- }
- switchBottomTab('summary');
- if(rtPollTimer===null)pollRTStatus();
-}
-
 /* === === */
 var rtPollTimer=null;
 function loadOutlineSource(){
- if(!bookId)return;
- api('GET','/api/book/'+bookId+'/readthrough/file?type=outline',undefined,function(d,s){
- var ss=$('outlineSource');
- if(s===200 && d.exists && d.text){
- ss.value=d.text;
-      ss.placeholder='outline.md 已加载';
- }else{
- ss.value='';
-      ss.placeholder='未生成过大纲，需要首次生成';
- }
- });
+ loadChapterOutline();
 }
 function loadSourceToRT(){
  if(!bookId)return;
@@ -4163,17 +4503,8 @@ function updateRTUI(d,s){
 
  function generateOutlineFromSource(){
  if(!bookId){toast('请先打开一本书','warn');return}
- toast('正在生成大纲...','success');
- _streamGenerate('outline',$('outlineLog'),function(fullText){
- if(fullText){
-      toast('大纲已保存到 outline.md','success');
-      $('outlineLog').textContent='大纲生成完成';
- loadOutlineSource();
- }else{
- toast('大纲生成失败','error');
- $('outlineLog').textContent='';
- }
- });
+ loadChapterOutline();
+ toast('本章大纲已刷新','success');
 }
 
 function loadAnnotations(){
@@ -4213,12 +4544,21 @@ function syncHighlights(){
  events.push({pos:Math.max(0,ann.start),type:'start',ann:ann});
  events.push({pos:Math.min(text.length,ann.end),type:'end',ann:ann});
  });
+ if(_searchMatches.length>0){
+ _searchMatches.forEach(function(m,i){
+ events.push({pos:m.start,type:'sstart',idx:i});
+ events.push({pos:m.end,type:'send',idx:i});
+ });
+ }
  events.sort(function(a,b){
  if(a.pos!==b.pos)return a.pos-b.pos;
- return a.type==='end'?-1:1;
+ var oa=a.type==='end'?0:a.type==='send'?1:2;
+ var ob=b.type==='end'?0:b.type==='send'?1:2;
+ return oa-ob;
  });
 
- var active=new Set();
+ var activeAnn=new Set();
+ var activeSearch=-1;
  var lastPos=0;
  var html='';
  var i=0;
@@ -4226,27 +4566,44 @@ function syncHighlights(){
  var pos=events[i].pos;
  if(pos>lastPos){
  var seg=esc(text.slice(lastPos,pos));
- if(active.size>0){
- var first=active.values().next().value;
+ var sCls=activeSearch>=0?(activeSearch===_searchCurrent?'search-current':'search-match'):null;
+ if(activeAnn.size>0&&sCls){
+ var first=activeAnn.values().next().value;
+ var aCls=first.color||'yellow';
+ html+='<mark class="'+esc(aCls)+'"><mark class="'+esc(sCls)+'">'+seg+'</mark></mark>';
+ }else if(activeAnn.size>0){
+ var first=activeAnn.values().next().value;
  var cls=first.color||'yellow';
  html+='<mark class="'+esc(cls)+'">'+seg+'</mark>';
+ }else if(sCls){
+ html+='<mark class="'+esc(sCls)+'">'+seg+'</mark>';
  }else{
  html+=seg;
  }
  lastPos=pos;
  }
  while(i<events.length&&events[i].pos===pos){
- if(events[i].type==='start')active.add(events[i].ann);
- else active.delete(events[i].ann);
+ var ev=events[i];
+ if(ev.type==='start')activeAnn.add(ev.ann);
+ else if(ev.type==='end')activeAnn.delete(ev.ann);
+ else if(ev.type==='sstart')activeSearch=ev.idx;
+ else if(ev.type==='send')activeSearch=-1;
  i++;
  }
  }
  if(lastPos<text.length){
  var seg=esc(text.slice(lastPos));
- if(active.size>0){
- var first=active.values().next().value;
+ var sCls=activeSearch>=0?(activeSearch===_searchCurrent?'search-current':'search-match'):null;
+ if(activeAnn.size>0&&sCls){
+ var first=activeAnn.values().next().value;
+ var aCls=first.color||'yellow';
+ html+='<mark class="'+esc(aCls)+'"><mark class="'+esc(sCls)+'">'+seg+'</mark></mark>';
+ }else if(activeAnn.size>0){
+ var first=activeAnn.values().next().value;
  var cls=first.color||'yellow';
  html+='<mark class="'+esc(cls)+'">'+seg+'</mark>';
+ }else if(sCls){
+ html+='<mark class="'+esc(sCls)+'">'+seg+'</mark>';
  }else{
  html+=seg;
  }
@@ -4254,6 +4611,186 @@ function syncHighlights(){
 
  hc.innerHTML=html;
  hc.style.marginTop=(-ta.scrollTop)+'px';
+}
+
+var _searchMatches=[];
+var _searchCurrent=-1;
+var _searchNavMode=false;
+var _searchDebounce=null;
+
+function openSearch(initialQuery){
+ var bar=$('searchBar');
+ if(!bar)return;
+ bar.classList.add('open');
+ closeBottomPanel();
+ var inp=$('searchInput');
+ if(initialQuery!==undefined){
+  inp.value=initialQuery;
+  _searchNavMode=true;
+  doSearch();
+  var ta=$('editorArea');
+  if(ta)ta.focus();
+ }else{
+  _searchNavMode=false;
+  inp.focus();
+  inp.select();
+  doSearch();
+ }
+}
+function closeSearch(){
+ var bar=$('searchBar');
+ if(!bar)return;
+ bar.classList.remove('open','has-replace');
+ _searchMatches=[];
+ _searchCurrent=-1;
+ _searchNavMode=false;
+ $('searchCount').textContent='';
+ $('searchInput').value='';
+ $('searchReplaceInput').value='';
+ syncHighlights();
+ var ta=$('editorArea');
+ if(ta)ta.focus();
+}
+function toggleSearchReplace(){
+ var bar=$('searchBar');
+ if(!bar)return;
+ bar.classList.toggle('has-replace');
+ var ri=$('searchReplaceInput');
+ if(bar.classList.contains('has-replace'))ri.focus();
+}
+
+function _refreshSearchMatches(){
+ var q=$('searchInput').value;
+ var ta=$('editorArea');
+ if(!ta||!q){_searchMatches=[];_searchCurrent=-1;$('searchCount').textContent='';return}
+ var text=ta.value;
+ var lower=text.toLowerCase();
+ var lq=q.toLowerCase();
+ _searchMatches=[];
+ var from=0;
+ while(from<lower.length){
+  var idx=lower.indexOf(lq,from);
+  if(idx<0)break;
+  _searchMatches.push({start:idx,end:idx+q.length});
+  from=idx+1;
+ }
+ if(_searchMatches.length>0){
+  if(_searchCurrent>=_searchMatches.length)_searchCurrent=_searchMatches.length-1;
+  if(_searchCurrent<0)_searchCurrent=0;
+  $('searchCount').textContent=(_searchCurrent+1)+'/'+_searchMatches.length;
+ }else{
+  _searchCurrent=-1;
+  $('searchCount').textContent='0/0';
+ }
+}
+
+function doSearch(){
+ if(_searchDebounce){clearTimeout(_searchDebounce);_searchDebounce=null}
+ _searchDebounce=setTimeout(_doSearch,60);
+}
+function _doSearch(){
+ _searchDebounce=null;
+ var q=$('searchInput').value;
+ var ta=$('editorArea');
+ if(!ta)return;
+ var text=ta.value;
+ _searchMatches=[];
+ _searchCurrent=-1;
+ if(!q){
+  $('searchCount').textContent='';
+  syncHighlights();
+  return;
+ }
+ var lower=text.toLowerCase();
+ var lq=q.toLowerCase();
+ var from=0;
+ while(from<lower.length){
+  var idx=lower.indexOf(lq,from);
+  if(idx<0)break;
+  _searchMatches.push({start:idx,end:idx+q.length});
+  from=idx+1;
+ }
+ var total=_searchMatches.length;
+ if(total>0){
+  if(_searchNavMode){
+   var cp=ta.selectionStart;
+   var best=0;
+   for(var i=0;i<total;i++){
+    if(_searchMatches[i].start>=cp){best=i;break}
+   }
+   _searchCurrent=best;
+  }else{
+   _searchCurrent=0;
+  }
+  $('searchCount').textContent=(_searchCurrent+1)+'/'+total;
+  _scrollToMatch(_searchCurrent);
+ }else{
+  $('searchCount').textContent='0/0';
+ }
+ syncHighlights();
+}
+
+function _scrollToMatch(idx){
+ var ta=$('editorArea');
+ if(!ta||idx<0||idx>=_searchMatches.length)return;
+ var m=_searchMatches[idx];
+ ta.focus();
+ ta.setSelectionRange(m.start,m.end);
+ var lineHeight=parseFloat(getComputedStyle(ta).lineHeight)||28;
+ var linesBefore=ta.value.substring(0,m.start).split('\n').length-1;
+ var visibleLines=Math.floor(ta.clientHeight/lineHeight);
+ var targetScroll=Math.max(0,(linesBefore-Math.floor(visibleLines/2))*lineHeight);
+ ta.scrollTop=targetScroll;
+}
+
+function searchNav(dir){
+ if(!_searchMatches.length)return;
+ _searchNavMode=true;
+ _searchCurrent+=dir;
+ if(_searchCurrent<0)_searchCurrent=_searchMatches.length-1;
+ if(_searchCurrent>=_searchMatches.length)_searchCurrent=0;
+ $('searchCount').textContent=(_searchCurrent+1)+'/'+_searchMatches.length;
+ _scrollToMatch(_searchCurrent);
+ syncHighlights();
+}
+
+function searchReplaceOne(){
+ var ta=$('editorArea');
+ if(!ta||!_searchMatches.length||_searchCurrent<0)return;
+ var m=_searchMatches[_searchCurrent];
+ var rep=$('searchReplaceInput').value;
+ var before=ta.value;
+ ta.value=before.substring(0,m.start)+rep+before.substring(m.end);
+ ta.setSelectionRange(m.start,m.start+rep.length);
+ onContentChange();
+ doSearch();
+}
+function searchReplaceAll(){
+ var ta=$('editorArea');
+ if(!ta||!_searchMatches.length)return;
+ var q=$('searchInput').value;
+ var rep=$('searchReplaceInput').value;
+ var text=ta.value;
+ var lower=text.toLowerCase();
+ var lq=q.toLowerCase();
+ var result='';
+ var last=0;
+ var from=0;
+ while(from<lower.length){
+  var idx=lower.indexOf(lq,from);
+  if(idx<0)break;
+  result+=text.substring(last,idx)+rep;
+  last=idx+q.length;
+  from=last;
+ }
+ result+=text.substring(last);
+ ta.value=result;
+ onContentChange();
+ doSearch();
+}
+
+function findEntity(name){
+ openSearch(name);
 }
 
 function startRTFromChat(){
@@ -4266,6 +4803,57 @@ function startRTFromChat(){
 
 var _editorCursorPos=null;
 document.addEventListener('keydown',function(e){
+  if((e.ctrlKey||e.metaKey)&&e.key==='f'){
+    e.preventDefault();
+    e.stopPropagation();
+    var bar=$('searchBar');
+    if(bar&&bar.classList.contains('open')){
+      $('searchInput').focus();
+      $('searchInput').select();
+    }else{
+      openSearch();
+    }
+    return;
+  }
+  if((e.ctrlKey||e.metaKey)&&e.key==='h'){
+    e.preventDefault();
+    e.stopPropagation();
+    var bar=$('searchBar');
+    if(!bar||!bar.classList.contains('open'))openSearch();
+    bar=$('searchBar');
+    if(bar&&!bar.classList.contains('has-replace'))bar.classList.add('has-replace');
+    setTimeout(function(){var ri=$('searchReplaceInput');if(ri)ri.focus()},50);
+    return;
+  }
+  var bar=$('searchBar');
+  var searchOpen=bar&&bar.classList.contains('open');
+  if(searchOpen&&e.key==='Escape'){
+    e.preventDefault();
+    closeSearch();
+    return;
+  }
+  if(searchOpen&&(e.key==='F3'||((e.ctrlKey||e.metaKey)&&e.key==='g'))){
+    e.preventDefault();
+    searchNav(e.shiftKey?-1:1);
+    return;
+  }
+  if(searchOpen&&_searchNavMode&&e.target===$('editorArea')){
+    if(e.key==='ArrowDown'||e.key==='ArrowRight'){
+      e.preventDefault();
+      searchNav(1);
+      return;
+    }
+    if(e.key==='ArrowUp'||e.key==='ArrowLeft'){
+      e.preventDefault();
+      searchNav(-1);
+      return;
+    }
+    if(e.key==='Enter'){
+      e.preventDefault();
+      searchNav(e.shiftKey?-1:1);
+      return;
+    }
+  }
   var sc=settings.shortcut_focus_ai||'none';
   if(sc==='none')return;
   var target=e.target;

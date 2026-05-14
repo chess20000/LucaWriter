@@ -9,9 +9,13 @@ from kb_storage import (
     init_db, db_transaction, upsert_chapter, get_chapter, list_chapters_db,
     delete_chapter_artifacts,
     upsert_entity, add_mention, list_entities, match_entities_by_name, remaining_entities,
-    add_event, list_events,
+    get_mentions_by_chapter, get_mentions_for_entity, get_entity_recent_mentions_before,
+    add_event, list_events, get_events_by_chapter, list_timeline_events,
     add_foreshadowing, resolve_foreshadowing, list_foreshadowing,
-    upsert_rule, list_rules,
+    upsert_rule, add_rule_mention, get_rule_mentions_by_chapter, list_rules,
+    upsert_timeline_event_meta, add_timeline_relation, clear_ai_timeline_relations,
+    list_timeline_relations, save_consistency_alerts, list_consistency_alerts,
+    delete_kb_records,
     set_rt_state, get_rt_state, get_pause_requested, append_stream, rt_log, get_rt_logs,
     embed_upsert, embed_query, embed_clear, embed_collection_count,
     hash_content, get_embedding_backend_id, get_embedding_chunk, get_kb_path,
@@ -26,6 +30,7 @@ def _lazy_main():
         _get_effective_context_length,
         _read_chapter_file, get_book_meta, get_book_dir,
         save_source, _get_source_dir, _write_entity_file,
+        save_prediction_md,
         _is_content_empty, _extract_context_summary,
         set_conn_meta,
     )
@@ -443,7 +448,8 @@ def apply_structured_result(book_id, chapter_id, structured, chapter_idx=None):
         name = str(rule_data.get('name', '')).strip()
         body = str(rule_data.get('body', '')).strip()
         if name and body:
-            upsert_rule(book_id, name, body=body, first_chapter_id=chapter_id)
+            rid = upsert_rule(book_id, name, body=body, first_chapter_id=chapter_id)
+            add_rule_mention(book_id, rid, chapter_id, evidence=rule_data.get('snippet') or body[:200])
 
 
 def affected_sources(structured):
@@ -1105,6 +1111,708 @@ def format_foreshadowing(book_id, status='open'):
         chapter_ref = f'第 {f["chapter_idx"] + 1} 章' if f.get('chapter_idx') is not None else '?'
         lines.append(f'- {f["hint"]}（{chapter_ref}）')
     return '\n'.join(lines)
+
+
+_GBK_INITIAL_RANGES = [
+    (-20319, -20284, 'A'), (-20283, -19776, 'B'), (-19775, -19219, 'C'),
+    (-19218, -18711, 'D'), (-18710, -18527, 'E'), (-18526, -18240, 'F'),
+    (-18239, -17923, 'G'), (-17922, -17418, 'H'), (-17417, -16475, 'J'),
+    (-16474, -16213, 'K'), (-16212, -15641, 'L'), (-15640, -15166, 'M'),
+    (-15165, -14923, 'N'), (-14922, -14915, 'O'), (-14914, -14631, 'P'),
+    (-14630, -14150, 'Q'), (-14149, -14091, 'R'), (-14090, -13319, 'S'),
+    (-13318, -12839, 'T'), (-12838, -12557, 'W'), (-12556, -11848, 'X'),
+    (-11847, -11056, 'Y'), (-11055, -10247, 'Z'),
+]
+
+
+def _pinyin_initial(text):
+    text = str(text or '').strip()
+    if not text:
+        return '#'
+    ch = text[0]
+    if ch.isascii():
+        return ch.upper() if ch.isalnum() else '#'
+    try:
+        bs = ch.encode('gbk')
+        if len(bs) >= 2:
+            code = bs[0] * 256 + bs[1] - 65536
+            for start, end, initial in _GBK_INITIAL_RANGES:
+                if start <= code <= end:
+                    return initial
+    except Exception:
+        pass
+    return '#'
+
+
+def _safe_json_loads(raw, default):
+    if not raw:
+        return default
+    text = str(raw).strip()
+    text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.I)
+    text = re.sub(r'\s*```$', '', text)
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    start_obj, end_obj = text.find('{'), text.rfind('}')
+    start_arr, end_arr = text.find('['), text.rfind(']')
+    candidates = []
+    if start_obj >= 0 and end_obj > start_obj:
+        candidates.append(text[start_obj:end_obj + 1])
+    if start_arr >= 0 and end_arr > start_arr:
+        candidates.append(text[start_arr:end_arr + 1])
+    for c in candidates:
+        try:
+            return json.loads(c)
+        except Exception:
+            continue
+    return default
+
+
+def chapter_outline(book_id, chapter_id):
+    init_db(book_id)
+    ch = get_chapter(book_id, chapter_id)
+    ch = dict(ch) if ch else None
+    chapter_idx = ch.get('idx') if ch else None
+
+    mentions = get_mentions_by_chapter(book_id, chapter_id)
+    by_entity = {}
+    for mref in mentions:
+        eid = mref.get('entity_id')
+        if not eid:
+            continue
+        ent = by_entity.setdefault(eid, {
+            'id': eid,
+            'name': mref.get('canonical_name') or '',
+            'type': mref.get('type') or '',
+            'aliases': [],
+            'initial': _pinyin_initial(mref.get('canonical_name') or ''),
+            'facts': [],
+            'recent_before': [],
+        })
+        try:
+            ent['aliases'] = json.loads(mref.get('aliases') or '[]')
+        except Exception:
+            ent['aliases'] = []
+        ent['facts'].append({
+            'id': mref.get('id'),
+            'fact': mref.get('fact') or '',
+            'snippet': mref.get('snippet') or '',
+        })
+
+    for ent in by_entity.values():
+        ent['recent_before'] = [{
+            'chapter_idx': r.get('chapter_idx'),
+            'chapter_title': r.get('chapter_title') or '',
+            'fact': r.get('fact') or '',
+            'snippet': r.get('snippet') or '',
+        } for r in get_entity_recent_mentions_before(book_id, ent['id'], chapter_idx, limit=3)]
+
+    entities = sorted(by_entity.values(), key=lambda e: (e.get('initial') or '#', e.get('name') or ''))
+
+    rules = [{
+        'id': r.get('rule_id'),
+        'name': r.get('name') or '',
+        'body': r.get('body') or '',
+        'evidence': r.get('evidence') or '',
+        'first_chapter_idx': r.get('first_chapter_idx'),
+        'first_chapter_title': r.get('first_chapter_title') or '',
+        'initial': _pinyin_initial(r.get('name') or ''),
+    } for r in get_rule_mentions_by_chapter(book_id, chapter_id)]
+    rules.sort(key=lambda r: (r.get('initial') or '#', r.get('name') or ''))
+
+    events = get_events_by_chapter(book_id, chapter_id)
+    fss = []
+    for f in list_foreshadowing(book_id):
+        if f.get('hint_chapter_id') == chapter_id or f.get('resolved_chapter_id') == chapter_id:
+            fss.append(f)
+
+    return {
+        'chapter': ch,
+        'summary': ch.get('summary', '') if ch else '',
+        'entities': entities,
+        'rules': rules,
+        'events': events,
+        'foreshadowing': fss,
+        'alerts': list_consistency_alerts(book_id, chapter_id=chapter_id, status='open', limit=8),
+    }
+
+
+def timeline_map(book_id, focus_chapter_id=None, zoom=1):
+    init_db(book_id)
+    try:
+        zoom = int(zoom)
+    except Exception:
+        zoom = 1
+    zoom = max(0, min(2, zoom))
+    raw_events = list_timeline_events(book_id)
+    events = []
+    focus_ids = []
+    fallback_order = 0
+    for ev in raw_events:
+        fallback_order += 10
+        order = ev.get('story_order')
+        if order is None:
+            ci = ev.get('chapter_idx')
+            order = (ci if ci is not None else 9999) * 1000 + fallback_order
+        importance = ev.get('importance')
+        if importance is None:
+            importance = 3 if ev.get('consequence') else 2
+        z = ev.get('zoom_level')
+        if z is None:
+            z = 1 if importance >= 4 else 2
+        item = dict(ev)
+        item['story_order'] = order
+        item['segment_id'] = item.get('segment_id') or 'main'
+        item['segment_title'] = item.get('segment_title') or '主线'
+        item['lane'] = item.get('lane') if item.get('lane') is not None else 0
+        item['importance'] = importance
+        item['zoom_level'] = z
+        item['confidence'] = item.get('confidence') if item.get('confidence') is not None else 0.5
+        item['timeline_status'] = item.get('timeline_status') or 'fallback'
+        item['uncertain'] = item['confidence'] < 0.7 or item['timeline_status'] == 'fallback'
+        if focus_chapter_id and item.get('chapter_id') == focus_chapter_id:
+            focus_ids.append(item.get('id'))
+        events.append(item)
+
+    if zoom == 0:
+        visible = [e for e in events if e.get('importance', 0) >= 4 or (focus_chapter_id and e.get('chapter_id') == focus_chapter_id)]
+        if not visible:
+            seen = set()
+            visible = []
+            for e in events:
+                sid = e.get('segment_id') or 'main'
+                if sid not in seen:
+                    visible.append(e)
+                    seen.add(sid)
+    elif zoom == 1:
+        visible = [e for e in events if e.get('importance', 0) >= 3 or (focus_chapter_id and e.get('chapter_id') == focus_chapter_id)]
+    else:
+        visible = events
+
+    segments = []
+    by_seg = {}
+    for ev in visible:
+        sid = ev.get('segment_id') or 'main'
+        seg = by_seg.setdefault(sid, {
+            'id': sid,
+            'title': ev.get('segment_title') or sid,
+            'lane': ev.get('lane') or 0,
+            'events': [],
+        })
+        seg['events'].append(ev)
+    for seg in by_seg.values():
+        seg['events'].sort(key=lambda e: (e.get('story_order') or 0, e.get('chapter_idx') or 0))
+        segments.append(seg)
+    segments.sort(key=lambda s: (s['events'][0].get('story_order') if s['events'] else 0, s.get('lane') or 0))
+
+    return {
+        'zoom': zoom,
+        'segments': segments,
+        'events_total': len(events),
+        'visible_total': len(visible),
+        'focus_event_ids': focus_ids,
+        'relations': list_timeline_relations(book_id),
+        'has_ai_layout': any((e.get('timeline_status') or '') != 'fallback' for e in events),
+        'uncertain_count': len([e for e in events if e.get('uncertain')]),
+    }
+
+
+def _timeline_event_catalog(book_id, max_events=180):
+    events = list_events(book_id)
+    out = []
+    for ev in events[:max_events]:
+        out.append({
+            'id': ev.get('id'),
+            'chapter': (ev.get('chapter_idx') + 1) if ev.get('chapter_idx') is not None else None,
+            'chapter_title': ev.get('chapter_title') or '',
+            'story_time': ev.get('story_time') or '',
+            'who': ev.get('who') or '',
+            'what': ev.get('what') or '',
+            'where': ev.get('where_loc') or '',
+            'why': ev.get('why') or '',
+            'consequence': ev.get('consequence') or '',
+        })
+    return out
+
+
+def fallback_timeline_arrange(book_id):
+    events = list_events(book_id)
+    for i, ev in enumerate(events):
+        importance = 3 if ev.get('consequence') else 2
+        upsert_timeline_event_meta(
+            book_id, ev['id'], story_order=i * 10, segment_id='main', segment_title='叙述顺序',
+            lane=0, importance=importance, zoom_level=2, confidence=0.45,
+            status='fallback', reason='未经过 AI 编排，暂按章节叙述顺序显示。'
+        )
+    return len(events)
+
+
+def arrange_timeline_ai(book_id, settings):
+    m = _main()
+    call_ai_full = m['call_ai_full']
+    set_conn_meta = m['set_conn_meta']
+    set_conn_meta('timeline', '时间线编排', book_id)
+    init_db(book_id)
+    catalog = _timeline_event_catalog(book_id)
+    if not catalog:
+        return {'updated': 0, 'fallback': True}
+    if not settings or not settings.get('base_url') or not settings.get('model'):
+        return {'updated': fallback_timeline_arrange(book_id), 'fallback': True}
+
+    prompt = f"""你是小说时间线编排员。下面是数据库已经抽取好的事件事实。你的任务不是重写时间线，而是给每个事件补充可视化编排信息。
+
+重要原则：
+1. 文本出现顺序不等于故事发生顺序；遇到倒叙、插叙、回忆、梦境、谎言叙述时，必须降低 confidence，不要装作确定。
+2. 保留不确定性。无法判断故事内先后时，segment_id 用 uncertain，confidence <= 0.6。
+3. 不要添加数据库里没有的事件。
+4. segment_id 表示连续事件段；明显时间跨度、回忆线、插叙线、平行线要拆成不同 segment。
+5. story_order 越小越早。只需相对顺序，不需要真实时间戳。
+
+事件列表 JSON：
+{json.dumps(catalog, ensure_ascii=False)}
+
+只输出 JSON，不要代码块：
+{{
+  "placements": [
+    {{"event_id":"事件id","story_order":10,"segment_id":"main","segment_title":"主线当前","lane":0,"importance":1-5,"zoom_level":0-2,"confidence":0.0-1.0,"reason":"为什么这么排","evidence":"依据的时间词或章节信息"}}
+  ],
+  "relations": [
+    {{"source_event_id":"A","target_event_id":"B","relation":"before|same_time|flashback|uncertain","confidence":0.0-1.0,"evidence":"依据","note":"说明"}}
+  ]
+}}"""
+    raw, _, err = call_ai_full(settings, [
+        {'role': 'system', 'content': '你只输出严格 JSON。你承认不确定性，绝不把复杂叙事强行排成确定答案。'},
+        {'role': 'user', 'content': prompt},
+    ], 5000, 0.2, timeout=180)
+    if err:
+        return {'updated': fallback_timeline_arrange(book_id), 'fallback': True, 'error': err}
+    data = _safe_json_loads(raw, {})
+    placements = data.get('placements') if isinstance(data, dict) else None
+    if not isinstance(placements, list):
+        return {'updated': fallback_timeline_arrange(book_id), 'fallback': True, 'error': 'AI 输出无法解析'}
+
+    valid_ids = {e['id'] for e in catalog}
+    updated = 0
+    for p in placements:
+        eid = p.get('event_id')
+        if eid not in valid_ids:
+            continue
+        try:
+            confidence = float(p.get('confidence', 0.5))
+        except Exception:
+            confidence = 0.5
+        try:
+            importance = max(1, min(5, int(p.get('importance', 2))))
+        except Exception:
+            importance = 2
+        try:
+            zoom_level = max(0, min(2, int(p.get('zoom_level', 2))))
+        except Exception:
+            zoom_level = 2
+        try:
+            lane = int(p.get('lane', 0))
+        except Exception:
+            lane = 0
+        try:
+            story_order = int(p.get('story_order', updated * 10))
+        except Exception:
+            story_order = updated * 10
+        if upsert_timeline_event_meta(
+            book_id, eid, story_order=story_order, segment_id=p.get('segment_id') or 'main',
+            segment_title=p.get('segment_title') or p.get('segment_id') or '主线',
+            lane=lane, importance=importance, zoom_level=zoom_level, confidence=confidence,
+            status='ai', reason=p.get('reason'), evidence=p.get('evidence')
+        ):
+            updated += 1
+
+    clear_ai_timeline_relations(book_id)
+    relation_items = data.get('relations', []) if isinstance(data, dict) else []
+    for r in relation_items:
+        sid = r.get('source_event_id')
+        tid = r.get('target_event_id')
+        if sid not in valid_ids:
+            continue
+        if tid and tid not in valid_ids:
+            tid = None
+        try:
+            conf = float(r.get('confidence', 0.5))
+        except Exception:
+            conf = 0.5
+        add_timeline_relation(
+            book_id, sid, tid, relation=r.get('relation') or 'uncertain',
+            confidence=conf, status='ai', evidence=r.get('evidence'), note=r.get('note')
+        )
+    return {'updated': updated, 'fallback': False}
+
+
+def generate_short_prediction(book_id, settings):
+    m = _main()
+    call_ai_full = m['call_ai_full']
+    save_prediction_md = m['save_prediction_md']
+    set_conn_meta = m['set_conn_meta']
+    set_conn_meta('prediction', '预言更新', book_id)
+    if not settings or not settings.get('base_url') or not settings.get('model'):
+        return '', '请先配置API'
+    chapters = [c for c in list_chapters_db(book_id) if c.get('status') == 'done' and c.get('summary')]
+    latest = chapters[-6:]
+    notes = []
+    for ch in latest:
+        notes.append(f"第 {ch.get('idx', 0) + 1} 章《{ch.get('title','')}》：{ch.get('summary','')[:800]}")
+    open_fs = list_foreshadowing(book_id, status='open')[:20]
+    fs_text = '\n'.join([f"- 第 {(f.get('chapter_idx') or 0) + 1} 章：{f.get('hint','')}" for f in open_fs]) or '（暂无）'
+    prompt = f"""你是正在追读这部小说的读者，只基于已公开到最新章节的信息写一个很短的预言。
+
+最近章节笔记：
+{chr(10).join(notes)}
+
+未解伏笔：
+{fs_text}
+
+要求：
+- 第一人称，用“我觉得……”
+- 只预测接下来最可能的一小段发展，不写长评
+- 允许不确定，不要编造数据库外事实
+- 120-260 字，纯文本，不要标题"""
+    result, reasoning, err = call_ai_full(settings, [
+        {'role': 'system', 'content': '你是克制的追更读者。短、具体、承认不确定性。'},
+        {'role': 'user', 'content': prompt},
+    ], 600, 0.65, timeout=120)
+    if err:
+        return '', err
+    result = (result or '').strip()
+    save_prediction_md(book_id, result)
+    return result, None
+
+
+def consistency_check(book_id, chapter_id, text, settings):
+    m = _main()
+    call_ai_full = m['call_ai_full']
+    set_conn_meta = m['set_conn_meta']
+    set_conn_meta('auto_comment', '吃书雷达', book_id)
+    init_db(book_id)
+    if not settings or not settings.get('base_url') or not settings.get('model'):
+        return {'alerts': [], 'error': '请先配置API'}
+    text = (text or '').strip()
+    if len(text) < 80:
+        return {'alerts': []}
+    focus_text = text[-2200:]
+    matched = match_entities_by_name(book_id, focus_text)
+    matched_names = [e.get('canonical_name') for e in matched[:12]]
+    ctx_parts = []
+    if matched:
+        for ent in matched[:8]:
+            block = render_entity_block(book_id, ent, max_chars=1200)
+            ctx_parts.append(block)
+    current = chapter_outline(book_id, chapter_id)
+    if current.get('events'):
+        ctx_parts.append('## 本章已入库事件\n' + '\n'.join([f"- {e.get('story_time','')} {e.get('who','')}：{e.get('what','')}" for e in current['events'][:8]]))
+    rules = list_rules(book_id)[:30]
+    if rules:
+        ctx_parts.append('## 已确认/已记录规则\n' + '\n'.join([f"- {r.get('name')}: {r.get('body')[:180]}" for r in rules]))
+    tl = timeline_map(book_id, focus_chapter_id=chapter_id, zoom=1)
+    focus_tl = []
+    for seg in tl.get('segments', [])[:8]:
+        for ev in seg.get('events', [])[:8]:
+            focus_tl.append(f"- 顺序{ev.get('story_order')} 第{(ev.get('chapter_idx') or 0)+1}章 {ev.get('story_time','')}: {ev.get('what','')}")
+    if focus_tl:
+        ctx_parts.append('## 时间线参考\n' + '\n'.join(focus_tl[:30]))
+    context = '\n\n'.join(ctx_parts)
+    if len(context) > 9000:
+        context = context[:9000]
+    prompt = f"""你是小说写作时的“吃书雷达”。你只提醒可能冲突，不替作者裁判，不修改数据库。
+
+相关知识库：
+{context or '（知识库很少）'}
+
+作者当前正在写的最新文本：
+{focus_text}
+
+请检查是否存在“可能吃书/设定冲突/时间线冲突/人物状态冲突”。如果可能是倒叙、回忆、梦境、误导叙述、角色谎言，请把它列为可解释情况，不要断言作者写错。
+
+只输出 JSON：
+{{"alerts":[{{"kind":"timeline|character|rule|object|continuity","severity":"low|medium|high","message":"一句话提醒，语气谦逊","evidence":"知识库依据","suggestion":"建议作者怎么处理或标记","highlight_text":"作者最新文本中需要用荧光笔标出的原文短句，必须逐字存在于最新文本"}}]}}
+
+最多 3 条。没有明显问题输出 {{"alerts":[]}}。highlight_text 要尽量短，优先选择新增文本里直接造成冲突的句子；如果找不到精确原文，留空。"""
+    raw, _, err = call_ai_full(settings, [
+        {'role': 'system', 'content': '你是谨慎的小说连续性检查器。只输出严格 JSON，不要替作者下定论。'},
+        {'role': 'user', 'content': prompt},
+    ], 1200, 0.2, timeout=90)
+    if err:
+        return {'alerts': [], 'error': err}
+    data = _safe_json_loads(raw, {'alerts': []})
+    alerts = data.get('alerts') if isinstance(data, dict) else []
+    if not isinstance(alerts, list):
+        alerts = []
+    clean = []
+    for a in alerts[:3]:
+        if not isinstance(a, dict) or not str(a.get('message') or '').strip():
+            continue
+        clean.append({
+            'kind': str(a.get('kind') or 'continuity')[:40],
+            'severity': str(a.get('severity') or 'medium')[:20],
+            'message': str(a.get('message') or '').strip()[:300],
+            'evidence': str(a.get('evidence') or '').strip()[:500],
+            'suggestion': str(a.get('suggestion') or '').strip()[:300],
+            'highlight_text': str(a.get('highlight_text') or '').strip()[:240],
+        })
+    source_hash = hashlib.sha256(focus_text.encode('utf-8')).hexdigest()
+    saved = save_consistency_alerts(book_id, chapter_id, clean, source_hash=source_hash) if clean else []
+    return {'alerts': saved, 'matched_entities': matched_names}
+
+
+def _focus_passages(content, focus_texts=None, max_chars=6000):
+    content = content or ''
+    focus_texts = [str(x).strip() for x in (focus_texts or []) if str(x).strip()]
+    if not content:
+        return ''
+    if not focus_texts:
+        return content[:max_chars] if len(content) <= max_chars else content[-max_chars:]
+
+    spans = []
+    for ft in focus_texts:
+        idx = content.find(ft)
+        if idx < 0:
+            compact = re.sub(r'\s+', '', ft)
+            compact_content = re.sub(r'\s+', '', content)
+            ci = compact_content.find(compact[:80])
+            if ci >= 0:
+                idx = max(0, min(len(content) - 1, ci))
+        if idx >= 0:
+            start = content.rfind('\n\n', 0, idx)
+            if start < 0:
+                start = content.rfind('\n', 0, idx)
+            start = 0 if start < 0 else start + 1
+            end = content.find('\n\n', idx + len(ft))
+            if end < 0:
+                end = content.find('\n', idx + len(ft))
+            end = len(content) if end < 0 else end
+            start = max(0, start - 300)
+            end = min(len(content), end + 300)
+            spans.append((start, end))
+
+    if not spans:
+        joined = '\n'.join(focus_texts)
+        return (joined + '\n\n--- 原章片段兜底 ---\n' + content[:max_chars])[:max_chars]
+
+    spans.sort()
+    merged = []
+    for s, e in spans:
+        if not merged or s > merged[-1][1] + 80:
+            merged.append([s, e])
+        else:
+            merged[-1][1] = max(merged[-1][1], e)
+    parts = [content[s:e].strip() for s, e in merged if content[s:e].strip()]
+    text = '\n\n---\n\n'.join(parts)
+    if len(text) > max_chars:
+        text = text[:max_chars]
+    return text
+
+
+def _chapter_kb_records_for_reread(book_id, chapter_id):
+    records = {'mentions': [], 'events': [], 'rules': [], 'foreshadowing': []}
+    for mref in get_mentions_by_chapter(book_id, chapter_id):
+        records['mentions'].append({
+            'id': mref.get('id'),
+            'entity': mref.get('canonical_name') or '',
+            'type': mref.get('type') or '',
+            'fact': mref.get('fact') or '',
+            'snippet': mref.get('snippet') or '',
+        })
+    for ev in get_events_by_chapter(book_id, chapter_id):
+        records['events'].append({
+            'id': ev.get('id'),
+            'story_time': ev.get('story_time') or '',
+            'who': ev.get('who') or '',
+            'what': ev.get('what') or '',
+            'where': ev.get('where_loc') or '',
+            'why': ev.get('why') or '',
+            'consequence': ev.get('consequence') or '',
+        })
+    for r in get_rule_mentions_by_chapter(book_id, chapter_id):
+        records['rules'].append({
+            'id': r.get('rule_id'),
+            'name': r.get('name') or '',
+            'body': r.get('body') or '',
+            'evidence': r.get('evidence') or '',
+        })
+    for f in list_foreshadowing(book_id):
+        if f.get('hint_chapter_id') == chapter_id or f.get('resolved_chapter_id') == chapter_id:
+            records['foreshadowing'].append({
+                'id': f.get('id'),
+                'status': f.get('status') or '',
+                'hint': f.get('hint') or '',
+                'resolution': f.get('resolution') or '',
+            })
+    return records
+
+
+def apply_partial_structured_result(book_id, chapter_id, structured):
+    added = {'mentions': 0, 'events': 0, 'foreshadowing': 0, 'rules': 0}
+    for ent_data in structured.get('entities', []) or []:
+        canonical = str(ent_data.get('canonical_name', '')).strip()
+        if not canonical:
+            continue
+        ent_id = upsert_entity(
+            book_id, canonical, ent_data.get('type', '人物') or '人物',
+            aliases=ent_data.get('aliases_in_chapter', []) or [],
+            first_chapter_id=chapter_id,
+        )
+        for fact_data in ent_data.get('facts', []) or []:
+            fact = str(fact_data.get('fact', '')).strip()
+            if not fact:
+                continue
+            add_mention(book_id, ent_id, chapter_id, fact=fact, snippet=fact_data.get('snippet'))
+            added['mentions'] += 1
+
+    for ev_data in structured.get('events', []) or []:
+        what = str(ev_data.get('what', '')).strip()
+        if not what:
+            continue
+        add_event(
+            book_id, chapter_id,
+            story_time=ev_data.get('story_time', ''),
+            who=ev_data.get('who', ''),
+            what=what,
+            where_loc=ev_data.get('where', ev_data.get('where_loc', '')),
+            why=ev_data.get('why', ''),
+            consequence=ev_data.get('consequence', ''),
+        )
+        added['events'] += 1
+
+    for fs_data in structured.get('foreshadowing_new', []) or []:
+        hint = str(fs_data.get('hint', '')).strip()
+        if hint:
+            add_foreshadowing(book_id, chapter_id, hint=hint)
+            added['foreshadowing'] += 1
+
+    for fs_res_data in structured.get('foreshadowing_resolved', []) or []:
+        earlier = str(fs_res_data.get('earlier_hint', '')).strip()
+        if earlier:
+            resolve_foreshadowing(book_id, hint=earlier, resolved_chapter_id=chapter_id,
+                                  resolution=fs_res_data.get('resolution', ''))
+            added['foreshadowing'] += 1
+
+    for rule_data in structured.get('rules', []) or []:
+        name = str(rule_data.get('name', '')).strip()
+        body = str(rule_data.get('body', '')).strip()
+        if name and body:
+            rid = upsert_rule(book_id, name, body=body, first_chapter_id=chapter_id)
+            add_rule_mention(book_id, rid, chapter_id, evidence=rule_data.get('snippet') or body[:200])
+            added['rules'] += 1
+    return added
+
+
+def reread_passages(book_id, chapter_ids, correction, focus_texts, settings):
+    m = _main()
+    _read_chapter_file = m['_read_chapter_file']
+    call_ai_full = m['call_ai_full']
+    set_conn_meta = m['set_conn_meta']
+    render_markdown_views_fn = render_markdown_views
+    set_conn_meta('kb-reread', '局部重读', book_id)
+    init_db(book_id)
+
+    chapter_ids = [str(x) for x in (chapter_ids or []) if str(x)]
+    focus_texts = [str(x) for x in (focus_texts or []) if str(x).strip()]
+    correction = str(correction or '').strip()
+    if not chapter_ids:
+        raise ValueError('缺少要重读的章节')
+    if not correction:
+        raise ValueError('缺少用户纠正说明')
+    if not settings or not settings.get('base_url') or not settings.get('model'):
+        raise ValueError('请先配置API')
+
+    total_deleted = {'mentions': 0, 'events': 0, 'foreshadowing': 0, 'rules': 0}
+    total_added = {'mentions': 0, 'events': 0, 'foreshadowing': 0, 'rules': 0}
+    details = []
+    events_changed = False
+
+    for chapter_id in chapter_ids[:6]:
+        raw = _read_chapter_file(book_id, chapter_id)
+        if not raw:
+            continue
+        title = raw.get('title', '')
+        content = raw.get('content', '')
+        passages = _focus_passages(content, focus_texts, max_chars=6500)
+        current_records = _chapter_kb_records_for_reread(book_id, chapter_id)
+        prompt = f"""用户指出 Luca 对某些段落的理解有误。你要局部重读，修正知识库。
+
+用户纠正说明：
+{correction}
+
+重读章节：《{title}》
+
+只阅读以下有关段落，不要扩大到无关正文：
+{passages}
+
+当前知识库里与本章有关的记录（可能有错，id 很重要）：
+{json.dumps(current_records, ensure_ascii=False)}
+
+任务：
+1. 根据用户纠正和原文段落，判断哪些旧记录是由误读造成的，列入 delete。
+2. 用通读同样的结构补充正确记录，列入 add。
+3. 只处理这段相关内容。不要删除或改写无关记录。
+4. 如果不确定，不要乱删；可以少改。
+5. snippet 必须来自原文段落。
+
+只输出严格 JSON，不要代码块：
+{{
+  "delete": {{"mentions":["旧mention id"],"events":["旧event id"],"rules":["旧rule id"],"foreshadowing":["旧foreshadowing id"]}},
+  "add": {{
+    "entities":[{{"canonical_name":"人物/实体名","type":"人物/物品/地点/势力/概念","aliases_in_chapter":[],"facts":[{{"fact":"正确事实","snippet":"原文片段"}}]}}],
+    "events":[{{"story_time":"故事内时间，不能确定就写时间未定","who":"参与者","what":"正确事件","where":"地点","why":"原因","consequence":"后果","snippet":"原文片段"}}],
+    "foreshadowing_new":[{{"hint":"新伏笔","snippet":"原文片段"}}],
+    "foreshadowing_resolved":[{{"earlier_hint":"被回收的旧伏笔","resolution":"如何回收","snippet":"原文片段"}}],
+    "rules":[{{"name":"设定名","body":"正确设定","snippet":"原文片段"}}]
+  }},
+  "note":"一句话说明你改了什么"
+}}"""
+        raw_result, _, err = call_ai_full(settings, [
+            {'role': 'system', 'content': '你是严谨的知识库局部重读器。只输出严格 JSON。只修正用户指出的误读，不碰无关内容。'},
+            {'role': 'user', 'content': prompt},
+        ], 4000, 0.2, timeout=180)
+        if err:
+            raise RuntimeError(err)
+        patch = _safe_json_loads(raw_result, {})
+        if not isinstance(patch, dict):
+            raise RuntimeError('局部重读输出无法解析')
+        delete_map = patch.get('delete') if isinstance(patch.get('delete'), dict) else {}
+        add_structured = patch.get('add') if isinstance(patch.get('add'), dict) else {}
+        deleted = delete_kb_records(book_id, delete_map)
+        added = apply_partial_structured_result(book_id, chapter_id, add_structured)
+        for k, v in deleted.items():
+            total_deleted[k] = total_deleted.get(k, 0) + (v or 0)
+        for k, v in added.items():
+            total_added[k] = total_added.get(k, 0) + (v or 0)
+        if deleted.get('events') or added.get('events'):
+            events_changed = True
+        details.append({'chapter_id': chapter_id, 'title': title, 'deleted': deleted, 'added': added, 'note': patch.get('note', '')})
+
+    if not details:
+        raise ValueError('没有找到可重读的章节')
+
+    try:
+        embed_clear(book_id)
+        incremental_embed(book_id, settings)
+    except Exception:
+        pass
+    try:
+        render_markdown_views_fn(book_id)
+    except Exception:
+        pass
+    if events_changed:
+        try:
+            arrange_timeline_ai(book_id, settings)
+        except Exception:
+            pass
+
+    return {
+        'chapters': len(details),
+        'details': details,
+        'deleted': total_deleted,
+        'added': total_added,
+        'events_changed': events_changed,
+    }
 
 
 def render_chapter_block(ch, max_chars=2500):
