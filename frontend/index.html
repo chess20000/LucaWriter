@@ -14,6 +14,7 @@
  --t1:#f8f9ff;--t2:#e6eaf2;--t3:#bfc9dd;
  /* Readability variables */
  --content-font-size:20px;
+ --editor-font-size:20px;
  --content-line-height:2.05;
  --panel-padding:20px;
  --radius:10px;
@@ -60,6 +61,7 @@
  --border:rgba(0,0,0,.15);--border2:rgba(0,0,0,.2);
  --scrollbar:rgba(0,0,0,.14);--scrollbar-hover:rgba(0,0,0,.22);
  --content-font-size:20px;
+ --editor-font-size:20px;
  --content-line-height:2.0;
  --panel-padding:16px;
  --on-accent:#1a1a1a;
@@ -90,6 +92,9 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 .topbar-btn:active{background:var(--surface4)}
 .topbar-btn.accent{color:var(--t-on-surface);background:var(--accent-a12);border:1px solid var(--accent-a15);backdrop-filter:blur(6px) saturate(160%);-webkit-backdrop-filter:blur(6px) saturate(160%)}
 .topbar-btn.accent:hover{background:var(--accent-dim)}
+.topbar-ch-title{flex:1;min-width:0;background:transparent;border:none;font-size:13px;font-weight:600;color:var(--t1);outline:none;padding:0;letter-spacing:-.2px}
+.topbar-ch-title::placeholder{color:var(--t3)}
+.topbar-complete-btn{font-size:12px!important;padding:4px 10px!important}
 .theme-toggle-btn{width:32px;height:32px;padding:5px;display:flex;align-items:center;justify-content:center;border-radius:50%}
 .theme-toggle-btn svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
 .topbar-sep{flex:1;min-width:12px}.topbar-device{font-size:11px;color:var(--t3);padding:2px 8px;background:var(--surface2);border-radius:var(--r1);white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis;border:1px solid var(--border)}
@@ -97,7 +102,6 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 .glass-surface,
 .topbar,
 .bookshelf-view,
-.editor-top,
 .right-sidebar,
 .bottom-panel {
   background:var(--glass-bg);
@@ -169,6 +173,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .left-sidebar::after{content:'';position:absolute;top:14px;bottom:14px;right:0;width:1px;background:linear-gradient(to bottom,transparent 0%,var(--border) 22%,var(--border) 78%,transparent 100%);opacity:.25;pointer-events:none}
 .left-sidebar.collapsed{opacity:0;pointer-events:none}
 .sidebar-trigger{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:90;background:var(--surface);border-right:1px solid var(--border);color:var(--t3);position:absolute;left:0;top:38px;bottom:0}
+.app:not(.writing-active) .sidebar-trigger,.app:not(.writing-active) .left-sidebar{display:none}
 .sidebar-trigger:hover{background:var(--surface2);color:var(--t-on-surface)}
 .sidebar-trigger svg{width:12px;height:12px;transform:rotate(0deg);transition:transform .25s ease}
 .sidebar-trigger.expanded svg{transform:rotate(180deg)}
@@ -265,15 +270,11 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .book-list-new:hover{color:var(--t-on-surface);background:var(--accent-a12);border-color:var(--accent);backdrop-filter:blur(6px) saturate(160%);-webkit-backdrop-filter:blur(6px) saturate(160%)}
 
 .editor-area{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;padding:0}
-.editor-top{padding:10px 20px;display:flex;align-items:center;gap:12px;flex-shrink:0}
-
-.editor-top input{flex:1;background:transparent;border:none;font-size:17px;font-weight:600;color:var(--t1);outline:none;padding:0;letter-spacing:-.2px}
-.editor-top input::placeholder{color:var(--t3)}
 .editor-wc{font-size:11px;color:var(--t3);flex-shrink:0;font-family:var(--font-mono)}
 .save-indicator{font-size:11px;color:var(--t3);flex-shrink:0;font-family:var(--font-mono);opacity:0;transition:opacity .2s}
 .save-indicator.show{opacity:1}.save-indicator.err{color:var(--danger)}
 .editor-body{flex:1;overflow:hidden;position:relative;background:transparent;padding:0;border:none}
-.editor-body textarea{width:100%;height:100%;resize:none;background:var(--surface);border:none;font-family:var(--font-serif);line-height:var(--content-line-height);font-size:var(--content-font-size);color:var(--t-on-surface);outline:none;padding:24px 36px;border-radius:0;letter-spacing:.3px;caret-color:var(--accent);position:relative;z-index:1;box-shadow:none}
+.editor-body textarea{width:100%;height:100%;resize:none;background:var(--surface);border:none;font-family:var(--font-serif);line-height:var(--content-line-height);font-size:var(--editor-font-size);color:var(--t-on-surface);outline:none;padding:24px 36px;border-radius:0;letter-spacing:.3px;caret-color:var(--accent);position:relative;z-index:1;box-shadow:none}
 .editor-body textarea::placeholder{color:var(--t3)}
 .editor-body textarea::selection{background:var(--t3);color:#fff}
 
@@ -292,7 +293,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .ai-dismiss:hover{color:var(--danger);border-color:var(--danger)}
 
 .editor-highlight-layer{position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:none}
-.editor-highlight-content{padding:24px 36px;font-family:var(--font-serif);line-height:var(--content-line-height);font-size:var(--content-font-size);letter-spacing:.3px;white-space:pre-wrap;word-wrap:break-word;color:transparent}
+.editor-highlight-content{padding:24px 36px;font-family:var(--font-serif);line-height:var(--content-line-height);font-size:var(--editor-font-size);letter-spacing:.3px;white-space:pre-wrap;word-wrap:break-word;color:transparent}
 .editor-highlight-content mark{background:rgba(232,204,122,.24);color:transparent;border-bottom:2px solid var(--accent);border-radius:2px}
 .editor-highlight-content mark.green{background:rgba(95,184,120,.22);border-bottom-color:#5fb878}
 .editor-highlight-content mark.pink{background:rgba(212,107,139,.24);border-bottom-color:#d46b8b}
@@ -462,11 +463,39 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .kb-item-body{margin-top:4px;color:var(--t2);font-size:11px;white-space:pre-wrap}
 .kb-sub{margin-top:5px;color:var(--t3);font-size:10px}
 .kb-fact{margin-top:4px;padding-left:8px;border-left:2px solid var(--accent-a30)}
+.tl-empty{height:100%;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:12px;text-align:center;padding:20px}
 .radar-alert{border-color:var(--accent-a30);background:var(--accent-a03)}
 .radar-alert.high{border-color:var(--danger)}
 .radar-actions{display:flex;gap:6px;margin-top:6px}
 .mini-btn{background:var(--surface2);color:var(--t2);border:1px solid var(--border);border-radius:var(--r1);font-size:10px;padding:2px 7px;cursor:pointer}
 .mini-btn:hover{border-color:var(--accent);color:var(--accent)}
+.timeline-pane{flex-direction:column;flex:1;min-height:0;overflow:hidden;background:var(--bg)}
+.timeline-toolbar{height:34px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 12px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0}
+.timeline-title{display:flex;align-items:center;gap:8px;min-width:0;color:var(--t1);font-size:12px;font-weight:700}
+.timeline-title .kb-muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.timeline-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.timeline-action-btn{height:24px;min-width:28px;padding:0 9px;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface2);color:var(--t2);font-size:11px;font-weight:650;cursor:pointer}
+.timeline-action-btn:hover{border-color:var(--accent);color:var(--accent)}
+.timeline-action-btn:disabled{opacity:.45;cursor:wait}
+.timeline-zoom-badge{height:24px;display:inline-flex;align-items:center;padding:0 8px;border:1px solid var(--border);border-radius:var(--r1);background:var(--bg);color:var(--t3);font-size:10px;font-weight:650}
+.timeline-river{position:relative;flex:1;min-height:0;overflow:auto;background:linear-gradient(180deg,var(--bg),var(--surface));cursor:zoom-out}
+.timeline-river-inner{position:relative;min-width:900px;height:100%;min-height:260px}
+.timeline-segment{position:absolute;left:0;right:0}
+.timeline-segment-line{position:absolute;height:8px;border-radius:var(--r2);background:linear-gradient(90deg,rgba(94,186,190,.32),var(--accent-a70),rgba(212,107,139,.32));box-shadow:0 0 18px var(--accent-a15);cursor:zoom-in}
+.timeline-segment-line:hover{box-shadow:0 0 24px var(--accent-a40);filter:brightness(1.08)}
+.timeline-seg-label{position:absolute;left:18px;top:8px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t3);font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--border);border-radius:var(--r1);padding:2px 7px}
+.timeline-bubble{position:absolute;width:168px;min-height:70px;transform:translate(-50%,-50%);padding:8px 9px;border:1px solid var(--border2);border-radius:var(--r3);background:var(--surface);box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:grab;user-select:none;touch-action:none;color:var(--t2);transition:border-color .12s,box-shadow .12s,transform .12s}
+.timeline-bubble:hover{border-color:var(--accent-a70);box-shadow:0 10px 30px rgba(0,0,0,.3)}
+.timeline-bubble.dragging{cursor:grabbing;z-index:20;transition:none;border-color:var(--accent);box-shadow:0 16px 40px rgba(0,0,0,.45);transform:translate(-50%,-50%) scale(1.02)}
+.timeline-bubble.focus{border-color:var(--accent);background:var(--accent-a12)}
+.timeline-bubble.uncertain{border-style:dashed}
+.timeline-bubble.user-corrected::after{content:'已校';position:absolute;right:7px;bottom:5px;color:var(--accent);font-size:9px;font-weight:750}
+.tl-bubble-head{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:4px;color:var(--t3);font-size:10px}
+.tl-bubble-time{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tl-bubble-title{font-size:12px;line-height:1.35;font-weight:700;color:var(--t1);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tl-bubble-meta{display:none;margin-top:5px;color:var(--t3);font-size:10px;line-height:1.35;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.timeline-river.zoom-2 .timeline-bubble{width:220px;min-height:96px}
+.timeline-river.zoom-2 .tl-bubble-meta{display:-webkit-box}
 .prediction-pane{flex-direction:column;height:100%;position:relative}
 .prediction-idle{flex:1;overflow-y:auto}
 .prediction-loading{position:absolute;inset:0;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:5}
@@ -544,7 +573,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  .rt-stat-value,.rt-db-section-body,.rt-source{font-size:11px}
  .rt-stat-label,.rt-db-section-head,.rt-message-name{font-size:10px}
 }
-.prediction-pane,.outline-pane{flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.timeline-pane,.prediction-pane,.outline-pane{flex-direction:column;flex:1;min-height:0;overflow:hidden}
 
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px) saturate(160%);-webkit-backdrop-filter:blur(6px) saturate(160%);z-index:100;justify-content:center;align-items:center}
 .modal-bg.open{display:flex}
@@ -744,11 +773,15 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="topbar-breadcrumb" id="breadcrumb">
  <span class="bc-book" id="bcBook" onclick="backToBooks()" style="display:none">Books</span>
  <span class="bc-sep" id="bcSep" style="display:none">/</span>
+ <input id="chTitleInput" class="topbar-ch-title" placeholder="章节标题" oninput="onTitleChange()" onkeydown="if(event.key==='Enter'){$('editorArea').focus();event.preventDefault()}" style="display:none">
  <span class="bc-chapter" id="bcChapter">LucaWriter</span>
  </div>
+ <span class="editor-wc" id="wordCount" style="display:none">0</span>
+ <span class="save-indicator" id="saveIndicator">已保存</span>
  <div class="ai-active-dots" id="aiActiveDots"></div>
  <div class="topbar-sep"></div>
     <button class="topbar-btn" id="topbarSummaryBtn" onclick="toggleBottomPanel()" style="display:none">摘要</button>
+    <button class="topbar-btn topbar-complete-btn" id="topbarCompleteBtn" onclick="completeChapter()" title="本章写完" style="display:none">&#10003; 本章写完</button>
     <button class="topbar-btn theme-toggle-btn" id="themeToggleBtn" onclick="toggleThemeMode()" title="切换深色/浅色模式" aria-label="切换深色/浅色模式">
       <svg id="tglMoon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <svg id="tglSun" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -853,12 +886,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="resize-handle" id="resizeHandleR" title="拖拽调整左侧栏宽度"></div>
 
  <div class="editor-area">
- <div class="editor-top">
-          <input id="chTitleInput" placeholder="章节标题" oninput="onTitleChange()" onkeydown="if(event.key==='Enter'){$('editorArea').focus();event.preventDefault()}">
- <span class="editor-wc" id="wordCount">0</span>
-          <span class="save-indicator" id="saveIndicator">已保存</span>
- <button class="ai-send" style="padding:4px 10px;font-size:11px" onclick="completeChapter()" title="本章写完">&#10003; 本章写完</button>
- </div>
  <div class="editor-body">
  <div class="editor-highlight-layer" id="highlightLayer"><div class="editor-highlight-content" id="highlightContent"></div></div>
  <div class="search-bar" id="searchBar">
@@ -887,13 +914,31 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
     <div id="aiInputZone" style="width:280px;flex:none;display:flex;align-items:stretch">
     <input class="ai-input" id="aiInput" placeholder="问 Luca" autocomplete="off" data-form-type="other" style="flex:1;min-width:0;height:30px;padding:0 10px;font-size:12px;border-radius:0;border:none;background:var(--surface2);color:var(--t1);outline:none" onkeydown="if(event.key==='Enter')sendAI()">
     </div>
-    <div class="bottom-tabs" style="margin-left:auto">
-          <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')">预言</button>
-          <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')">大纲</button>
-          <button class="bottom-tab active" data-btab="summary" onclick="switchBottomTab('summary')">摘要</button>
-    </div>
+	    <div class="bottom-tabs" style="margin-left:auto">
+	          <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')">时间线</button>
+	          <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')">预言</button>
+	          <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')">大纲</button>
+	          <button class="bottom-tab active" data-btab="summary" onclick="switchBottomTab('summary')">摘要</button>
+	    </div>
   </div>
  <div class="bottom-body">
+
+        <!-- 时间线 -->
+ <div class="bottom-pane timeline-pane" id="timelinePane">
+ <div class="timeline-toolbar">
+  <div class="timeline-title"><span>时间长河</span><span class="kb-muted" id="timelineMeta"></span></div>
+  <div class="timeline-actions">
+   <button class="timeline-action-btn" onclick="timelineZoomOut()" title="缩小">-</button>
+   <span class="timeline-zoom-badge" id="timelineZoomBadge">中景</span>
+   <button class="timeline-action-btn" onclick="timelineZoomIn()" title="放大">+</button>
+   <button class="timeline-action-btn" onclick="loadTimelineRiver(true)" title="刷新">刷新</button>
+   <button class="timeline-action-btn" onclick="arrangeTimelineRiver()" title="自动整理故事内顺序">整理</button>
+  </div>
+ </div>
+ <div class="timeline-river" id="timelineRiver" onclick="timelineRiverClick(event)">
+  <div class="tl-empty">通读或本章写完后，时间线会在这里汇成一条长河。</div>
+ </div>
+ </div>
 
         <!-- 预言 -->
  <div class="bottom-pane prediction-pane" id="predictionPane">
@@ -1063,6 +1108,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 </div>
 <div id="stAppearance" style="display:none">
   <p style="font-size:11px;color:var(--accent);line-height:1.5;margin-bottom:12px">● 外观设置即时生效，无需保存</p>
+  <div class="mg"><label>编辑器字号</label><div class="zoom-row" id="fontSizeRow"><button class="zoom-btn" data-fs="14" onclick="applyFontSize(14,this)"><span style="font-size:11px">14</span></button><button class="zoom-btn" data-fs="16" onclick="applyFontSize(16,this)"><span style="font-size:12px">16</span></button><button class="zoom-btn" data-fs="18" onclick="applyFontSize(18,this)"><span style="font-size:13px">18</span></button><button class="zoom-btn active" data-fs="20" onclick="applyFontSize(20,this)"><span style="font-size:14px">20</span></button><button class="zoom-btn" data-fs="22" onclick="applyFontSize(22,this)"><span style="font-size:15px">22</span></button><button class="zoom-btn" data-fs="24" onclick="applyFontSize(24,this)"><span style="font-size:16px">24</span></button><button class="zoom-btn" data-fs="28" onclick="applyFontSize(28,this)"><span style="font-size:18px">28</span></button></div><input id="sFontSize" type="hidden" value="20"></div>
   <div class="mg"><label>界面缩放</label><div class="zoom-row" id="zoomRow"><button class="zoom-btn" data-z="0.75" onclick="applyZoom(0.75,this)"><span style="font-size:12px">永</span></button><button class="zoom-btn" data-z="0.9" onclick="applyZoom(0.9,this)"><span style="font-size:14px">永</span></button><button class="zoom-btn active" data-z="1.0" onclick="applyZoom(1.0,this)"><span style="font-size:16px">永</span></button><button class="zoom-btn" data-z="1.15" onclick="applyZoom(1.15,this)"><span style="font-size:19px">永</span></button><button class="zoom-btn" data-z="1.35" onclick="applyZoom(1.35,this)"><span style="font-size:23px">永</span></button><button class="zoom-btn" data-z="1.6" onclick="applyZoom(1.6,this)"><span style="font-size:28px">永</span></button><button class="zoom-btn" data-z="1.9" onclick="applyZoom(1.9,this)"><span style="font-size:33px">永</span></button></div><input id="sZoom" type="hidden" value="1.0"></div>
   <div class="mg"><label>LUCA对话快捷键</label><div class="cs-wrap" id="csWrap_sShortcut"><button class="cs-trigger" type="button" onclick="toggleCS(this)"><span class="cs-label">无</span><svg class="cs-arrow" viewBox="0 0 10 6"><path d="M0 0l5 6 5-6z"/></svg></button><div class="cs-dropdown"></div><select id="sShortcut" class="cs-src" style="display:none"><option value="none">无</option><option value="minus">- 键</option><option value="backslash">\ 键</option><option value="alt">Alt</option></select></div></div>
   <div class="mg-toggle"><label>主题色</label><div style="display:flex;align-items:center;gap:8px"><input id="sThemeAccent" type="text" maxlength="7" placeholder="#E8CC7A" style="width:120px;background:var(--surface3);border:1px solid var(--border);color:var(--t1);padding:6px 10px;border-radius:var(--r1);font-family:var(--font-mono);font-size:14px" oninput="onThemeAccentInput(this.value)"><div id="themeColorPreview" style="width:32px;height:32px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;background:#E8CC7A"></div></div></div>
@@ -1290,6 +1336,12 @@ var _radarPending=false;
 var _radarLastLen=0;
 var _latestRadarAlerts=[];
 var _radarChatKeys=new Set();
+var timelineZoom=1;
+var _timelineData=null;
+var _timelineLoading=false;
+var _timelineDragging=null;
+var _timelineOrderRange={min:0,max:1000};
+var _timelineLayout={pad:72,rowGap:96,minLane:-2,maxLane:2,minOrder:0,maxOrder:1000};
 
 /* === AI 活跃连接指示 === */
 var _aiActivityES=null;
@@ -1375,7 +1427,17 @@ function loadAppState(){
 }
 
 function clearAppState(){
- try{localStorage.removeItem('lucawriter_state')}catch(e){}
+	 try{localStorage.removeItem('lucawriter_state')}catch(e){}
+}
+
+function setWritingViewActive(on){
+ var app=document.querySelector('.app');
+ if(app)app.classList.toggle('writing-active',!!on);
+ if(!on){
+  var sb=$('leftSidebar'),tr=$('sidebarTrigger');
+  if(sb)sb.classList.add('collapsed');
+  if(tr)tr.classList.remove('expanded');
+ }
 }
 
 function init(){initAllCS();loadSettings();loadThemedIcon();_startAIActivity();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
@@ -1404,9 +1466,10 @@ function setupModals(){
 }
 
 function showBookShelf(){
- bookId=null;chapterId=null;currentChapter=null;currentBookTitle='';
- seriesId=null;seriesTitle='';seriesBooks=[];seriesBookOrder=[];
- $('topbarSummaryBtn').style.display='none';
+	 setWritingViewActive(false);
+	 bookId=null;chapterId=null;currentChapter=null;currentBookTitle='';
+	 seriesId=null;seriesTitle='';seriesBooks=[];seriesBookOrder=[];
+	 $('topbarSummaryBtn').style.display='none';
  $('editorView').style.display='none';$('bottomPanel').style.display='none';
  $('bookshelfView').classList.add('active');
  $('seriesView').classList.remove('active');
@@ -1530,8 +1593,9 @@ function loadBooks(){showBookShelf()}
 function showBookCreate(){showPrompt('新建书本','书名','新建书本',function(t){if(!t)return;api('POST','/api/books/create',{title:t},function(d){if(d.book){cachedBooks=null;currentBookTitle=d.book.title;openBook(d.book.id)}})})}
 
 function openBook(id){
- bookId=id;chapterId=null;currentChapter=null;inTrash=false;aiMessages=[];
- bookAnnotations={};
+	 setWritingViewActive(true);
+	 bookId=id;chapterId=null;currentChapter=null;inTrash=false;aiMessages=[];
+	 bookAnnotations={};
  $('topbarSummaryBtn').style.display='';
   $('bookshelfView').classList.remove('active');
   $('seriesView').classList.remove('active');
@@ -1544,9 +1608,13 @@ function openBook(id){
  // Reset summary panel for new book
   $('rtStream').textContent='等待开始...';
  $('rtSource').value='';
- $('outlineSource').innerHTML='打开章节后显示本章相关人物、设定、事件和伏笔。';
- $('outlineLog').textContent='当前没有提醒。';
- $('predictionResultBody').innerHTML='<div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>';
+	 $('outlineSource').innerHTML='打开章节后显示本章相关人物、设定、事件和伏笔。';
+	 $('outlineLog').textContent='当前没有提醒。';
+	 timelineZoom=1;_timelineData=null;
+	 if($('timelineRiver'))$('timelineRiver').innerHTML='<div class="tl-empty">通读或本章写完后，时间线会在这里汇成一条长河。</div>';
+	 if($('timelineMeta'))$('timelineMeta').textContent='';
+	 if($('timelineZoomBadge'))$('timelineZoomBadge').textContent='中景';
+	 $('predictionResultBody').innerHTML='<div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>';
   $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='准备中...';
   $('rtChapters').textContent='0/0 章';
   _setRTButtonUI('idle', -1);
@@ -1555,9 +1623,10 @@ function openBook(id){
  updateBreadcrumb();
  saveAppState();
  setEditorLoading(true);
- loadChapters();
- loadAIMessages();
- loadPredictionCurrent();
+	 loadChapters();
+	 loadAIMessages();
+	 loadTimelineRiver();
+	 loadPredictionCurrent();
  loadSourceToRT();
  loadAnnotations();
 }
@@ -1574,9 +1643,10 @@ function backToBooks(){
  if(bookId&&chapterId&&currentChapter){doSaveNow()}
  clearAppState();
  setEditorLoading(false);
- if(seriesId){
-  $('topbarSummaryBtn').style.display='none';
-  $('bookshelfView').classList.remove('active');
+	 if(seriesId){
+	  setWritingViewActive(false);
+	  $('topbarSummaryBtn').style.display='none';
+	  $('bookshelfView').classList.remove('active');
   $('editorView').style.display='none';$('bottomPanel').style.display='none';
   $('seriesView').classList.add('active');
   updateBreadcrumb();
@@ -1650,19 +1720,23 @@ function filterChapters(){renderChapterList()}
 
 function updateBreadcrumb(){
  var bc=$('breadcrumb');
- var bookEl=$('bcBook');var sepEl=$('bcSep');var chEl=$('bcChapter');
+ var bookEl=$('bcBook');var sepEl=$('bcSep');var chEl=$('bcChapter');var chIn=$('chTitleInput');var wcEl=$('wordCount');var cbEl=$('topbarCompleteBtn');
  if(bookId){
  bookEl.style.display='inline';sepEl.style.display='inline';
  bookEl.textContent=currentBookTitle||'Book';
  if(chapterId&&currentChapter){
-      var chTitle=$('chTitleInput').value||currentChapter.title||'未命名';
- chEl.textContent=chTitle;
+      chIn.value=$('chTitleInput').value||currentChapter.title||'';
+ chEl.style.display='none';chIn.style.display='';
+ wcEl.style.display='';cbEl.style.display='';
  }else{
  chEl.textContent=currentBookTitle||'Book';
+ chEl.style.display='';chIn.style.display='none';
+ wcEl.style.display='none';cbEl.style.display='none';
  }
  }else{
  bookEl.style.display='none';sepEl.style.display='none';
- chEl.textContent='LucaWriter';
+ chEl.textContent='LucaWriter';chEl.style.display='';
+ chIn.style.display='none';wcEl.style.display='none';cbEl.style.display='none';
  }
 }
 
@@ -1672,6 +1746,7 @@ function selectChapter(id){
  chapterId=id;currentChapter=null;
  saveAppState();
   $('chTitleInput').value='加载中...';$('editorArea').value='';$('wordCount').textContent='0';
+ updateBreadcrumb();
  setEditorLoading(true);
  api('POST','/api/book/'+bookId+'/set-current-chapter',{id:id},function(){});
  api('GET','/api/book/'+bookId+'/chapter/'+id,undefined,function(d,s){
@@ -1908,10 +1983,11 @@ function _startChatPoll(taskId){
  }
  }
  if(!found){
- // pending 
  aiMessages.push({text:st.result||'',type:'ai',reasoning:st.reasoning||'',_pending:true,task_id:taskId});
- }
  renderAIMessages();
+ }else{
+ _updateLiveAIMessage(i);
+ }
  }
  });
  },800);
@@ -1942,38 +2018,36 @@ function _stopChatPoll(){if(_chatPollTimer){clearInterval(_chatPollTimer);_chatP
 
 function saveAIMessages(){if(!bookId)return;api('POST','/api/book/'+bookId+'/messages',{date:getTodayStr(),messages:aiMessages},function(){})}
 
-function renderAIMessages(){
-  var c=$('aiMessages');
-  var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
-  c.innerHTML='';
-    if(!aiMessages.length){c.innerHTML='<div style="width:100%;text-align:center;font-size:10px;color:var(--t3);padding:40px 0">Luca 会随着你写作，为你提供建议</div>';return}
-  aiMessages.forEach(function(m,idx){
+function _buildAIMsgEl(m,idx){
  var d=document.createElement('div');d.className='ai-msg ai-msg-'+m.type;d.dataset.idx=idx;
-   if(m.type==='ai'){
-  var isLive=m._streaming||m._pending;
-  var statusText='';
-  if(m.reasoning||m._streaming||m._pending){
-  statusText=isLive?'<span class="ai-msg-status thinking-word"></span>':'<span class="ai-msg-status">已完成思考</span>';
-  }
-  var hasReasoning=!!m.reasoning;
-  var header='<div class="ai-msg-header" onclick="toggleReasoningFromHeader(this)" data-has-reasoning="'+(hasReasoning||isLive?'1':'0')+'"><img class="ai-msg-logo" src="logo-white.png" alt="">'+statusText+'</div>';
-  var reasonHtml='';
-  if(m.reasoning){
-  reasonHtml='<div class="ai-reasoning"><div class="ai-reasoning-body'+(m._reasoningOpen?' open':'')+'">'+esc(String(m.reasoning))+'</div></div>';
-  }
-  if(m._pending && !m.text && !m.reasoning){
-  var dots=(m._pollTick||0)%3;var dotStr=''+(dots===0?'\u25CF':(dots===1?'\u25CF\u25CF':'\u25CF\u25CF\u25CF'));
-  d.innerHTML=header+'<div class="ai-msg-body" style="color:var(--t3);font-style:italic">'+dotStr+'</div>';
-  }else if(m._pending){
-  var dots=(m._pollTick||0)%2;var dstr=''+(dots===0?'\u25CF':'\u25CB');
-  d.innerHTML=header+reasonHtml+'<div class="ai-msg-body">'+esc(String(m.text||''))+' <span style="color:var(--accent)">'+dstr+'</span></div>';
-  }else{
-  d.innerHTML=header+reasonHtml+'<div class="ai-msg-body">'+esc(String(m.text||''))+'</div>';
-  }
-  }else{
-  d.textContent=m.text;
-  }
- c.appendChild(d);
+  if(m.type==='ai'){
+ var isLive=m._streaming||m._pending;
+ var statusText='';
+ if(m.reasoning||m._streaming||m._pending){
+ statusText=isLive?'<span class="ai-msg-status thinking-word"></span>':'<span class="ai-msg-status">已完成思考</span>';
+ }
+ var hasReasoning=!!m.reasoning;
+ var header='<div class="ai-msg-header" onclick="toggleReasoningFromHeader(this)" data-has-reasoning="'+(hasReasoning||isLive?'1':'0')+'"><img class="ai-msg-logo" src="logo-white.png" alt="">'+statusText+'</div>';
+ var reasonHtml='';
+ if(m.reasoning){
+ reasonHtml='<div class="ai-reasoning"><div class="ai-reasoning-body'+(m._reasoningOpen?' open':'')+'">'+esc(String(m.reasoning))+'</div></div>';
+ }
+ if(m._pending && !m.text && !m.reasoning){
+ var dots=(m._pollTick||0)%3;var dotStr=''+(dots===0?'\u25CF':(dots===1?'\u25CF\u25CF':'\u25CF\u25CF\u25CF'));
+ d.innerHTML=header+'<div class="ai-msg-body" style="color:var(--t3);font-style:italic">'+dotStr+'</div>';
+ }else if(m._pending){
+ var dots=(m._pollTick||0)%2;var dstr=''+(dots===0?'\u25CF':'\u25CB');
+ d.innerHTML=header+reasonHtml+'<div class="ai-msg-body">'+esc(String(m.text||''))+' <span style="color:var(--accent)">'+dstr+'</span></div>';
+ }else{
+ d.innerHTML=header+reasonHtml+'<div class="ai-msg-body">'+esc(String(m.text||''))+'</div>';
+ }
+ }else{
+ d.textContent=m.text;
+ }
+ return d;
+}
+
+function _appendAIMsgCards(c,m,d){
  if(m.type==='ai' && m.needs_summary){
  var card=document.createElement('div');
  card.className='ai-summary-card';
@@ -2002,6 +2076,45 @@ function renderAIMessages(){
  kbShowProposalModal(m.kb_proposals);
  }
  }
+}
+
+function _updateLiveAIMessage(msgIdx){
+ var c=$('aiMessages');
+ var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
+ var m=aiMessages[msgIdx];
+ if(!m||m.type!=='ai')return;
+ var oldEl=c.querySelector('[data-idx="'+msgIdx+'"]');
+ var d=_buildAIMsgEl(m,msgIdx);
+ if(oldEl){
+  var next=oldEl.nextElementSibling;
+  while(next&&!next.classList.contains('ai-msg')){
+   var rm=next;next=next.nextElementSibling;rm.remove();
+  }
+  oldEl.replaceWith(d);
+ }else{
+  c.appendChild(d);
+ }
+ _appendAIMsgCards(c,m,d);
+ if(m._streaming||m._pending){
+  var rb=d.querySelector('.ai-reasoning-body');
+  if(rb)rb.scrollTop=rb.scrollHeight;
+ }
+ if(nearBottom)c.scrollTop=c.scrollHeight;
+ var hasLive=aiMessages.some(function(x){return x._streaming||x._pending});
+ if(hasLive)_startThinkingRotation();else _stopThinkingRotation();
+ _applyThinkingWord();
+}
+
+function renderAIMessages(){
+  var c=$('aiMessages');
+  var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
+  var savedScrollTop=c.scrollTop;
+  c.innerHTML='';
+    if(!aiMessages.length){c.innerHTML='<div style="width:100%;text-align:center;font-size:10px;color:var(--t3);padding:40px 0">Luca 会随着你写作，为你提供建议</div>';return}
+  aiMessages.forEach(function(m,idx){
+ var d=_buildAIMsgEl(m,idx);
+ c.appendChild(d);
+ _appendAIMsgCards(c,m,d);
  if(m.type==='ai' && (m._streaming||m._pending)){
  var rb=d.querySelector('.ai-reasoning-body');
   if(rb) rb.scrollTop=rb.scrollHeight;
@@ -2010,8 +2123,8 @@ function renderAIMessages(){
 
   var first=c.firstElementChild;
   if(first)first.style.marginTop='auto';
-  var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
   if(nearBottom)c.scrollTop=c.scrollHeight;
+  else c.scrollTop=savedScrollTop;
   var hasLive=aiMessages.some(function(x){return x._streaming||x._pending});
   if(hasLive)_startThinkingRotation();else _stopThinkingRotation();
 }
@@ -2128,7 +2241,7 @@ function sendAI(){
 
  function completeChapter(){
  if(!bookId||!chapterId){toast('请先打开章节','warn');return}
- var btn=document.querySelector('.editor-top .ai-send');
+ var btn=$('topbarCompleteBtn');
  if(btn)btn.disabled=true;
  toast('正在生成本章摘要...','success');
  var text=$('editorArea').value;
@@ -2213,7 +2326,7 @@ function _doSendAI(text){
  m.reasoning=st.reasoning||'';
  m._pollTick=(m._pollTick||0)+1;
  }
- renderAIMessages();
+ _updateLiveAIMessage(msgIdx);
  }
  });
  },600);
@@ -2224,9 +2337,10 @@ function _doSendAI(text){
 
 
 function refreshChapterKnowledge(){
- if(!bookId)return;
- if(chapterId)loadChapterOutline();
- loadPredictionCurrent();
+	 if(!bookId)return;
+	 if(chapterId)loadChapterOutline();
+	 if(currentBottomTab==='timeline')loadTimelineRiver();
+	 loadPredictionCurrent();
 }
 
 function loadChapterOutline(){
@@ -2330,6 +2444,9 @@ function applySettings(){
  applyTheme(settings.theme_accent||'#E8CC7A');
  var mode=settings.theme_mode||getSystemTheme();
  applyThemeMode(mode);
+ var fs=parseInt(settings.content_font_size)||20;
+ _currentFontSize=fs;
+ document.documentElement.style.setProperty('--editor-font-size',fs+'px');
  // 首次使用且跟随系统时，保存
  if(!settings.theme_mode){ settings.theme_mode=mode; saveSettings(); }
  // 检查主题色明暗，若主题色为暗色并且当前为深色模式，则提示切换浅色模式
@@ -2457,6 +2574,9 @@ function openSettings(){
   // zoom state is managed by _currentZoom, not re-read from settings
   $('sZoom').value=_currentZoom;
   applyZoom(_currentZoom);
+  // font size state
+  $('sFontSize').value=_currentFontSize;
+  applyFontSize(_currentFontSize);
   var scEl=$('sShortcut');if(scEl)scEl.value=settings.shortcut_focus_ai||'none';
   syncCSById('sShortcut');
   var spEl=$('sSearchProvider');if(spEl)spEl.value=settings.search_provider||'duckduckgo';
@@ -2817,6 +2937,29 @@ function toggleCustomJson(){
  wrap.style.display=$('sUseCustomJson').checked?'block':'none';
 }
 
+var _currentFontSize=20;
+var _fontSizeSaveTimer=null;
+function applyFontSize(fs,btn){
+ if(isNaN(fs)||fs<10)fs=10;if(fs>40)fs=40;
+ fs=Math.round(fs);
+ _currentFontSize=fs;
+ settings.content_font_size=fs;
+ $('sFontSize').value=fs;
+ document.documentElement.style.setProperty('--editor-font-size',fs+'px');
+ document.querySelectorAll('#fontSizeRow .zoom-btn').forEach(function(b){b.classList.remove('active')});
+ var best=null,bestDiff=Infinity;
+ document.querySelectorAll('#fontSizeRow .zoom-btn').forEach(function(b){
+  var bfs=parseInt(b.getAttribute('data-fs'));
+  if(Math.abs(bfs-fs)<bestDiff){bestDiff=Math.abs(bfs-fs);best=b;}
+ });
+ if(best)best.classList.add('active');
+ if(btn)btn.blur();
+ clearTimeout(_fontSizeSaveTimer);
+ _fontSizeSaveTimer=setTimeout(function(){
+  api('POST','/api/settings',{content_font_size:fs},function(r,s){if(s===200)settings=r});
+ },300);
+}
+
 var _currentZoom=1.0;
 var _zoomSaveTimer=null;
 function applyZoom(z,btn){
@@ -2861,7 +3004,8 @@ function saveSettings(){
     keep_background:$('sKeepBackground')?$('sKeepBackground').checked:false,
     theme_accent:_currentThemeAccent,
     theme_mode:settings.theme_mode||'dark',
-    browser_enabled:$('sBrowserEnabled')?$('sBrowserEnabled').checked:false
+    browser_enabled:$('sBrowserEnabled')?$('sBrowserEnabled').checked:false,
+    content_font_size:_currentFontSize
    };
   // 同时保存当前激活 preset 的字段到顶层，确保向后兼容
  var active=providerPresets[currentPresetIdx];
@@ -3076,20 +3220,354 @@ function doImport(file){
  }else{
  setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'}
  });
- };
- reader.readAsDataURL(file);
+	};
+	reader.readAsDataURL(file);
+}
+
+function _timelineZoomLabel(){
+	return timelineZoom===0?'远景':(timelineZoom===2?'近景':'中景');
+}
+
+function _timelineSetZoom(z){
+	var next=Math.max(0,Math.min(2,z));
+	if($('timelineZoomBadge'))$('timelineZoomBadge').textContent=_timelineZoomLabel();
+	if(next===timelineZoom)return;
+	timelineZoom=next;
+	if($('timelineZoomBadge'))$('timelineZoomBadge').textContent=_timelineZoomLabel();
+	loadTimelineRiver(true);
+}
+
+function timelineZoomIn(){_timelineSetZoom(timelineZoom+1)}
+function timelineZoomOut(){_timelineSetZoom(timelineZoom-1)}
+
+function loadTimelineRiver(force){
+	if(!bookId)return;
+	var el=$('timelineRiver');if(!el)return;
+	if(_timelineLoading&&!force)return;
+	_timelineLoading=true;
+	if(force)el.innerHTML='<div class="tl-empty">时间长河同步中...</div>';
+	if($('timelineZoomBadge'))$('timelineZoomBadge').textContent=_timelineZoomLabel();
+	var url='/api/book/'+bookId+'/timeline-map?zoom='+timelineZoom;
+	if(chapterId)url+='&chapter_id='+encodeURIComponent(chapterId);
+	api('GET',url,undefined,function(d,s){
+		_timelineLoading=false;
+		if(s!==200){
+			el.innerHTML='<div class="tl-empty">'+esc((d&&d.error)||'时间线读取失败')+'</div>';
+			if($('timelineMeta'))$('timelineMeta').textContent='';
+			return;
+		}
+		_timelineData=d||{};
+		renderTimelineRiver(_timelineData);
+	});
+}
+
+function _timelineEventById(id){
+	var segs=(_timelineData&&_timelineData.segments)||[];
+	for(var i=0;i<segs.length;i++){
+		var evs=segs[i].events||[];
+		for(var j=0;j<evs.length;j++)if(evs[j].id===id)return evs[j];
+	}
+	return null;
+}
+
+function _timelineHash(s){
+	s=String(s||'');
+	var h=0;
+	for(var i=0;i<s.length;i++)h=((h<<5)-h+s.charCodeAt(i))|0;
+	return Math.abs(h);
+}
+
+function _timelineLaneSequence(preferred,minLane,maxLane,id){
+	var lanes=[];
+	var seen={};
+	function add(v){
+		v=Math.max(minLane,Math.min(maxLane,v));
+		if(!seen[v]){lanes.push(v);seen[v]=true}
+	}
+	add(preferred);
+	for(var d=1;lanes.length<(maxLane-minLane+1);d++){
+		if((_timelineHash(id)+d)%2===0){add(preferred+d);add(preferred-d)}
+		else{add(preferred-d);add(preferred+d)}
+		if(d>20)break;
+	}
+	for(var l=minLane;l<=maxLane;l++)add(l);
+	return lanes;
+}
+
+function _timelineBuildSegmentLayout(seg,events,ctx,segTop){
+	var evs=(seg.events||[]).slice().sort(function(a,b){
+		return (Number(a.story_order)||0)-(Number(b.story_order)||0) || (a.chapter_idx||0)-(b.chapter_idx||0) || String(a.id||'').localeCompare(String(b.id||''));
+	});
+	var lanes={};
+	var placed=[];
+	var maxX=ctx.pad;
+	var minOrder=ctx.minOrder,maxOrder=ctx.maxOrder;
+	evs.forEach(function(ev,idx){
+		var order=Number(ev.story_order);
+		if(!isFinite(order))order=minOrder+idx*10;
+		var ratio=(order-minOrder)/(maxOrder-minOrder||1);
+		ratio=Math.max(0,Math.min(1,ratio));
+		var rawX=ctx.pad+ratio*ctx.orderSpan;
+		var preferred=parseInt(ev.lane,10);
+		if(!isFinite(preferred))preferred=(_timelineHash(ev.id)%3)-1;
+		preferred=Math.max(ctx.minLane,Math.min(ctx.maxLane,preferred));
+		var best=null;
+		var laneSeq=_timelineLaneSequence(preferred,ctx.minLane,ctx.maxLane,ev.id);
+		laneSeq.forEach(function(lane){
+			var last=lanes[lane];
+			var x=last===undefined?rawX:Math.max(rawX,last+ctx.minGap);
+			var push=Math.max(0,x-rawX);
+			var lanePenalty=Math.abs(lane-preferred)*52;
+			var directionPenalty=(lane!==0&&preferred===0)?8:0;
+			var score=push+lanePenalty+directionPenalty;
+			if(!best||score<best.score)best={lane:lane,x:x,score:score,push:push};
+		});
+		var place=best||{lane:0,x:rawX};
+		lanes[place.lane]=place.x;
+		maxX=Math.max(maxX,place.x);
+		placed.push({event:ev,x:place.x,lane:place.lane});
+	});
+	var maxAbsLane=Math.max(Math.abs(ctx.minLane),Math.abs(ctx.maxLane));
+	var topPad=ctx.labelH+ctx.bubbleH/2+Math.max(0,-ctx.minLane)*ctx.rowGap+18;
+	var lineY=segTop+topPad;
+	var segH=topPad+Math.max(0,ctx.maxLane)*ctx.rowGap+ctx.bubbleH/2+30;
+	return {segment:seg,events:placed,lineY:lineY,height:segH,maxX:maxX};
+}
+
+function _timelineComputeLayout(segs,events,river){
+	var viewW=Math.max(360,river.clientWidth||(($('bottomPanel')&&$('bottomPanel').clientWidth)||window.innerWidth||900));
+	var viewH=Math.max(220,river.clientHeight||260);
+	var bubbleW=timelineZoom===2?220:(timelineZoom===0?150:168);
+	var bubbleH=timelineZoom===2?96:(timelineZoom===0?62:72);
+	var rowGap=bubbleH+18;
+	var possibleRows=Math.floor(Math.max(1,viewH-92)/rowGap);
+	var laneRadius=Math.max(1,Math.min(timelineZoom===2?4:3,Math.floor((possibleRows-1)/2)));
+	var laneCount=laneRadius*2+1;
+	var pad=Math.max(56,Math.min(96,Math.round(viewW*.08)));
+	var minGap=bubbleW+26;
+	var orders=events.map(function(e){return Number(e.story_order)||0});
+	var minOrder=Math.min.apply(null,orders);
+	var maxOrder=Math.max.apply(null,orders);
+	if(!isFinite(minOrder)||!isFinite(maxOrder)){minOrder=0;maxOrder=1000}
+	if(minOrder===maxOrder){minOrder-=500;maxOrder+=500}
+	var avgSegCount=Math.max(1,Math.ceil(events.length/Math.max(1,segs.length)));
+	var targetW=Math.max(viewW-24,Math.ceil((avgSegCount*minGap)/Math.max(1,laneCount*.86))+pad*2);
+	targetW=Math.min(Math.max(targetW,viewW-24),12000);
+	var ctx={
+		viewW:viewW,bubbleW:bubbleW,bubbleH:bubbleH,rowGap:rowGap,pad:pad,minGap:minGap,
+		minLane:-laneRadius,maxLane:laneRadius,labelH:28,minOrder:minOrder,maxOrder:maxOrder,
+		orderSpan:Math.max(1,targetW-pad*2)
+	};
+	var layouts=[];
+	var y=22;
+	var maxX=targetW-pad;
+	segs.forEach(function(seg){
+		var layout=_timelineBuildSegmentLayout(seg,events,ctx,y);
+		layouts.push(layout);
+		y+=layout.height+18;
+		maxX=Math.max(maxX,layout.maxX);
+	});
+	var innerW=Math.ceil(Math.max(targetW,maxX+pad+bubbleW/2));
+	var innerH=Math.ceil(Math.max(viewH-8,y+18));
+	_timelineOrderRange={min:minOrder,max:maxOrder};
+	_timelineLayout={pad:pad,rowGap:rowGap,minLane:ctx.minLane,maxLane:ctx.maxLane,minOrder:minOrder,maxOrder:maxOrder,span:Math.max(1,innerW-pad*2),bubbleW:bubbleW,bubbleH:bubbleH};
+	return {layouts:layouts,innerW:innerW,innerH:innerH,ctx:ctx};
+}
+
+function renderTimelineRiver(d){
+	var river=$('timelineRiver');if(!river)return;
+	var segs=(d&&d.segments)||[];
+	var events=[];
+	segs.forEach(function(seg){(seg.events||[]).forEach(function(ev){events.push(ev)})});
+	var total=d&&d.events_total?d.events_total:events.length;
+	var visible=d&&d.visible_total?d.visible_total:events.length;
+	if($('timelineMeta')){
+		var meta=total?('显示 '+visible+' / '+total+' 个事件'):'暂无事件';
+		if(d&&d.uncertain_count)meta+='，'+d.uncertain_count+' 个待确认';
+		$('timelineMeta').textContent=meta;
+	}
+	river.className='timeline-river zoom-'+timelineZoom;
+	if(!events.length){
+			river.innerHTML='<div class="tl-empty">暂无可显示事件。先运行通读或点击“本章写完”生成知识库事件。</div>';
+			return;
+		}
+		var focusIds=new Set((d&&d.focus_event_ids)||[]);
+		var layout=_timelineComputeLayout(segs,events,river);
+		var html='<div class="timeline-river-inner" id="timelineRiverInner" style="width:'+layout.innerW+'px;height:'+layout.innerH+'px">';
+		layout.layouts.forEach(function(segLayout){
+			var seg=segLayout.segment;
+			var top=segLayout.lineY-Math.max(0,-layout.ctx.minLane)*layout.ctx.rowGap-layout.ctx.bubbleH/2-layout.ctx.labelH-18;
+			html+='<div class="timeline-segment" style="top:'+top+'px;height:'+segLayout.height+'px">';
+			html+='<div class="timeline-seg-label" title="'+esc(seg.title||'主线')+'">'+esc(seg.title||'主线')+'</div>';
+			html+='<div class="timeline-segment-line" style="left:'+layout.ctx.pad+'px;right:'+layout.ctx.pad+'px;top:'+(segLayout.lineY-top-4)+'px" onclick="timelineLineClick(event)" title="放大"></div>';
+			html+='</div>';
+			segLayout.events.forEach(function(p){
+				var ev=p.event;
+				var x=Math.round(p.x);
+				var lane=p.lane;
+				var y=Math.round(segLayout.lineY+lane*layout.ctx.rowGap);
+				var cls='timeline-bubble';
+				if(focusIds.has(ev.id))cls+=' focus';
+				if(ev.uncertain)cls+=' uncertain';
+				if((ev.timeline_status||'')==='user')cls+=' user-corrected';
+				var timeText=ev.story_time||('第 '+(((ev.chapter_idx||0)+1))+' 章');
+				var chapterText=ev.chapter_title?('第 '+(((ev.chapter_idx||0)+1))+' 章 '+ev.chapter_title):'';
+				var meta=[ev.who,ev.where_loc,ev.why,ev.consequence].filter(Boolean).join(' / ');
+				html+='<div class="'+cls+'" data-id="'+esc(ev.id||'')+'" data-line-y="'+segLayout.lineY+'" data-lane="'+lane+'" data-min-lane="'+layout.ctx.minLane+'" data-max-lane="'+layout.ctx.maxLane+'" style="left:'+x+'px;top:'+y+'px" onpointerdown="timelineBubblePointerDown(event)" onclick="timelineBubbleClick(event)" title="'+esc((ev.what||'事件')+(chapterText?' - '+chapterText:''))+'">';
+				html+='<div class="tl-bubble-head"><span class="tl-bubble-time">'+esc(timeText)+'</span><span>'+esc(chapterText||'')+'</span></div>';
+				html+='<div class="tl-bubble-title">'+esc(ev.what||'未命名事件')+'</div>';
+				html+='<div class="tl-bubble-meta">'+esc(meta||ev.timeline_reason||'')+'</div>';
+			html+='</div>';
+		});
+	});
+	html+='</div>';
+	river.innerHTML=html;
+}
+
+function timelineLineClick(e){
+	e.stopPropagation();
+	timelineZoomIn();
+}
+
+function timelineRiverClick(e){
+	if(e.target.closest('.timeline-bubble,.timeline-segment-line,.timeline-action-btn'))return;
+	timelineZoomOut();
+}
+
+function timelineBubbleClick(e){
+	e.stopPropagation();
+	var bubble=e.currentTarget;
+	if(bubble&&bubble._dragMoved)return;
+	var ev=_timelineEventById(bubble.dataset.id);
+	if(ev&&ev.chapter_id&&ev.chapter_id!==chapterId){
+		selectChapter(ev.chapter_id);
+		toast('已跳到事件章节','success');
+	}
+}
+
+function _timelineClamp(v,min,max){return Math.max(min,Math.min(max,v))}
+
+function timelineBubblePointerDown(e){
+	if(e.button!==undefined&&e.button!==0)return;
+	var bubble=e.currentTarget;
+	var inner=$('timelineRiverInner');
+	if(!bubble||!inner)return;
+	e.preventDefault();
+	e.stopPropagation();
+	var startLeft=parseFloat(bubble.style.left)||0;
+	var startTop=parseFloat(bubble.style.top)||0;
+	bubble._dragMoved=false;
+	_timelineDragging={
+		bubble:bubble,
+		inner:inner,
+		startX:e.clientX,
+		startY:e.clientY,
+		startLeft:startLeft,
+		startTop:startTop
+	};
+	bubble.classList.add('dragging');
+	document.body.style.userSelect='none';
+	document.addEventListener('pointermove',timelineBubblePointerMove);
+	document.addEventListener('pointerup',timelineBubblePointerUp,{once:true});
+}
+
+function timelineBubblePointerMove(e){
+	if(!_timelineDragging)return;
+	var d=_timelineDragging;
+	var dx=e.clientX-d.startX;
+	var dy=e.clientY-d.startY;
+	if(Math.abs(dx)>3||Math.abs(dy)>3)d.bubble._dragMoved=true;
+	var pad=64;
+	var layout=_timelineLayout||{};
+	pad=layout.pad||pad;
+	var x=_timelineClamp(d.startLeft+dx,pad,d.inner.clientWidth-pad);
+	var y=_timelineClamp(d.startTop+dy,42,d.inner.clientHeight-42);
+	var lineY=parseFloat(d.bubble.dataset.lineY||y);
+	var rowGap=layout.rowGap||96;
+	var minLane=parseInt(d.bubble.dataset.minLane||layout.minLane||-4,10);
+	var maxLane=parseInt(d.bubble.dataset.maxLane||layout.maxLane||4,10);
+	var lane=_timelineClamp(Math.round((y-lineY)/rowGap),minLane,maxLane);
+	d.bubble.dataset.lane=lane;
+	d.bubble.style.left=x+'px';
+	d.bubble.style.top=(lineY+lane*rowGap)+'px';
+}
+
+function timelineBubblePointerUp(){
+	if(!_timelineDragging)return;
+	var bubble=_timelineDragging.bubble;
+	bubble.classList.remove('dragging');
+	document.body.style.userSelect='';
+	document.removeEventListener('pointermove',timelineBubblePointerMove);
+	var moved=!!bubble._dragMoved;
+	_timelineDragging=null;
+	if(moved)timelineSaveLayout();
+	setTimeout(function(){bubble._dragMoved=false},80);
+}
+
+function timelineSaveLayout(){
+	if(!bookId)return;
+	var inner=$('timelineRiverInner');
+	if(!inner)return;
+	var bubbles=Array.from(inner.querySelectorAll('.timeline-bubble'));
+	if(!bubbles.length)return;
+	var layout=_timelineLayout||{};
+	var pad=layout.pad||64;
+	var span=Math.max(1,inner.clientWidth-pad*2);
+	var minOrder=layout.minOrder!==undefined?layout.minOrder:_timelineOrderRange.min;
+	var maxOrder=layout.maxOrder!==undefined?layout.maxOrder:_timelineOrderRange.max;
+	var rowGap=layout.rowGap||96;
+	var events=bubbles.map(function(b){
+		var x=parseFloat(b.style.left)||pad;
+		var ratio=_timelineClamp((x-pad)/span,0,1);
+		var lineY=parseFloat(b.dataset.lineY||0);
+		var top=parseFloat(b.style.top)||lineY;
+		var minLane=parseInt(b.dataset.minLane||layout.minLane||-4,10);
+		var maxLane=parseInt(b.dataset.maxLane||layout.maxLane||4,10);
+		var lane=_timelineClamp(Math.round((top-lineY)/rowGap),minLane,maxLane);
+		return {id:b.dataset.id,story_order:Math.round(minOrder+ratio*(maxOrder-minOrder)),lane:lane};
+	});
+	if($('timelineMeta'))$('timelineMeta').textContent='正在保存时间线纠错...';
+	api('POST','/api/book/'+bookId+'/action',{
+		action:'timeline-reorder',
+		events:events,
+		reason:'用户拖动时间线泡泡调整故事内顺序'
+	},function(d,s){
+		if(s===200){
+			toast('时间线已保存','success');
+			setTimeout(loadTimelineRiver,350);
+		}else{
+			toast((d&&d.error)||'时间线保存失败','error');
+			loadTimelineRiver(true);
+		}
+	});
+}
+
+function arrangeTimelineRiver(){
+	if(!bookId)return;
+	api('POST','/api/book/'+bookId+'/action',{action:'timeline-arrange'},function(d,s){
+		if(s===200){
+			toast((d&&d.started)?'时间线整理已启动':'已有时间线整理任务','success');
+			setTimeout(loadTimelineRiver,3500);
+		}else{
+			toast((d&&d.error)||'时间线整理失败','error');
+		}
+	});
 }
 
 function switchBottomTab(tab){
- currentBottomTab=tab;
- document.querySelectorAll('.bottom-tab').forEach(function(b){b.classList.toggle('active',b.dataset.btab===tab)});
- $('predictionPane').classList.toggle('active',tab==='prediction');
- $('outlinePane').classList.toggle('active',tab==='outline');
- $('summaryPane').classList.toggle('active',tab==='summary');
- if(!bottomPanelOpen){openBottomPanel()}
- if(tab==='outline'){loadChapterOutline()}
- if(tab==='prediction'){loadPredictionCurrent()}
- if(tab==='summary'){pollRTStatus()}
+	currentBottomTab=tab;
+	document.querySelectorAll('.bottom-tab').forEach(function(b){b.classList.toggle('active',b.dataset.btab===tab)});
+	$('timelinePane').classList.toggle('active',tab==='timeline');
+	$('predictionPane').classList.toggle('active',tab==='prediction');
+	$('outlinePane').classList.toggle('active',tab==='outline');
+	$('summaryPane').classList.toggle('active',tab==='summary');
+	var _tabLabels={timeline:'时间线',prediction:'预言',outline:'大纲',summary:'摘要'};
+	var btn=$('topbarSummaryBtn');if(btn)btn.textContent=_tabLabels[tab]||'摘要';
+	if(!bottomPanelOpen){openBottomPanel()}
+	if(tab==='timeline'){loadTimelineRiver()}
+	if(tab==='outline'){loadChapterOutline()}
+	if(tab==='prediction'){loadPredictionCurrent()}
+	if(tab==='summary'){pollRTStatus()}
 }
 
 function clearAIChat(){aiMessages=[];renderAIMessages();saveAIMessages()}
@@ -3159,7 +3637,15 @@ function _mdToHtml(md){
  return html;
 }
 
-function toggleBottomPanel(){if(bottomPanelOpen)closeBottomPanel();else openBottomPanel()}
+function toggleBottomPanel(){
+ if(bottomPanelOpen)closeBottomPanel();
+ else{
+	  var btn=$('topbarSummaryBtn');
+	  var _tabLabels={timeline:'时间线',prediction:'预言',outline:'大纲',summary:'摘要'};
+	  if(btn)btn.textContent=_tabLabels[currentBottomTab]||'摘要';
+	  openBottomPanel();
+ }
+}
 
 function openBottomPanel(){
  bottomPanelOpen=true;
@@ -3171,11 +3657,12 @@ function openBottomPanel(){
  else{bottomPanelHeight=Math.round(full*0.6)}
  panel.style.height=bottomPanelHeight+'px';
  panel.classList.remove('collapsed');
- if(bookId){
-  if(currentBottomTab==='summary')pollRTStatus();
-  else if(currentBottomTab==='prediction')loadPredictionCurrent();
-  else if(currentBottomTab==='outline')loadChapterOutline();
- }
+	 if(bookId){
+	  if(currentBottomTab==='summary')pollRTStatus();
+	  else if(currentBottomTab==='timeline')loadTimelineRiver();
+	  else if(currentBottomTab==='prediction')loadPredictionCurrent();
+	  else if(currentBottomTab==='outline')loadChapterOutline();
+	 }
 }
 
 function closeBottomPanel(){
@@ -3199,7 +3686,8 @@ function createSeries(){
 }
 
 function openSeries(id,title){
- seriesId=id;seriesTitle=title;
+	 setWritingViewActive(false);
+	 seriesId=id;seriesTitle=title;
  seriesAIMessages=[];
  if(seriesAIChatTimer){clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;}
  if(_seriesRTPoll){clearInterval(_seriesRTPoll);_seriesRTPoll=null;}
@@ -3921,13 +4409,14 @@ function setupBottomPanelDrag(){
    var minH=handle.offsetHeight||30;
    if(panel.offsetHeight<=38){
     closeBottomPanel();
-   }else{
-    savedBottomPanelHeight=bottomPanelHeight;
-    localStorage.setItem('lw_bottom_panel_h',bottomPanelHeight);
-   }
-  }
-  startY=0;
- });
+	   }else{
+	    savedBottomPanelHeight=bottomPanelHeight;
+	    localStorage.setItem('lw_bottom_panel_h',bottomPanelHeight);
+	   }
+	   if(currentBottomTab==='timeline'&&_timelineData)setTimeout(function(){renderTimelineRiver(_timelineData)},40);
+	  }
+	  startY=0;
+	 });
 }
 
 	window.addEventListener('resize',function(){
@@ -3936,9 +4425,13 @@ function setupBottomPanelDrag(){
 	  var saved=parseInt(localStorage.getItem('lw_bottom_panel_h')||'0');
 	  var panel=$('bottomPanel');
 	  if(!saved||saved>=full){bottomPanelHeight=full;panel.style.height=full+'px'}
-	 }
-	 syncInputWidth();
-	});
+		 }
+		 syncInputWidth();
+		 if(currentBottomTab==='timeline'&&_timelineData){
+		  clearTimeout(window._timelineResizeTimer);
+		  window._timelineResizeTimer=setTimeout(function(){renderTimelineRiver(_timelineData)},120);
+		 }
+		});
 
 
 

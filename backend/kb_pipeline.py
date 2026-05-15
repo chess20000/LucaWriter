@@ -1319,7 +1319,7 @@ def timeline_map(book_id, focus_chapter_id=None, zoom=1):
 
 
 def _timeline_event_catalog(book_id, max_events=180):
-    events = list_events(book_id)
+    events = list_timeline_events(book_id)
     out = []
     for ev in events[:max_events]:
         out.append({
@@ -1332,13 +1332,22 @@ def _timeline_event_catalog(book_id, max_events=180):
             'where': ev.get('where_loc') or '',
             'why': ev.get('why') or '',
             'consequence': ev.get('consequence') or '',
+            'previous_story_order': ev.get('story_order'),
+            'previous_segment_id': ev.get('segment_id') or '',
+            'previous_segment_title': ev.get('segment_title') or '',
+            'previous_lane': ev.get('lane'),
+            'previous_importance': ev.get('importance'),
+            'previous_zoom_level': ev.get('zoom_level'),
+            'previous_status': ev.get('timeline_status') or '',
         })
     return out
 
 
 def fallback_timeline_arrange(book_id):
-    events = list_events(book_id)
+    events = list_timeline_events(book_id)
     for i, ev in enumerate(events):
+        if ev.get('story_order') is not None:
+            continue
         importance = 3 if ev.get('consequence') else 2
         upsert_timeline_event_meta(
             book_id, ev['id'], story_order=i * 10, segment_id='main', segment_title='叙述顺序',
@@ -1368,6 +1377,8 @@ def arrange_timeline_ai(book_id, settings):
 3. 不要添加数据库里没有的事件。
 4. segment_id 表示连续事件段；明显时间跨度、回忆线、插叙线、平行线要拆成不同 segment。
 5. story_order 越小越早。只需相对顺序，不需要真实时间戳。
+6. previous_* 字段是上一次时间线的视觉风格。除非新证据明显要求变动，否则保持原来的 segment、相对间距、重要度和 lane 风格；新增事件插入合适位置，不要整体洗牌。
+7. previous_status 为 user 的事件是作者手动拖动纠错过的位置，必须优先尊重；除非证据极强，不要改变它的 story_order 和 lane。
 
 事件列表 JSON：
 {json.dumps(catalog, ensure_ascii=False)}
@@ -1393,11 +1404,13 @@ def arrange_timeline_ai(book_id, settings):
         return {'updated': fallback_timeline_arrange(book_id), 'fallback': True, 'error': 'AI 输出无法解析'}
 
     valid_ids = {e['id'] for e in catalog}
+    existing_by_id = {e['id']: e for e in list_timeline_events(book_id)}
     updated = 0
     for p in placements:
         eid = p.get('event_id')
         if eid not in valid_ids:
             continue
+        existing = existing_by_id.get(eid) or {}
         try:
             confidence = float(p.get('confidence', 0.5))
         except Exception:
@@ -1418,11 +1431,19 @@ def arrange_timeline_ai(book_id, settings):
             story_order = int(p.get('story_order', updated * 10))
         except Exception:
             story_order = updated * 10
+        status = 'ai'
+        if existing.get('timeline_status') == 'user':
+            if existing.get('story_order') is not None:
+                story_order = existing.get('story_order')
+            if existing.get('lane') is not None:
+                lane = existing.get('lane')
+            status = 'user'
+            confidence = max(confidence, 1.0)
         if upsert_timeline_event_meta(
             book_id, eid, story_order=story_order, segment_id=p.get('segment_id') or 'main',
             segment_title=p.get('segment_title') or p.get('segment_id') or '主线',
             lane=lane, importance=importance, zoom_level=zoom_level, confidence=confidence,
-            status='ai', reason=p.get('reason'), evidence=p.get('evidence')
+            status=status, reason=p.get('reason'), evidence=p.get('evidence')
         ):
             updated += 1
 

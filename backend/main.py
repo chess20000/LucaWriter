@@ -157,6 +157,7 @@ DEFAULT_SETTINGS = {
     'theme_accent': '#E8CC7A',
     'theme_mode': 'dark',
     'ui_scale': 1.0,
+    'content_font_size': 20,
     'embedding_backend': 'local',
     'local_embedding_model': 'BAAI/bge-small-zh-v1.5',
     'embedding_model': 'text-embedding-3-small',
@@ -2793,11 +2794,73 @@ class Handler(BaseHTTPRequestHandler):
                                  daemon=True).start()
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
+            if action == 'timeline-arrange':
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                try:
+                    kb_storage.init_db(bid)
+                    started = _schedule_timeline_arrange(bid, settings)
+                    self.json_resp(200, {'ok': True, 'started': bool(started)}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)[:200]}); return
+
+            if action == 'timeline-reorder':
+                raw_events = data.get('events') or []
+                if not isinstance(raw_events, list):
+                    self.json_resp(400, {'error': 'events 必须是数组'}); return
+                if len(raw_events) > 500:
+                    self.json_resp(400, {'error': '一次最多保存 500 个事件'}); return
+                updates = []
+                for item in raw_events:
+                    if not isinstance(item, dict):
+                        continue
+                    eid = item.get('id') or item.get('event_id')
+                    if not is_valid_id(eid):
+                        self.json_resp(400, {'error': '事件 ID 无效'}); return
+                    try:
+                        story_order = int(float(item.get('story_order')))
+                    except Exception:
+                        self.json_resp(400, {'error': 'story_order 无效'}); return
+                    try:
+                        lane = int(float(item.get('lane', 0)))
+                    except Exception:
+                        lane = 0
+                    story_order = max(-1000000000, min(1000000000, story_order))
+                    lane = max(-8, min(8, lane))
+                    updates.append((eid, story_order, lane))
+                try:
+                    kb_storage.init_db(bid)
+                    updated = 0
+                    reason = str(data.get('reason') or '用户拖动时间线调整故事内顺序')[:500]
+                    for eid, story_order, lane in updates:
+                        if kb_storage.upsert_timeline_event_meta(
+                            bid, eid, story_order=story_order, lane=lane,
+                            status='user', confidence=1.0, reason=reason
+                        ):
+                            updated += 1
+                    try:
+                        tl_events = kb_storage.list_timeline_events(bid)
+                        lines = ['# 故事时间线', '']
+                        for ev in tl_events:
+                            chapter_idx = ev.get('chapter_idx')
+                            chapter_label = f"第 {int(chapter_idx) + 1} 章" if chapter_idx is not None else ''
+                            time_label = ev.get('story_time') or '时间未标明'
+                            what = ev.get('what') or '未命名事件'
+                            lines.append(f"- {time_label}｜{what}" + (f"（{chapter_label}）" if chapter_label else ''))
+                        save_timeline_md(bid, '\n'.join(lines))
+                    except Exception as e:
+                        log_action('TIMELINE_MD_SYNC_ERR', str(e)[:120])
+                    log_action('TIMELINE_REORDER', f'{bid}: {updated}')
+                    self.json_resp(200, {'ok': True, 'updated': updated}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)[:200]}); return
+
             if action == 'timeline-generate':
+                settings = get_settings()
                 source_text = get_smart_context(bid, settings=settings) or ''
                 if not source_text or source_text.startswith('（目前还没有'):
                     self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
-                settings = get_settings()
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
                 existing = bg_task_get_by_book_type(bid, 'timeline')
@@ -4422,7 +4485,7 @@ class Handler(BaseHTTPRequestHandler):
             for k in DEFAULT_SETTINGS:
                 if k in data:
                     v = data[k]
-                    if k in ('ai_frequency', 'ai_max_tokens', 'outline_frequency', 'model_context_length'):
+                    if k in ('ai_frequency', 'ai_max_tokens', 'outline_frequency', 'model_context_length', 'content_font_size'):
                         try: v = int(v)
                         except: continue
                     elif k == 'ai_temperature':
