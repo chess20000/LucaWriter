@@ -187,7 +187,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 
 .chapter-list{flex:1;overflow-y:auto;padding:6px 0 14px 0;width:100%;max-width:none;position:relative;direction:rtl;scrollbar-gutter:stable}
 .chapter-list>*{direction:ltr}
-.chapter-list::before{content:'';position:absolute;left:19px;top:14px;bottom:18px;width:1px;background:linear-gradient(to bottom,transparent 0%,var(--border2) 8%,var(--border2) 92%,transparent 100%);opacity:.55;pointer-events:none}
 .ch-item{position:relative;width:100%;padding:6px 10px 6px 28px;border-radius:5px;font-size:13px;color:var(--t-on-surface-muted);cursor:pointer;display:flex;align-items:center;gap:6px;margin:2px 0;transition:all .12s ease;box-sizing:border-box;text-align:left;justify-content:flex-start}
 .ch-item:hover{color:var(--t-on-surface);background:var(--accent-a03)}
 .ch-item.active{color:var(--t-on-surface);font-weight:600;background:linear-gradient(90deg,var(--accent-a08,var(--accent-a03)),transparent 70%)}
@@ -386,20 +385,15 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .bottom-pane.active{display:flex}
 
 /* === Task Queue === */
-.task-queue-wrap{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:6px;height:38px;z-index:5;padding:0 6px}
-.task-queue{display:flex;align-items:center;gap:4px;max-width:520px;overflow:hidden;height:38px;padding:0 4px;flex-direction:row-reverse}
-.tq-node{position:relative;width:20px;height:20px;flex-shrink:0;animation:tqIn .25s ease}
-.tq-node.no-anim{animation:none}
-@keyframes tqIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:translateX(0)}}
-.tq-node.tq-out{animation:tqOut .3s ease forwards}
-@keyframes tqOut{to{opacity:0;transform:translateX(10px);width:0;margin:0}}
-.tq-badge{position:relative;width:20px;height:20px;border-radius:var(--r1);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;background:var(--surface2);color:var(--t3);z-index:1;transition:all .2s;flex-shrink:0;letter-spacing:0}
-.tq-badge.running{background:var(--accent);color:var(--on-accent)}
-.tq-arrow{color:var(--t3);font-size:9px;padding:0 2px;flex-shrink:0}
-.tq-sep{width:4px;flex-shrink:0}
-.tq-empty{font-size:10px;color:var(--t3);white-space:nowrap;padding:0 6px}
-.task-expand{background:none;border:none;color:var(--t3);font-size:9px;cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;flex-shrink:0}
-.task-expand:hover{color:var(--t1);background:var(--surface3)}
+.ai-active-dots{display:flex;align-items:center;gap:3px;height:38px;padding:0 4px}
+.ai-active-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent-a70),0 0 12px var(--accent-a40);animation:aiDotBreathe 2s ease-in-out infinite}
+.ai-active-dot:nth-child(2){animation-delay:.3s}
+.ai-active-dot:nth-child(3){animation-delay:.6s}
+.ai-active-dot:nth-child(4){animation-delay:.9s}
+.ai-active-dot:nth-child(5){animation-delay:1.2s}
+@keyframes aiDotBreathe{0%,100%{opacity:.5;box-shadow:0 0 4px var(--accent-a40),0 0 8px var(--accent-a20)}50%{opacity:1;box-shadow:0 0 8px var(--accent-a70),0 0 16px var(--accent-a40)}}
+[data-theme-mode="light"] .ai-active-dot{box-shadow:0 0 6px rgba(200,170,80,.5),0 0 12px rgba(200,170,80,.25)}
+[data-theme-mode="light"] @keyframes aiDotBreathe{0%,100%{opacity:.6;box-shadow:0 0 4px rgba(200,170,80,.3),0 0 8px rgba(200,170,80,.15)}50%{opacity:1;box-shadow:0 0 8px rgba(200,170,80,.5),0 0 16px rgba(200,170,80,.25)}}
 
 /* === Download Float Panel === */
 .dl-float-panel{display:none;position:fixed;right:20px;bottom:20px;width:380px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--r4);box-shadow:var(--glass-shadow);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);z-index:200;overflow:hidden;flex-direction:column}
@@ -424,26 +418,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .dl-fp-badge.open{display:flex}
 .dl-fp-badge svg{width:20px;height:20px;animation:dlSpin .8s linear infinite}
 @keyframes dlPulse{0%,100%{box-shadow:0 4px 16px var(--accent-a40)}50%{box-shadow:0 4px 24px var(--accent-a70)}}
-.task-expand.open{transform:rotate(180deg)}
-.task-stop-all{background:none;border:none;color:var(--danger);font-size:10px;cursor:pointer;padding:2px 6px;border-radius:var(--r1);transition:all .1s;flex-shrink:0;font-weight:600}
-.task-stop-all:hover{background:rgba(196,92,92,.15)}
-.task-detail-panel{position:absolute;top:44px;left:50%;transform:translateX(-50%);width:320px;max-height:360px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--r3);box-shadow:var(--glass-shadow);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);display:none;flex-direction:column;overflow:hidden;z-index:200}
-.task-detail-panel.open{display:flex}
-.task-detail-head{padding:10px 12px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.5px;display:flex;justify-content:space-between;align-items:center}
-.task-detail-list{flex:1;overflow-y:auto;padding:6px}
-.td-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--r1);margin-bottom:2px;transition:background .1s}
-.td-item:hover{background:var(--surface2)}
-.td-icon{width:18px;height:18px;border-radius:var(--r1);display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:800;flex-shrink:0}
-.td-info{flex:1;min-width:0}
-.td-name{font-size:11px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.td-meta{font-size:9px;color:var(--t3);margin-top:1px}
-.td-status{width:6px;height:6px;border-radius:var(--r1);flex-shrink:0}
-.td-status.running{background:var(--accent);animation:tdPulse 1.5s infinite}
-@keyframes tdPulse{0%,100%{opacity:1}50%{opacity:.3}}
-.td-status.done{background:#5fb878}
-.td-status.error{background:var(--danger)}
-.td-bar{height:2px;background:var(--surface3);border-radius:1px;margin-top:4px;overflow:hidden}
-.td-fill{height:100%;background:var(--accent);border-radius:1px;transition:width .3s}
 
 .ai-pane{flex-direction:column;height:100%}
 .ai-messages{flex:1;overflow-y:auto;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
@@ -477,24 +451,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .ai-send{background:var(--accent);color:var(--on-accent);border:none;padding:8px 16px;border-radius:var(--r1);font-size:13px;font-weight:700;cursor:pointer;transition:all .12s}
 .ai-send:hover{background:var(--accent2);transform:translateY(-1px)}
 
-.timeline-pane{flex-direction:column;height:100%}
-.timeline-toolbar{display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid var(--border);flex-shrink:0}
-.timeline-toolbar button{background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent-a20);padding:3px 8px;border-radius:var(--r1);font-size:10px;font-weight:600;cursor:pointer}
-.timeline-toolbar button:hover{background:var(--accent);color:var(--on-accent)}
-.timeline-toolbar button:disabled{opacity:.4;cursor:not-allowed}
-.timeline-scroll{flex:1;overflow-x:auto;overflow-y:auto;padding:10px}
-.timeline-track{display:flex;align-items:flex-start;gap:0;min-width:max-content;padding:4px 0}
-.tl-node{display:flex;flex-direction:column;align-items:center;min-width:100px;cursor:pointer;position:relative;padding:0 3px}
-.tl-dot{width:10px;height:10px;border-radius:var(--r1);background:var(--accent);z-index:1;flex-shrink:0;transition:transform .1s;transform:rotate(45deg)}
-.tl-node:hover .tl-dot{transform:rotate(45deg) scale(1.3)}
-.tl-line{position:absolute;top:4px;left:50%;width:100%;height:1px;background:var(--surface4);z-index:0}
-.tl-node:last-child .tl-line{display:none}
-.tl-label{font-size:10px;font-weight:600;margin-top:8px;text-align:center;max-width:90px;color:var(--t1);line-height:1.2}
-.tl-hint{font-size:9px;color:var(--t3);margin-top:2px;text-align:center;max-width:90px}
-.tl-children{margin-top:4px;display:flex;flex-direction:column;gap:2px;align-items:center}
-.tl-child{font-size:9px;color:var(--t2);background:var(--surface2);padding:1px 6px;border-radius:var(--r1);cursor:pointer;border:1px solid var(--border)}
-.tl-child:hover{color:var(--accent);border-color:var(--accent)}
-.tl-empty{text-align:center;padding:24px;color:var(--t3);font-size:11px}
 .kb-view{height:100%;overflow:auto;padding:12px 14px;color:var(--t2);font-size:12px;line-height:1.65;background:var(--bg)}
 .kb-muted{color:var(--t3);font-size:11px}
 .kb-section{padding:10px 0;border-bottom:1px solid var(--border)}
@@ -511,27 +467,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .radar-actions{display:flex;gap:6px;margin-top:6px}
 .mini-btn{background:var(--surface2);color:var(--t2);border:1px solid var(--border);border-radius:var(--r1);font-size:10px;padding:2px 7px;cursor:pointer}
 .mini-btn:hover{border-color:var(--accent);color:var(--accent)}
-.timeline-map{height:100%;display:flex;flex-direction:column;background:var(--bg)}
-.timeline-map-head{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;border-bottom:1px solid var(--border);font-size:11px;color:var(--t2);flex-shrink:0}
-.timeline-zoom{display:flex;gap:4px}
-.timeline-zoom button{width:24px;height:22px;background:var(--surface2);border:1px solid var(--border);color:var(--t2);border-radius:var(--r1);cursor:pointer;font-size:11px}
-.timeline-zoom button.active{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
-.timeline-canvas{flex:1;overflow:auto;padding:16px 18px 28px}
-.timeline-seg{position:relative;margin:12px 0 22px;min-width:max-content;padding-top:18px}
-.timeline-seg-title{position:absolute;top:0;left:0;font-size:11px;color:var(--t3);font-weight:700}
-.timeline-line{display:flex;align-items:flex-start;gap:0;min-width:max-content;padding-top:18px}
-.timeline-event{width:150px;min-height:82px;position:relative;padding:0 8px;flex-shrink:0}
-.timeline-event::before{content:"";position:absolute;top:6px;left:0;right:0;height:1px;background:var(--surface4)}
-.timeline-event:last-child::before{right:50%}
-.timeline-event:first-child::before{left:50%}
-.timeline-dot{position:absolute;top:1px;left:50%;width:10px;height:10px;background:var(--accent);border:2px solid var(--bg);transform:translateX(-50%) rotate(45deg);z-index:1}
-.timeline-event.focus .timeline-dot{background:var(--danger);box-shadow:0 0 0 4px var(--accent-a20)}
-.timeline-card{margin-top:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r1);padding:7px 8px}
-.timeline-event.focus .timeline-card{border-color:var(--accent)}
-.timeline-card-title{font-size:11px;font-weight:700;color:var(--t1);line-height:1.35}
-.timeline-card-meta{font-size:10px;color:var(--t3);margin-top:3px}
-.timeline-card-detail{font-size:10px;color:var(--t2);margin-top:4px;line-height:1.45}
-.timeline-uncertain{color:var(--warn);font-size:10px;margin-left:4px}
 .prediction-pane{flex-direction:column;height:100%;position:relative}
 .prediction-idle{flex:1;overflow-y:auto}
 .prediction-loading{position:absolute;inset:0;background:var(--surface);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:5}
@@ -546,6 +481,13 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .prediction-btn-small{background:var(--surface2);color:var(--t2);border:1px solid var(--border);padding:3px 10px;border-radius:var(--r1);font-size:10px;font-weight:600;cursor:pointer}
 .prediction-btn-small:hover{color:var(--accent);border-color:var(--accent)}
 .prediction-text{font-size:13px;line-height:1.8;color:var(--t2);white-space:pre-wrap}
+.prediction-stale{display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:12px;background:var(--accent-a08);border:1px solid var(--accent-a25);border-radius:var(--r1)}
+.prediction-stale .ps-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex-shrink:0;animation:psPulse 1.8s ease-in-out infinite}
+@keyframes psPulse{0%,100%{opacity:.6}50%{opacity:1}}
+.prediction-stale .ps-text{flex:1;font-size:11px;color:var(--t2);font-weight:600}
+.prediction-stale .ps-btn{background:var(--accent);color:var(--on-accent);border:none;padding:4px 12px;border-radius:var(--r1);font-size:11px;font-weight:600;cursor:pointer;transition:all .15s ease}
+.prediction-stale .ps-btn:hover{filter:brightness(1.1)}
+.prediction-stale .ps-btn:disabled{opacity:.5;cursor:not-allowed}
 
 .panel-layout{display:flex;flex:1;overflow:hidden;min-height:0}
 .panel-left{width:30%;min-width:260px;max-width:380px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);background:var(--surface)}
@@ -602,7 +544,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  .rt-stat-value,.rt-db-section-body,.rt-source{font-size:11px}
  .rt-stat-label,.rt-db-section-head,.rt-message-name{font-size:10px}
 }
-.timeline-pane,.prediction-pane,.outline-pane{flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.prediction-pane,.outline-pane{flex-direction:column;flex:1;min-height:0;overflow:hidden}
 
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px) saturate(160%);-webkit-backdrop-filter:blur(6px) saturate(160%);z-index:100;justify-content:center;align-items:center}
 .modal-bg.open{display:flex}
@@ -804,18 +746,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <span class="bc-sep" id="bcSep" style="display:none">/</span>
  <span class="bc-chapter" id="bcChapter">LucaWriter</span>
  </div>
- <div class="task-queue-wrap" id="taskQueueWrap">
- <div class="task-queue" id="taskQueue"></div>
-      <button class="task-stop-all" id="taskStopAllBtn" onclick="stopAllTasks()" title="停止所有后台任务">&#10005;</button>
-      <button class="task-expand" id="taskExpandBtn" onclick="toggleTaskDetail()" title="查看任务详情">&#9660;</button>
- <div class="task-detail-panel" id="taskDetailPanel">
- <div class="task-detail-head">
-          <span>后台任务</span>
-          <button class="task-stop-all" onclick="stopAllTasks()" title="停止所有后台任务">全部停止</button>
- </div>
- <div class="task-detail-list" id="taskDetailList"></div>
- </div>
- </div>
+ <div class="ai-active-dots" id="aiActiveDots"></div>
  <div class="topbar-sep"></div>
     <button class="topbar-btn" id="topbarSummaryBtn" onclick="toggleBottomPanel()" style="display:none">摘要</button>
     <button class="topbar-btn theme-toggle-btn" id="themeToggleBtn" onclick="toggleThemeMode()" title="切换深色/浅色模式" aria-label="切换深色/浅色模式">
@@ -957,7 +888,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
     <input class="ai-input" id="aiInput" placeholder="问 Luca" autocomplete="off" data-form-type="other" style="flex:1;min-width:0;height:30px;padding:0 10px;font-size:12px;border-radius:0;border:none;background:var(--surface2);color:var(--t1);outline:none" onkeydown="if(event.key==='Enter')sendAI()">
     </div>
     <div class="bottom-tabs" style="margin-left:auto">
-          <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')">时间线</button>
           <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')">预言</button>
           <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')">大纲</button>
           <button class="bottom-tab active" data-btab="summary" onclick="switchBottomTab('summary')">摘要</button>
@@ -965,22 +895,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
   </div>
  <div class="bottom-body">
 
-        <!-- 时间线 -->
- <div class="bottom-pane timeline-pane" id="timelinePane">
- <div class="timeline-map">
-  <div class="timeline-map-head">
-   <span id="timelineMeta">本书唯一时间线</span>
-   <div class="timeline-zoom">
-    <button data-z="0" onclick="setTimelineZoom(0)" title="全书视角">远</button>
-    <button data-z="1" onclick="setTimelineZoom(1)" title="章节簇视角">中</button>
-    <button data-z="2" onclick="setTimelineZoom(2)" title="事件细节视角">近</button>
-   </div>
-  </div>
-  <div class="timeline-canvas" id="timelineResult"><div class="tl-empty">通读后会显示本书时间线</div></div>
- </div>
- </div>
-
- <!-- -->
+        <!-- 预言 -->
  <div class="bottom-pane prediction-pane" id="predictionPane">
  <div class="kb-view" id="predictionResultBody">
   <div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>
@@ -1043,7 +958,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  </div>
  </div>
  <div class="rt-generate-bar" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
-            <span style="font-size:11px;color:var(--t2);white-space:nowrap">通读入库后，时间线和本章大纲会自动从数据库刷新；预言在“本章写完”后更新。</span>
+            <span style="font-size:11px;color:var(--t2);white-space:nowrap">通读入库后，本章大纲会自动从数据库刷新；预言在“本章写完”后更新。</span>
  </div>
  <div class="rt-controls" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
  <div class="rt-progress-wrap" style="flex:1;display:flex;flex-direction:column;gap:4px">
@@ -1370,112 +1285,41 @@ var coverUploadBookId=null;
 var rtLastDoneChapters=0;
 var rtLastStatus='idle';
 var bookAnnotations={};
-var timelineZoom=1;
 var _radarTimer=null;
 var _radarPending=false;
 var _radarLastLen=0;
 var _latestRadarAlerts=[];
 var _radarChatKeys=new Set();
 
-/* === 活跃连接实时追踪 === */
-var _rtTaskId=null;
-var _activeConnections=[];
-var _connPollTimer=null;
-var _prevConnIds=new Set();
-var _connTypeMap={
-  chat:{label:'聊',color:'#5a9fd4',name:'AI对话'},
-  summary:{label:'读',color:'#E8CC7A',name:'摘要全书'},
-  timeline:{label:'时',color:'#8b7fd9',name:'生成时间线'},
-  'timeline-arrange':{label:'线',color:'#8b7fd9',name:'时间线编排'},
-  outline:{label:'纲',color:'#5fb878',name:'生成大纲'},
-  prediction:{label:'预',color:'#d46b6b',name:'生成预言'},
-  'kb-reread':{label:'重',color:'#d46b6b',name:'局部重读'},
-  auto_comment:{label:'自',color:'#9e9e9e',name:'自动建议'},
-  memory:{label:'忆',color:'#9e9e9e',name:'记忆更新'},
-  'chapter-complete':{label:'章',color:'#E8CC7A',name:'本章摘要'},
-  'series-chat':{label:'系',color:'#5a9fd4',name:'系列AI对话'},
-  'series-summary':{label:'读',color:'#E8CC7A',name:'系列摘要'},
+/* === AI 活跃连接指示 === */
+var _aiActivityES=null;
+var _activeAICount=0;
 
-};
-
-function _startConnPoll(){
- if(_connPollTimer)return;
- _connPollTimer=setInterval(function(){
- api('GET','/api/active-connections',undefined,function(d){
- _activeConnections=d.connections||[];
- _renderConnections();
- });
- },1000);
+function _startAIActivity(){
+ if(_aiActivityES)return;
+ _aiActivityES=new EventSource('/api/ai-activity');
+ _aiActivityES.onmessage=function(e){
+  var d=JSON.parse(e.data);
+  _activeAICount=d.count||0;
+  _renderAIDots();
+ };
+ _aiActivityES.onerror=function(){
+  _aiActivityES.close();
+  _aiActivityES=null;
+  setTimeout(_startAIActivity,3000);
+ };
 }
-function _stopConnPoll(){
- if(_connPollTimer){clearInterval(_connPollTimer);_connPollTimer=null;}
+function _stopAIActivity(){
+ if(_aiActivityES){_aiActivityES.close();_aiActivityES=null;}
 }
-function _renderConnections(){
- var q=$('taskQueue'),d=$('taskDetailList'),c=$('taskDetailCount');
- if(!q)return;
- var conns=_activeConnections;
+function _renderAIDots(){
+ var el=$('aiActiveDots');
+ if(!el)return;
+ var n=Math.min(_activeAICount,5);
+ if(n===0){el.innerHTML='';return}
  var html='';
- var currIds=new Set();
-  if(!conns.length){html='<span class="tq-empty">无活跃连接</span>';}
- else{
- conns.forEach(function(conn,i){
- var cfg=_connTypeMap[conn.type]||_connTypeMap.unknown;
- if(i>0){html+='<span class="tq-sep"></span>';}
- var key=conn.id||conn.type+'-'+conn.created;
- currIds.add(key);
- var animClass=_prevConnIds.has(key)?' no-anim':'';
- html+='<div class="tq-node'+animClass+'" title="'+esc(cfg.name)+'" data-conn-id="'+esc(key)+'">';
- html+='<div class="tq-badge running">'+cfg.label+'</div>';
- html+='</div>';
- });
- }
- _prevConnIds=currIds;
- q.innerHTML=html;
- var stopBtn=$('taskStopAllBtn');
- if(stopBtn)stopBtn.style.display=conns.length?'':'none';
-  if(c)c.textContent=conns.length+' 个连接';
- if(d){
- var dhtml='';
- conns.slice().reverse().forEach(function(conn){
- var cfg=_connTypeMap[conn.type]||_connTypeMap.unknown;
- var sec=Math.round((Date.now()-conn.created*1000)/1000);
- var tim=sec<60?sec+'s':Math.floor(sec/60)+'m'+(sec%60)+'s';
- dhtml+='<div class="td-item">';
- dhtml+='<div class="td-icon" style="background:'+cfg.color+'20;color:'+cfg.color+'">'+cfg.label+'</div>';
- dhtml+='<div class="td-info">';
- dhtml+='<div class="td-name">'+esc(cfg.name)+'</div>';
-      dhtml+='<div class="td-meta">活跃中 · '+tim+'</div>';
- dhtml+='</div>';
- dhtml+='<div class="td-status running"></div>';
- dhtml+='</div>';
- });
-    if(!conns.length)dhtml='<div style="padding:20px;text-align:center;font-size:11px;color:var(--t3)">暂无活跃连接</div>';
- d.innerHTML=dhtml;
- }
-}
-function toggleTaskDetail(){
- var p=$('taskDetailPanel'),b=$('taskExpandBtn');
- var open=p.classList.toggle('open');
- b.classList.toggle('open',open);
-}
-function stopAllTasks(){
-  // 直接取消后台所有对AI提供商的活跃连接
- api('POST','/api/stop-all-ai',{},function(d){});
-  // 停止摘要
- if(bookId)api('POST','/api/book/'+bookId+'/readthrough/pause',{},function(){});
-  // 把本地 pending 的聊天消息标记为已停止
- var last=aiMessages[aiMessages.length-1];
- if(last&&last.type==='ai'&&last._pending){
- last._pending=false;
-    last.text='[已停止]';
- last.reasoning='';
- renderAIMessages();
- saveAIMessages();
- }
- _stopChatPoll();
- _activeConnections=[];
- _renderConnections();
-  toast('已停止所有后台任务','success');
+ for(var i=0;i<n;i++)html+='<div class="ai-active-dot"></div>';
+ el.innerHTML=html;
 }
 
 function $(id){return document.getElementById(id)}
@@ -1534,7 +1378,7 @@ function clearAppState(){
  try{localStorage.removeItem('lucawriter_state')}catch(e){}
 }
 
-function init(){initAllCS();loadSettings();loadThemedIcon();_startConnPoll();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
+function init(){initAllCS();loadSettings();loadThemedIcon();_startAIActivity();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
 
 function setupModals(){
  document.querySelectorAll('.modal-bg,.confirm-bg,.prompt-bg').forEach(function(bg){
@@ -1713,7 +1557,6 @@ function openBook(id){
  setEditorLoading(true);
  loadChapters();
  loadAIMessages();
- loadTimeline();
  loadPredictionCurrent();
  loadSourceToRT();
  loadAnnotations();
@@ -2100,7 +1943,9 @@ function _stopChatPoll(){if(_chatPollTimer){clearInterval(_chatPollTimer);_chatP
 function saveAIMessages(){if(!bookId)return;api('POST','/api/book/'+bookId+'/messages',{date:getTodayStr(),messages:aiMessages},function(){})}
 
 function renderAIMessages(){
-  var c=$('aiMessages');c.innerHTML='';
+  var c=$('aiMessages');
+  var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
+  c.innerHTML='';
     if(!aiMessages.length){c.innerHTML='<div style="width:100%;text-align:center;font-size:10px;color:var(--t3);padding:40px 0">Luca 会随着你写作，为你提供建议</div>';return}
   aiMessages.forEach(function(m,idx){
  var d=document.createElement('div');d.className='ai-msg ai-msg-'+m.type;d.dataset.idx=idx;
@@ -2165,7 +2010,8 @@ function renderAIMessages(){
 
   var first=c.firstElementChild;
   if(first)first.style.marginTop='auto';
-  c.scrollTop=c.scrollHeight;
+  var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
+  if(nearBottom)c.scrollTop=c.scrollHeight;
   var hasLive=aiMessages.some(function(x){return x._streaming||x._pending});
   if(hasLive)_startThinkingRotation();else _stopThinkingRotation();
 }
@@ -2189,7 +2035,7 @@ function kbConfirmProposal(pid,btnEl){
  if(card)card.classList.add('resolved');
  toast('已确认修改','success');
  refreshChapterKnowledge();
- setTimeout(function(){loadTimeline()},2500);
+ setTimeout(function(){loadPredictionCurrent()},2500);
  }else{
  toast(d.error||'操作失败','error');
  }
@@ -2300,7 +2146,7 @@ function sendAI(){
  clearInterval(pollTimer);
  toast('本章摘要已生成','success');
  refreshChapterKnowledge();
- setTimeout(function(){loadPredictionCurrent();loadTimeline();},2500);
+ setTimeout(function(){loadPredictionCurrent()},2500);
  var summary=st.result||'';
  if(summary){
  var card=document.createElement('div');
@@ -2353,7 +2199,7 @@ function _doSendAI(text){
  if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;m.kb_reread_started=st.kb_reread_started;m.kb_citations=st.kb_citations||[];m.kb_proposals=st.kb_proposals||[];}
  renderAIMessages();saveAIMessages();
  if(st.annotations_changed){loadAnnotations();}
- if(st.kb_reread_started){toast('已开始局部重读','success');setTimeout(function(){refreshChapterKnowledge();loadTimeline()},3500);}
+ if(st.kb_reread_started){toast('已开始局部重读','success');setTimeout(refreshChapterKnowledge,3500);}
  if(st.complete_chapter){
  toast('AI ','success');
  }
@@ -2378,10 +2224,9 @@ function _doSendAI(text){
 
 
 function refreshChapterKnowledge(){
- if(!bookId||!chapterId)return;
- loadChapterOutline();
- loadTimeline();
- if(currentBottomTab==='prediction')loadPredictionCurrent();
+ if(!bookId)return;
+ if(chapterId)loadChapterOutline();
+ loadPredictionCurrent();
 }
 
 function loadChapterOutline(){
@@ -2432,45 +2277,6 @@ function renderChapterOutline(d){
  el.innerHTML=html||'<div class="tl-empty">本章暂无知识库信息</div>';
 }
 
-function loadTimeline(){
- if(!bookId)return;
- var url='/api/book/'+bookId+'/timeline-map?zoom='+timelineZoom+(chapterId?'&chapter_id='+encodeURIComponent(chapterId):'');
- api('GET',url,undefined,function(d,s){
-  if(s!==200){$('timelineResult').innerHTML='<div class="tl-empty">'+esc((d&&d.error)||'时间线读取失败')+'</div>';return}
-  renderTimelineMap(d||{});
- });
-}
-
-function setTimelineZoom(z){timelineZoom=z;loadTimeline()}
-
-function renderTimelineMap(d){
- document.querySelectorAll('.timeline-zoom button').forEach(function(b){b.classList.toggle('active',parseInt(b.dataset.z)===timelineZoom)});
- var meta=$('timelineMeta');
- if(meta)meta.textContent='本书唯一时间线 · '+(d.visible_total||0)+'/'+(d.events_total||0)+' 个事件'+(d.uncertain_count?' · '+d.uncertain_count+' 个不确定':'')+(d.has_ai_layout?'':' · 暂按章节顺序');
- var c=$('timelineResult'),segs=d.segments||[];
- if(!segs.length){c.innerHTML='<div class="tl-empty">通读后会显示本书时间线</div>';return}
- var focus={};(d.focus_event_ids||[]).forEach(function(id){focus[id]=true});
- var html='';
- segs.forEach(function(seg){
-  html+='<div class="timeline-seg" data-seg="'+esc(seg.id||'')+'"><div class="timeline-seg-title">'+esc(seg.title||'时间段')+'</div><div class="timeline-line">';
-  (seg.events||[]).forEach(function(ev){
-   var cls='timeline-event'+(focus[ev.id]?' focus':'');
-   html+='<div class="'+cls+'" data-event="'+esc(ev.id||'')+'"><div class="timeline-dot"></div><div class="timeline-card">';
-   html+='<div class="timeline-card-title">'+esc(ev.what||'事件')+(ev.uncertain?'<span class="timeline-uncertain">?</span>':'')+'</div>';
-   html+='<div class="timeline-card-meta">第 '+(((ev.chapter_idx||0)+1))+' 章 · '+esc(ev.story_time||'时间未定')+'</div>';
-   var detail=[ev.who,ev.where_loc].filter(Boolean).join(' · ');
-   if(detail)html+='<div class="timeline-card-detail">'+esc(detail)+'</div>';
-   if(ev.timeline_reason)html+='<div class="timeline-card-detail">'+esc(ev.timeline_reason)+'</div>';
-   html+='</div></div>';
-  });
-  html+='</div></div>';
- });
- c.innerHTML=html;
- if(d.focus_event_ids&&d.focus_event_ids.length){
-  setTimeout(function(){var key=(window.CSS&&CSS.escape)?CSS.escape(d.focus_event_ids[0]):String(d.focus_event_ids[0]).replace(/"/g,'');var n=c.querySelector('[data-event="'+key+'"]');if(n)n.scrollIntoView({block:'nearest',inline:'center'});},50);
- }
-}
-
 function _streamGenerate(type,logEl,onDone){
   logEl.textContent='正在启动后台任务...';
  // 
@@ -2507,9 +2313,6 @@ function _streamGenerate(type,logEl,onDone){
  });
 }
 
-function generateTimeline(){loadTimeline();toast('时间线已刷新','success')}
-function expandTimelineNode(nodeId){loadTimeline()}
-
 function toggleTrash(){
  inTrash=!inTrash;var trashEl=$('trashList');var btn=$('trashToggleBtn');
  if(inTrash){btn.textContent='返回';btn.classList.add('open');api('GET','/api/book/'+bookId+'/trash',undefined,function(d){var chs=d.chapters||[];if(!chs.length){trashEl.innerHTML='<div class="trash-empty">回收站为空</div>'}else{var html='<div class="trash-header">已删除章节</div>';chs.forEach(function(ch){html+='<div class="trash-item"><span class="ti-title">'+esc(ch.title||'未命名')+'</span><button class="ti-restore" onclick="event.stopPropagation();restoreChapter(\''+esc(ch.id)+'\')">恢复</button></div>'});trashEl.innerHTML=html}trashEl.classList.add('open')})}
@@ -2540,7 +2343,6 @@ function applySettings(){
      }
    }
  });
- _updateConnTypeColors();
  // 加载当前预设到表单
  loadPresetToForm(currentPresetIdx);
  renderProviderSlider();
@@ -2608,13 +2410,6 @@ function getSystemTheme(){
  return window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
 }
 
-function _updateConnTypeColors(){
- var hex=_currentThemeAccent;
- _connTypeMap.summary.color=hex;
- _connTypeMap['chapter-complete'].color=hex;
- _connTypeMap['series-summary'].color=hex;
-}
-
 function onThemeAccentInput(val){
  val=val.trim().toUpperCase();
  if(val.length===6&&/^[0-9A-F]{6}$/.test(val))val='#'+val;
@@ -2627,7 +2422,6 @@ function onThemeAccentInput(val){
  if(prev)prev.style.borderColor='var(--accent)';
  _currentThemeAccent=val;
  applyTheme(val);
- _updateConnTypeColors();
  if(prev)prev.style.background=val;
 }
 
@@ -3289,13 +3083,11 @@ function doImport(file){
 function switchBottomTab(tab){
  currentBottomTab=tab;
  document.querySelectorAll('.bottom-tab').forEach(function(b){b.classList.toggle('active',b.dataset.btab===tab)});
- $('timelinePane').classList.toggle('active',tab==='timeline');
  $('predictionPane').classList.toggle('active',tab==='prediction');
  $('outlinePane').classList.toggle('active',tab==='outline');
  $('summaryPane').classList.toggle('active',tab==='summary');
  if(!bottomPanelOpen){openBottomPanel()}
  if(tab==='outline'){loadChapterOutline()}
- if(tab==='timeline'){loadTimeline()}
  if(tab==='prediction'){loadPredictionCurrent()}
  if(tab==='summary'){pollRTStatus()}
 }
@@ -3318,10 +3110,27 @@ function loadPredictionCurrent(){
   if(s!==200){el.innerHTML='<div class="tl-empty">'+esc((d&&d.error)||'预言读取失败')+'</div>';return}
   if(d.exists&&d.text){
    var when=d.updated?new Date(d.updated*1000).toLocaleString('zh-CN',{hour12:false}):'';
-   el.innerHTML='<div class="kb-section"><div class="kb-section-title"><span>读者预言</span><span class="kb-pill">'+esc(when)+'</span></div><div class="prediction-text">'+_mdToHtml(d.text)+'</div></div><div class="kb-muted">预言只在“本章写完”后自动更新。</div>';
+   var stale=d.stale;
+   var staleBanner=stale?'<div class="prediction-stale"><span class="ps-dot"></span><span class="ps-text">知识库已变动，预言已经不是最新</span><button class="ps-btn" onclick="refreshPrediction()">手动更新</button></div>':'';
+   el.innerHTML=staleBanner+'<div class="kb-section"><div class="kb-section-title"><span>读者预言</span><span class="kb-pill">'+esc(when)+'</span></div><div class="prediction-text">'+_mdToHtml(d.text)+'</div></div><div class="kb-muted">预言只在“本章写完”后自动更新。</div>';
   }else{
    el.innerHTML='<div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>';
   }
+ });
+}
+
+function refreshPrediction(){
+ if(!bookId)return;
+ var btn=document.querySelector('.ps-btn');
+ if(btn){btn.disabled=true;btn.textContent='更新中...';}
+ api('POST','/api/book/'+bookId+'/action',{action:'reader-prediction'},function(d,s){
+  if(s!==200){
+   toast((d&&d.error)||'更新失败','error');
+   if(btn){btn.disabled=false;btn.textContent='手动更新';}
+   return;
+  }
+  toast('预言更新已启动，稍候...','success');
+  setTimeout(loadPredictionCurrent,3500);
  });
 }
 
@@ -3364,7 +3173,6 @@ function openBottomPanel(){
  panel.classList.remove('collapsed');
  if(bookId){
   if(currentBottomTab==='summary')pollRTStatus();
-  else if(currentBottomTab==='timeline')loadTimeline();
   else if(currentBottomTab==='prediction')loadPredictionCurrent();
   else if(currentBottomTab==='outline')loadChapterOutline();
  }
@@ -3678,7 +3486,9 @@ function saveSeriesAIMessages(){
 }
 
 function renderSeriesAIMessages(){
- var c=$('seriesAIMessages');if(!c)return;c.innerHTML='';
+ var c=$('seriesAIMessages');if(!c)return;
+ var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
+ c.innerHTML='';
  if(!seriesAIMessages.length){c.innerHTML='<div class="ai-msg ai-msg-ai" style="text-align:center;font-size:10px;background:transparent;border:none;padding:10px;color:var(--t3)">Luca 是你的系列规划顾问</div>';return}
  seriesAIMessages.forEach(function(m){
   var d=document.createElement('div');d.className='ai-msg ai-msg-'+m.type;
@@ -3700,7 +3510,7 @@ function renderSeriesAIMessages(){
   }
   c.appendChild(d);
  });
- c.scrollTop=c.scrollHeight;
+ if(nearBottom)c.scrollTop=c.scrollHeight;
 }
 
 function sendSeriesAI(){

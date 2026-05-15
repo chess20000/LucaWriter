@@ -30,9 +30,8 @@
 - **宽度**：`width: fit-content; min-width: 180px; max-width: 320px`。在能完整显示所有章节名前提下尽可能窄。
 - **毛玻璃**：sidebar 自身 `background: transparent`，玻璃放到 `::before` 上并加横向 `mask-image: linear-gradient(to right, #000 0%, #000 75%, transparent 100%)`，右端 25% 渐隐。
 - **右边界**：`::after` 一根 1px 渐变细线（`var(--border)`，`opacity: .25`），上下各 14px 淡出，不使用 `box-shadow`。
-- **垂直时间线**：`.chapter-list::before` 画一条从顶到底的细线（`var(--border2)`，`opacity: .55`，两端各 8% 淡出）。
-- **滚动条放左侧**：`.chapter-list` 用 `direction: rtl; scrollbar-gutter: stable`，子元素 `direction: ltr`。时间线 `left` 要 +5px 补偿 gutter，与 dot 居中对齐。
-- **元素顺序**：dot（绝对定位，钉在时间线上）→ `.ch-meta`（wc/del 共享槽位，order 1）→ `.ch-title`（order 2）。所有元素靠左聚拢，不让 title `flex:1` 撑满。
+- **滚动条放左侧**：`.chapter-list` 用 `direction: rtl; scrollbar-gutter: stable`，子元素 `direction: ltr`。
+- **元素顺序**：dot（绝对定位）→ `.ch-meta`（wc/del 共享槽位，order 1）→ `.ch-title`（order 2）。所有元素靠左聚拢，不让 title `flex:1` 撑满。
 - **wc/del 原地切换**：用同一个 `.ch-meta` 容器（固定 `width: 26px`），wc 和 del 都 `position: absolute; inset: 0`，hover 时 wc `opacity: 0` / del `opacity: 1`。**不能**用 `display:none ↔ flex` 切换，会让 title 左右抖。
 - **搜索框**：紧凑型，`width: 66%; height: 24px; padding: 4px 10px; font-size: 12px`，左对齐，不撑满容器。
 

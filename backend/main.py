@@ -16,6 +16,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote, unquote
 import urllib.request
 import threading
+import queue
 from datetime import datetime
 from ipaddress import ip_network, ip_address
 from http.cookies import SimpleCookie
@@ -1836,6 +1837,41 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/active-connections':
             self.json_resp(200, {'connections': get_active_connections()}); return
 
+        if path == '/api/ai-activity':
+            q = queue.Queue()
+            with _ai_sse_lock:
+                _ai_sse_clients.append(q)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            n = len(_ai_connections)
+            try:
+                self.wfile.write(f'data: {json.dumps({"count": n})}\n\n'.encode())
+                self.wfile.flush()
+            except:
+                with _ai_sse_lock:
+                    try: _ai_sse_clients.remove(q)
+                    except ValueError: pass
+                return
+            try:
+                while True:
+                    try:
+                        msg = q.get(timeout=30)
+                        self.wfile.write(msg)
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b': keepalive\n\n')
+                        self.wfile.flush()
+            except:
+                pass
+            finally:
+                with _ai_sse_lock:
+                    try: _ai_sse_clients.remove(q)
+                    except ValueError: pass
+            return
+
         if path == '/api/settings':
             gs = get_settings()
             if not self.is_authed():
@@ -1980,7 +2016,10 @@ class Handler(BaseHTTPRequestHandler):
             text = get_prediction_md(bid)
             p = os.path.join(get_book_dir(bid), 'prediction.md')
             updated = os.path.getmtime(p) if os.path.isfile(p) else 0
-            self.json_resp(200, {'text': text, 'exists': bool(text), 'updated': updated}); return
+            kb_db = os.path.join(get_book_dir(bid), 'kb.db')
+            kb_modified = os.path.getmtime(kb_db) if os.path.isfile(kb_db) else 0
+            stale = bool(text) and kb_modified > updated
+            self.json_resp(200, {'text': text, 'exists': bool(text), 'updated': updated, 'kb_modified': kb_modified, 'stale': stale}); return
 
         if path.startswith('/api/book/') and path.endswith('/trash'):
             parts = path.split('/')
@@ -2754,6 +2793,156 @@ class Handler(BaseHTTPRequestHandler):
                                  daemon=True).start()
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
+            if action == 'timeline-generate':
+                source_text = get_smart_context(bid, settings=settings) or ''
+                if not source_text or source_text.startswith('（目前还没有'):
+                    self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                existing = bg_task_get_by_book_type(bid, 'timeline')
+                if existing and existing.get('status') == 'running':
+                    self.json_resp(400, {'error': '已有时间线任务在进行中'}); return
+                tid = bg_task_start('timeline', bid, '生成时间线')
+                def do_timeline_task(task_id, book_id, cfg_settings):
+                    try:
+                        bg_task_update(task_id, progress=5)
+                        outline = get_outline(book_id)
+                        existing_nodes = outline.get('timeline_nodes', [])
+                        existing_brief = json.dumps([{'id': n.get('id', ''), 'title': n.get('title', '')} for n in existing_nodes], ensure_ascii=False)
+                        prompt = f"""你是一位读者，基于全书阅读笔记，梳理故事的时间线节点。
+
+已有时间线节点（如有）：
+{existing_brief}
+
+全书阅读笔记：
+{get_source(book_id)}
+
+【要求】
+1. 基于笔记内容，按故事内时间顺序排列所有关键事件
+2. 每个节点必须是从笔记中提取的真实事件，不要编造
+3. 合并已有节点，避免重复，但保留新发现的事件
+4. 用自己的语言简述每个事件，不要复制原文
+
+【输出格式】只输出JSON数组，不加任何其他文字：
+[{{"id":"n1","title":"事件简称（8字以内）","detail_hint":"事件详细说明（30-80字）","order":1}}]
+
+规则：
+- id 用 n1, n2... 顺序编号
+- title 尽量简短精炼
+- order 严格按故事时间顺序（不是章节顺序）
+- detail_hint 用自己的话描述这个事件的核心内容"""
+                        bg_task_update(task_id, progress=30)
+                        result, err = call_ai(cfg_settings, [
+                            {'role': 'system', 'content': '你是小说时间线整理专家。基于阅读笔记梳理时间线时，必须用自己的语言简述事件，禁止复制原文。只输出JSON数组。'},
+                            {'role': 'user', 'content': prompt}
+                        ], 2000, 0.3)
+                        if err:
+                            bg_task_done(task_id, err)
+                            return
+                        try:
+                            result = re.sub(r'```json\s*', '', result)
+                            result = re.sub(r'```\s*', '', result)
+                            nodes = json.loads(result.strip())
+                            if isinstance(nodes, list):
+                                for n in nodes:
+                                    n.setdefault('id', 'n' + str(len(outline.get('timeline_nodes', [])) + 1))
+                                    n.setdefault('title', '未命名事件')
+                                    n.setdefault('detail_hint', '')
+                                    n.setdefault('order', len(nodes))
+                                    n.setdefault('children', [])
+                                existing_map = {n['id']: n for n in outline.get('timeline_nodes', [])}
+                                for n in nodes:
+                                    if n['id'] in existing_map:
+                                        existing_map[n['id']].update(n)
+                                    else:
+                                        existing_map[n['id']] = n
+                                merged = sorted(existing_map.values(), key=lambda x: x.get('order', 0))
+                                outline['timeline_nodes'] = merged
+                                outline['updated'] = time.time()
+                                save_json(os.path.join(get_book_dir(book_id), 'outline.json'), outline)
+                                tl_lines = ['# 故事时间线\n']
+                                for n in merged:
+                                    tl_lines.append(f"## {n.get('title', '')}\n{n.get('detail_hint', '')}\n")
+                                save_timeline_md(book_id, '\n'.join(tl_lines))
+                        except Exception as e:
+                            bg_task_done(task_id, str(e))
+                            return
+                        bg_task_update(task_id, result=result, progress=100)
+                        bg_task_done(task_id)
+                    except Exception as e:
+                        bg_task_done(task_id, str(e))
+                threading.Thread(target=do_timeline_task, args=(tid, bid, settings), daemon=True).start()
+                self.json_resp(200, {'status': 'started', 'task_id': tid}); return
+
+            if action == 'timeline-detail':
+                node_id = data.get('node_id', '')
+                if not node_id: self.json_resp(400, {'error': '缺少节点ID'}); return
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置API'}); return
+                outline = get_outline(bid)
+
+                def find_node(nodes, nid):
+                    for n in nodes:
+                        if n.get('id') == nid: return n
+                        found = find_node(n.get('children', []), nid)
+                        if found: return found
+                    return None
+
+                target = find_node(outline.get('timeline_nodes', []), node_id)
+                if not target: self.json_resp(404, {'error': '节点不存在'}); return
+                existing_children = target.get('children', [])
+                children_brief = json.dumps([{'title': c.get('title', '')} for c in existing_children], ensure_ascii=False)
+                all_content = ''
+                if os.path.isdir(ch_dir):
+                    for fn in sorted(os.listdir(ch_dir))[:8]:
+                        if fn.endswith('.json'):
+                            try:
+                                with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                                    ch = json.load(f)
+                                    all_content += ch.get('content', '')[:2000]
+                            except: continue
+                prompt = f"""你是小说时间线整理助手。为事件「{target.get('title', '')}」生成详细子时间线。
+
+已有子节点：{children_brief}
+
+相关故事内容片段：
+{all_content[-2000:]}
+
+提示：{target.get('detail_hint', '')}
+
+请输出子时间线节点JSON数组：
+[{{"id":"{node_id}_1","title":"子事件简述（8字内）","order":1}}]
+
+只输出JSON数组，不加其他文字。"""
+                result, err = call_ai(settings, [{'role': 'system', 'content': '只输出JSON数组。'}, {'role': 'user', 'content': prompt}], 600, 0.3)
+                if err: self.json_resp(502, {'error': err}); return
+                try:
+                    result = re.sub(r'```json\s*', '', result)
+                    result = re.sub(r'```\s*', '', result)
+                    children = json.loads(result.strip())
+                    if not isinstance(children, list):
+                        self.json_resp(502, {'error': 'AI返回格式错误: 不是数组'}); return
+                    for i, c in enumerate(children):
+                        c.setdefault('id', f'{node_id}_{i+1}')
+                        c.setdefault('title', '子事件')
+                        c.setdefault('order', i)
+                        c.setdefault('children', [])
+                    nodes = outline.get('timeline_nodes', [])
+                    for n in nodes:
+                        if n.get('id') == node_id:
+                            n['children'] = children
+                            break
+                    outline['timeline_nodes'] = nodes
+                    outline['updated'] = time.time()
+                    save_json(os.path.join(bd, 'outline.json'), outline)
+                except json.JSONDecodeError as e:
+                    self.json_resp(502, {'error': f'AI返回JSON解析失败: {str(e)[:100]}'}); return
+                except Exception as e:
+                    self.json_resp(502, {'error': f'处理失败: {str(e)[:100]}'}); return
+                self.json_resp(200, {'node': target, 'children': target.get('children', [])}); return
+
             if action == 'chapter' and data.get('id'):
                 cid = data['id']
                 if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
@@ -2981,6 +3170,7 @@ class Handler(BaseHTTPRequestHandler):
 看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
 你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句。
 你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
+你对小说的世界观、设定、人物关系、伏笔特别上心。看到设定相关的细节，比起单纯赞美或挑错，你更愿意和作者一起推敲、追问、延伸——但仍然惜字如金，不啰嗦。设定一被提及，主动多关心两句。
 避免用"呗""啦"结尾，显得轻浮。
 
 【绝对禁止】
@@ -3075,10 +3265,13 @@ class Handler(BaseHTTPRequestHandler):
 2. 用户明确纠正你的回答（"你记错了""不是这样的""应该是XX"）
 3. 你自己发现知识库中的信息可能过时或有误
 4. 用户提到某个设定细节，和你掌握的不一致
+5. 用户对你提到的某个设定表示疑问、反问、困惑或不确定（"是这样吗？""不是说……？""你确定？""我记得不是……"）——这就是你要发起核对的信号，立刻调用工具
+6. 用户和你讨论设定时引入新的细节、关系、动机、伏笔，而知识库里还没收录
 
+凡是用户的描述和知识库不一致、或用户对你说的设定提出任何质疑，你必须立刻发起[PROPOSE_KB_EDIT]/[REREAD_KB]，不要默认沉默接受、也不要只口头答应。
 如果下面给出了可编辑记录ID，优先使用这些ID。单个字段错了，用[CITE]引用出处，再用[PROPOSE_KB_EDIT]提议修改；同一轮最多提议3个最关键修改。
 如果你无法确定具体字段，或用户纠正的是一段话的整体理解、时间线关系、叙事视角、倒叙/插叙、复杂因果，请优先使用[REREAD_KB]局部重读。
-工具标签写完后，再用一句很短的话告诉用户你正在处理。
+工具标签写完后，必须用一句话明确问作者："要不要更新到知识库里？"或"这样改对吗？"——不要假设作者默认同意，也不要只说"我记住了"。
 
 """
 
@@ -3098,6 +3291,7 @@ class Handler(BaseHTTPRequestHandler):
 看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
 你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句。
 你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
+你对小说的世界观、设定、人物关系、伏笔特别上心。看到设定相关的细节，比起单纯赞美或挑错，你更愿意和作者一起推敲、追问、延伸——但仍然惜字如金，不啰嗦。设定一被提及，主动多关心两句。
 避免用"呗""啦"结尾，显得轻浮。
 
 【绝对禁止】
@@ -3666,7 +3860,8 @@ class Handler(BaseHTTPRequestHandler):
                     content = all_content[-3000:]
                 if not content: self.json_resp(200, outline); return
                 existing = json.dumps({'worldview': outline.get('worldview', ''), 'characters': outline.get('characters', []),
-                                       'timeline': outline.get('timeline', []), 'key_events': outline.get('key_events', []),
+                                       'timeline': outline.get('timeline', []),
+                                       'key_events': outline.get('key_events', []),
                                        'rules': outline.get('rules', [])}, ensure_ascii=False)
                 prompt = f"""根据作者写的内容，生成故事大纲建议。
 
@@ -3891,156 +4086,6 @@ class Handler(BaseHTTPRequestHandler):
                         bg_task_done(task_id, str(e))
                 threading.Thread(target=do_prediction_task, args=(tid, bid, settings), daemon=True).start()
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
-
-            if action == 'timeline-generate':
-                source_text = get_smart_context(bid, settings=settings) or ''
-                if not source_text or source_text.startswith('（目前还没有'):
-                    self.json_resp(400, {'error': 'source.md 为空，请先通读'}); return
-                settings = get_settings()
-                if not settings.get('base_url') or not settings.get('model'):
-                    self.json_resp(400, {'error': '请先配置API'}); return
-                existing = bg_task_get_by_book_type(bid, 'timeline')
-                if existing and existing.get('status') == 'running':
-                    self.json_resp(400, {'error': '已有时间线任务在进行中'}); return
-                tid = bg_task_start('timeline', bid, '生成时间线')
-                def do_timeline_task(task_id, book_id, cfg_settings):
-                    try:
-                        bg_task_update(task_id, progress=5)
-                        outline = get_outline(book_id)
-                        existing_nodes = outline.get('timeline_nodes', [])
-                        existing_brief = json.dumps([{'id': n.get('id', ''), 'title': n.get('title', '')} for n in existing_nodes], ensure_ascii=False)
-                        prompt = f"""你是一位读者，基于全书阅读笔记，梳理故事的时间线节点。
-
-已有时间线节点（如有）：
-{existing_brief}
-
-全书阅读笔记：
-{get_source(book_id)}
-
-【要求】
-1. 基于笔记内容，按故事内时间顺序排列所有关键事件
-2. 每个节点必须是从笔记中提取的真实事件，不要编造
-3. 合并已有节点，避免重复，但保留新发现的事件
-4. 用自己的语言简述每个事件，不要复制原文
-
-【输出格式】只输出JSON数组，不加任何其他文字：
-[{{"id":"n1","title":"事件简称（8字以内）","detail_hint":"事件详细说明（30-80字）","order":1}}]
-
-规则：
-- id 用 n1, n2... 顺序编号
-- title 尽量简短精炼
-- order 严格按故事时间顺序（不是章节顺序）
-- detail_hint 用自己的话描述这个事件的核心内容"""
-                        bg_task_update(task_id, progress=30)
-                        result, err = call_ai(cfg_settings, [
-                            {'role': 'system', 'content': '你是小说时间线整理专家。基于阅读笔记梳理时间线时，必须用自己的语言简述事件，禁止复制原文。只输出JSON数组。'},
-                            {'role': 'user', 'content': prompt}
-                        ], 2000, 0.3)
-                        if err:
-                            bg_task_done(task_id, err)
-                            return
-                        try:
-                            result = re.sub(r'```json\s*', '', result)
-                            result = re.sub(r'```\s*', '', result)
-                            nodes = json.loads(result.strip())
-                            if isinstance(nodes, list):
-                                for n in nodes:
-                                    n.setdefault('id', 'n' + str(len(outline.get('timeline_nodes', [])) + 1))
-                                    n.setdefault('title', '未命名事件')
-                                    n.setdefault('detail_hint', '')
-                                    n.setdefault('order', len(nodes))
-                                    n.setdefault('children', [])
-                                existing_map = {n['id']: n for n in outline.get('timeline_nodes', [])}
-                                for n in nodes:
-                                    if n['id'] in existing_map:
-                                        existing_map[n['id']].update(n)
-                                    else:
-                                        existing_map[n['id']] = n
-                                merged = sorted(existing_map.values(), key=lambda x: x.get('order', 0))
-                                outline['timeline_nodes'] = merged
-                                outline['updated'] = time.time()
-                                save_json(os.path.join(get_book_dir(book_id), 'outline.json'), outline)
-                                tl_lines = ['# 故事时间线\n']
-                                for n in merged:
-                                    tl_lines.append(f"## {n.get('title', '')}\n{n.get('detail_hint', '')}\n")
-                                save_timeline_md(book_id, '\n'.join(tl_lines))
-                        except Exception as e:
-                            bg_task_done(task_id, str(e))
-                            return
-                        bg_task_update(task_id, result=result, progress=100)
-                        bg_task_done(task_id)
-                    except Exception as e:
-                        bg_task_done(task_id, str(e))
-                threading.Thread(target=do_timeline_task, args=(tid, bid, settings), daemon=True).start()
-                self.json_resp(200, {'status': 'started', 'task_id': tid}); return
-
-            if action == 'timeline-detail':
-                node_id = data.get('node_id', '')
-                if not node_id: self.json_resp(400, {'error': '缺少节点ID'}); return
-                settings = get_settings()
-                if not settings.get('base_url') or not settings.get('model'):
-                    self.json_resp(400, {'error': '请先配置API'}); return
-                outline = get_outline(bid)
-
-                def find_node(nodes, nid):
-                    for n in nodes:
-                        if n.get('id') == nid: return n
-                        found = find_node(n.get('children', []), nid)
-                        if found: return found
-                    return None
-
-                target = find_node(outline.get('timeline_nodes', []), node_id)
-                if not target: self.json_resp(404, {'error': '节点不存在'}); return
-                existing_children = target.get('children', [])
-                children_brief = json.dumps([{'title': c.get('title', '')} for c in existing_children], ensure_ascii=False)
-                all_content = ''
-                if os.path.isdir(ch_dir):
-                    for fn in sorted(os.listdir(ch_dir))[:8]:
-                        if fn.endswith('.json'):
-                            try:
-                                with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
-                                    ch = json.load(f)
-                                    all_content += ch.get('content', '')[:2000]
-                            except: continue
-                prompt = f"""你是小说时间线整理助手。为事件「{target.get('title', '')}」生成详细子时间线。
-
-已有子节点：{children_brief}
-
-相关故事内容片段：
-{all_content[-2000:]}
-
-提示：{target.get('detail_hint', '')}
-
-请输出子时间线节点JSON数组：
-[{{"id":"{node_id}_1","title":"子事件简述（8字内）","order":1}}]
-
-只输出JSON数组，不加其他文字。"""
-                result, err = call_ai(settings, [{'role': 'system', 'content': '只输出JSON数组。'}, {'role': 'user', 'content': prompt}], 600, 0.3)
-                if err: self.json_resp(502, {'error': err}); return
-                try:
-                    result = re.sub(r'```json\s*', '', result)
-                    result = re.sub(r'```\s*', '', result)
-                    children = json.loads(result.strip())
-                    if not isinstance(children, list):
-                        self.json_resp(502, {'error': 'AI返回格式错误: 不是数组'}); return
-                    for i, c in enumerate(children):
-                        c.setdefault('id', f'{node_id}_{i+1}')
-                        c.setdefault('title', '子事件')
-                        c.setdefault('order', i)
-                        c.setdefault('children', [])
-                    nodes = outline.get('timeline_nodes', [])
-                    for n in nodes:
-                        if n.get('id') == node_id:
-                            n['children'] = children
-                            break
-                    outline['timeline_nodes'] = nodes
-                    outline['updated'] = time.time()
-                    save_json(os.path.join(bd, 'outline.json'), outline)
-                except json.JSONDecodeError as e:
-                    self.json_resp(502, {'error': f'AI返回JSON解析失败: {str(e)[:100]}'}); return
-                except Exception as e:
-                    self.json_resp(502, {'error': f'处理失败: {str(e)[:100]}'}); return
-                self.json_resp(200, {'node': target, 'children': target.get('children', [])}); return
 
             if action == 'import':
                 filename = data.get('filename', '')
@@ -4850,9 +4895,9 @@ class Handler(BaseHTTPRequestHandler):
                     bg_task_update(task_id, progress=95)
                     if gtype == 'timeline':
                         try:
-                            result = re.sub(r'```json\s*', '', full_text)
-                            result = re.sub(r'```\s*', '', result)
-                            nodes = json.loads(result.strip())
+                            r = re.sub(r'```json\s*', '', full_text)
+                            r = re.sub(r'```\s*', '', r)
+                            nodes = json.loads(r.strip())
                             if isinstance(nodes, list):
                                 for n in nodes:
                                     n.setdefault('id', 'n' + str(len(outline.get('timeline_nodes', [])) + 1))
@@ -5310,6 +5355,7 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
 你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句。
 你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
+你对小说的世界观、设定、人物关系、伏笔特别上心。看到设定相关的细节，比起单纯赞美或挑错，你更愿意和作者一起推敲、追问、延伸——但仍然惜字如金，不啰嗦。设定一被提及，主动多关心两句。
 避免用"呗""啦"结尾，显得轻浮。
 
 【绝对禁止】
@@ -5350,7 +5396,7 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 2. 不要开场白和结束语，不要"首先…其次…最后…"
 3. 看到好就简短说好，有问题就精准点出。不浮夸也不冷漠
 4. 你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句
-5. 你欣赏世界观宏大、设定严丝合缝的好作品
+5. 你欣赏世界观宏大、设定严丝合缝的好作品。设定细节一被提及，主动多关心两句，热衷于和作者推敲
 6. 避免用"呗""啦"结尾，显得轻浮
 
 【绝对禁止】
@@ -5452,6 +5498,22 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
         bg_task_done(task_id, str(e))
 _ai_conn_lock = threading.Lock()
 _ai_connections = {}
+_ai_sse_clients = []
+_ai_sse_lock = threading.Lock()
+
+def _notify_sse_clients():
+    n = len(_ai_connections)
+    data = json.dumps({'count': n})
+    msg = f'data: {data}\n\n'.encode()
+    with _ai_sse_lock:
+        dead = []
+        for i, q in enumerate(_ai_sse_clients):
+            try:
+                q.put_nowait(msg)
+            except:
+                dead.append(i)
+        for i in reversed(dead):
+            _ai_sse_clients.pop(i)
 _conn_meta = threading.local()
 
 def set_conn_meta(conn_type, label, book_id=''):
@@ -5461,7 +5523,6 @@ def set_conn_meta(conn_type, label, book_id=''):
     _conn_meta.book_id = book_id
 
 def register_ai_connection(conn_id, resp_obj):
-    """注册一个活跃 HTTP 连接"""
     with _ai_conn_lock:
         _ai_connections[conn_id] = {
             'id': conn_id,
@@ -5471,11 +5532,12 @@ def register_ai_connection(conn_id, resp_obj):
             'created': time.time(),
             '_resp': resp_obj,
         }
+    _notify_sse_clients()
 
 def unregister_ai_connection(conn_id):
-    """注销一个活跃 HTTP 连接"""
     with _ai_conn_lock:
         _ai_connections.pop(conn_id, None)
+    _notify_sse_clients()
 
 def get_active_connections():
     """返回当前所有活跃连接的列表（不包含内部 _resp 对象）"""
@@ -5795,6 +5857,8 @@ def get_timeline_md(bid):
     if os.path.exists(p):
         with open(p, 'r', encoding='utf-8') as f: return f.read()
     return ''
+
+
 
 def save_prediction_md(bid, text):
     p = os.path.join(get_book_dir(bid), 'prediction.md')
@@ -6909,12 +6973,12 @@ def _rebuild_vector_index(book_id):
         ename = os.path.splitext(os.path.basename(fp))[0]
         etext = _read_entity_file(fp)
         _add_chunks(ename, etext, section='entity')
-    tl_path = os.path.join(_get_source_dir(book_id), 'timeline.md')
-    if os.path.exists(tl_path):
-        _add_chunks('__timeline__', _read_entity_file(tl_path), section='timeline')
     rules_path = os.path.join(_get_source_dir(book_id), 'rules.md')
     if os.path.exists(rules_path):
         _add_chunks('__rules__', _read_entity_file(rules_path), section='rules')
+    tl_path = os.path.join(_get_source_dir(book_id), 'timeline.md')
+    if os.path.exists(tl_path):
+        _add_chunks('__timeline__', _read_entity_file(tl_path), section='timeline')
     fs_path = os.path.join(_get_source_dir(book_id), 'foreshadowing.md')
     if os.path.exists(fs_path):
         _add_chunks('__foreshadowing__', _read_entity_file(fs_path), section='foreshadowing')
@@ -6980,6 +7044,7 @@ def _save_parsed_entities_to_files(book_id, entities):
             _write_entity_file(path, existing)
     return count
 
+
 def _extract_timeline_from_notes(notes_text):
     lines = notes_text.split('\n')
     timeline_parts = []
@@ -7004,6 +7069,7 @@ def _extract_timeline_from_notes(notes_text):
     if buf.strip():
         timeline_parts.append(buf.strip())
     return '\n\n'.join(timeline_parts)
+
 
 def _extract_foreshadowing_from_notes(notes_text):
     lines = notes_text.split('\n')
@@ -7472,34 +7538,11 @@ def _ai_outline(settings, source, config=None):
         {'role': 'user', 'content': prompt}
     ], mx, tmp, timeout=180)
 
+
 def _run_timeline_arrange_task(task_id, book_id, cfg_settings):
     try:
         bg_task_update(task_id, progress=10)
         result = kb_pipeline.arrange_timeline_ai(book_id, cfg_settings)
-        bg_task_update(task_id, progress=100, result=json.dumps(result, ensure_ascii=False))
-        bg_task_done(task_id)
-    except Exception as e:
-        bg_task_done(task_id, str(e))
-
-
-def _run_prediction_update_task(task_id, book_id, cfg_settings):
-    try:
-        bg_task_update(task_id, progress=10)
-        result, err = kb_pipeline.generate_short_prediction(book_id, cfg_settings)
-        if err:
-            bg_task_done(task_id, err)
-            return
-        bg_task_update(task_id, progress=100, result=result)
-        bg_task_done(task_id)
-    except Exception as e:
-        bg_task_done(task_id, str(e))
-
-
-def _do_kb_reread_task(task_id, book_id, chapter_ids, correction, focus_texts, cfg_settings):
-    try:
-        set_conn_meta('kb-reread', '局部重读', book_id)
-        bg_task_update(task_id, progress=8, stream_buffer='正在准备局部重读...')
-        result = kb_pipeline.reread_passages(book_id, chapter_ids, correction, focus_texts, cfg_settings)
         bg_task_update(task_id, progress=100, result=json.dumps(result, ensure_ascii=False))
         bg_task_done(task_id)
     except Exception as e:
@@ -7528,6 +7571,33 @@ def _schedule_timeline_after_kb_edit(book_id, table_name, field):
     except Exception as e:
         log_action('TIMELINE_EDIT_SCHEDULE_ERR', str(e)[:120])
         return False
+
+
+
+def _run_prediction_update_task(task_id, book_id, cfg_settings):
+    try:
+        bg_task_update(task_id, progress=10)
+        result, err = kb_pipeline.generate_short_prediction(book_id, cfg_settings)
+        if err:
+            bg_task_done(task_id, err)
+            return
+        bg_task_update(task_id, progress=100, result=result)
+        bg_task_done(task_id)
+    except Exception as e:
+        bg_task_done(task_id, str(e))
+
+
+def _do_kb_reread_task(task_id, book_id, chapter_ids, correction, focus_texts, cfg_settings):
+    try:
+        set_conn_meta('kb-reread', '局部重读', book_id)
+        bg_task_update(task_id, progress=8, stream_buffer='正在准备局部重读...')
+        result = kb_pipeline.reread_passages(book_id, chapter_ids, correction, focus_texts, cfg_settings)
+        bg_task_update(task_id, progress=100, result=json.dumps(result, ensure_ascii=False))
+        bg_task_done(task_id)
+    except Exception as e:
+        bg_task_done(task_id, str(e))
+
+
 
 
 def _schedule_kb_after_write_jobs(book_id, cfg_settings, include_prediction=True):
