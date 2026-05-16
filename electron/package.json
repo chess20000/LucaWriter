@@ -1,6 +1,6 @@
 {
   "name": "lucawriter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "LucaWriter - AI写作搭档",
   "main": "main.js",
   "author": "LucaWriter",
@@ -21,7 +21,7 @@
     "productName": "LucaWriter",
     "copyright": "Copyright © 2026 LucaWriter",
     "directories": {
-      "output": "../release/v1.0.0"
+      "output": "../release/v1.1.0"
     },
     "files": [
       "main.js",
