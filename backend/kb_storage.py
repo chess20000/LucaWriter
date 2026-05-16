@@ -901,6 +901,7 @@ def _get_chroma_client(book_id):
     from main import get_book_dir
     persist_dir = os.path.join(get_book_dir(book_id), '.vector_db')
     if book_id not in _chroma_clients:
+        os.makedirs(persist_dir, exist_ok=True)
         _chroma_clients[book_id] = chromadb.PersistentClient(path=persist_dir)
     return _chroma_clients[book_id]
 
@@ -947,6 +948,7 @@ def embed_clear(book_id):
             client.delete_collection(name=_CHROMA_KB_COLLECTION)
         except:
             pass
+        _chroma_clients.pop(book_id, None)
     except:
         pass
     clear_embedding_chunks(book_id)
