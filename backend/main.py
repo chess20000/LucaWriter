@@ -123,6 +123,7 @@ PORT = 20000 if os.environ.get('DATA_DIR') else 10000
 BOOKS_DIR = os.path.join(DATA_DIR, 'books')
 LOG_DIR = os.path.join(DATA_DIR, 'logs')
 MESSAGES_DIR = os.path.join(DATA_DIR, 'messages')
+GLOBAL_CHAT_HISTORY_FILE = os.path.join(DATA_DIR, 'chat_history.json')
 SALT_FILE = os.path.join(DATA_DIR, 'salt')
 SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
@@ -2170,12 +2171,8 @@ class Handler(BaseHTTPRequestHandler):
             bid = unquote(parts[3]) if len(parts) > 3 else ''
             if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
                 self.json_resp(404, {'error': '书本不存在'}); return
-            date_str = qs.get('date', [datetime.now().strftime('%Y-%m-%d')])[0]
-            msg_dir = os.path.join(get_book_dir(bid), 'messages')
-            os.makedirs(msg_dir, exist_ok=True)
-            msg_file = os.path.join(msg_dir, f'{date_str}.json')
-            messages = load_json(msg_file, list)
-            self.json_resp(200, {'messages': messages, 'date': date_str}); return
+            messages = _load_chat_history(bid)
+            self.json_resp(200, {'messages': messages}); return
 
         if path.startswith('/api/book/') and path.endswith('/annotations'):
             parts = path.split('/')
@@ -2677,18 +2674,14 @@ class Handler(BaseHTTPRequestHandler):
             settings = get_settings()
             if not settings.get('base_url') or not settings.get('model'):
                 self.json_resp(400, {'error': '请先配置API'}); return
-            existing = bg_task_get_by_book_type(sid, 'series-chat')
+            existing = bg_task_get_running_luca_chat()
             if existing and existing.get('status') == 'running':
                 self.json_resp(400, {'error': '已有对话在进行中，请稍候'}); return
             tid = bg_task_start('series-chat', sid, '系列AI对话')
-            msg_dir = os.path.join(get_book_dir(sid), 'messages')
-            os.makedirs(msg_dir, exist_ok=True)
-            today = datetime.now().strftime('%Y-%m-%d')
-            msg_file = os.path.join(msg_dir, f'{today}.json')
-            messages = load_json(msg_file, list)
-            messages.append({'text': text, 'type': 'user'})
-            messages.append({'text': '', 'type': 'ai', 'reasoning': '', '_pending': True, 'task_id': tid})
-            save_json(msg_file, messages)
+            _append_chat_history(sid, [
+                {'text': text, 'type': 'user'},
+                {'text': '', 'type': 'ai', 'reasoning': '', '_pending': True, 'task_id': tid},
+            ])
             threading.Thread(target=_do_series_chat, args=(sid, tid, text, settings, data.get('history', [])), daemon=True).start()
             self.json_resp(200, {'task_id': tid}); return
 
@@ -2764,6 +2757,17 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     kb_storage.update_consistency_alert_status(bid, aid, status)
                     self.json_resp(200, {'ok': True}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)[:200]}); return
+
+            if action == 'consistency-deep-check':
+                aid = data.get('alert_id', '')
+                if not aid:
+                    self.json_resp(400, {'error': '缺少提醒ID'}); return
+                settings = get_settings()
+                try:
+                    result = kb_pipeline.consistency_deep_check(bid, aid, settings)
+                    self.json_resp(200, result); return
                 except Exception as e:
                     self.json_resp(500, {'error': str(e)[:200]}); return
 
@@ -3223,7 +3227,7 @@ class Handler(BaseHTTPRequestHandler):
 
 当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
-【重要】你已经在系统里看到了用户当前正在写的章节正文（见下方「现有正文」），不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
+【重要】系统已将用户当前正在写的章节正文注入下方，你可以直接看到他写了什么。
 
 【说话方式】
 谨言慎行。你所说的每一个字都很重要。
@@ -3264,22 +3268,18 @@ class Handler(BaseHTTPRequestHandler):
                     finally:
                         unregister_ai_connection(threading.current_thread().ident)
                 # 检查是否已有进行中的聊天任务
-                existing = bg_task_get_by_book_type(bid, 'chat')
+                existing = bg_task_get_running_luca_chat()
                 if existing and existing.get('status') == 'running':
                     self.json_resp(400, {'error': '已有聊天任务在进行中，请稍候'}); return
                 tid = bg_task_start('chat', bid, 'AI对话')
-                # 立即保存 user 消息 + pending AI 消息到文件，这样刷新后还能看到
-                today = datetime.now().strftime('%Y-%m-%d')
-                msg_dir = os.path.join(bd, 'messages')
-                os.makedirs(msg_dir, exist_ok=True)
-                msg_file = os.path.join(msg_dir, f'{today}.json')
-                messages = load_json(msg_file, list)
-                messages.append({'text': text, 'type': 'user'})
-                messages.append({'text': '', 'type': 'ai', 'reasoning': '', '_pending': True, 'task_id': tid})
-                save_json(msg_file, messages)
+                _append_chat_history(bid, [
+                    {'text': text, 'type': 'user'},
+                    {'text': '', 'type': 'ai', 'reasoning': '', '_pending': True, 'task_id': tid},
+                ])
                 def do_chat_task(task_id, book_id, user_text, cfg_settings, history_list):
                     set_conn_meta('chat', 'AI对话', book_id)
                     try:
+                        history_list = _saved_chat_to_ai_history(book_id, task_id)
                         mt = None
                         tp = cfg_settings.get('ai_temperature', 0.7)
                         source_ctx = get_smart_context(book_id, user_query=text, settings=cfg_settings)
@@ -3288,16 +3288,39 @@ class Handler(BaseHTTPRequestHandler):
                         meta_chat = load_json(os.path.join(bd_chat, 'meta.json'), dict)
                         cid_chat = meta_chat.get('current_chapter_id', '')
                         ch_title_chat = '未命名章节'
-                        ch_content_chat = ''
                         if cid_chat:
                             cp_chat = os.path.join(bd_chat, 'chapters', f'{cid_chat}.json')
                             if os.path.exists(cp_chat):
                                 ch_data_chat = load_json(cp_chat, dict)
                                 ch_title_chat = ch_data_chat.get('title', '未命名章节')
-                                ch_content_chat = ch_data_chat.get('content', '')
+                        browse_parts = []
+                        _sid_chat = _find_series_for_book(book_id)
+                        if _sid_chat:
+                            _s_meta_chat = get_book_meta(_sid_chat)
+                            _s_title_chat = _s_meta_chat.get('title', '') if _s_meta_chat else ''
+                            if _s_title_chat:
+                                browse_parts.append(_s_title_chat)
+                        browse_parts.append(meta_chat.get('title', '未命名'))
+                        if cid_chat and ch_title_chat and ch_title_chat != '未命名章节':
+                            browse_parts.append(ch_title_chat)
+                        browse_ctx = ' - '.join(browse_parts)
+                        ch_list_parts = []
+                        _ch_order = meta_chat.get('chapter_order', [])
+                        for _ci, _cid in enumerate(_ch_order):
+                            _cp = os.path.join(bd_chat, 'chapters', f'{_cid}.json')
+                            if os.path.exists(_cp):
+                                _cd = load_json(_cp, dict)
+                                ch_list_parts.append(f'id={_cid} 第{_ci+1}章 {_cd.get("title", "未命名")}')
+                        ch_list_ctx = '\n'.join(ch_list_parts[:50])
                         kb_tool_context = _build_chat_kb_tool_context(book_id, user_text, cid_chat)
 
-                        annotate_tool = """你还有一个"荧光笔"工具，可以在正文中为用户标注重点内容。
+                        annotate_tool = """你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。系统会把该章的完整正文发给你。
+- 调用格式：[READ_CHAPTER]{{"chapter_id":"章节ID"}}[/READ_CHAPTER]
+- 你不需要每次都读取正文——只有在用户明确要求你评论正文、修改建议、检查连贯性等需要看到原文时才调用。
+- 你可以一次读取多个章节，每个章节调用一次。
+- 当前章ID：{cid_chat or '未知'}
+
+你还有一个"荧光笔"工具，可以在正文中为用户标注重点内容。
 - 添加标注格式：[ANNOTATE_ADD]{{"chapter_id":"当前章ID","text":"要标注的原文片段（需精确匹配）","note":"批注内容","color":"yellow"}}[/ANNOTATE_ADD]
 - 删除标注格式：[ANNOTATE_REMOVE]{{"text":"要删除标注的原文片段"}}[/ANNOTATE_REMOVE] 或 [ANNOTATE_REMOVE]{{"id":"标注ID"}}[/ANNOTATE_REMOVE]
 - 可用颜色：yellow（默认）、green、pink、blue
@@ -3320,8 +3343,6 @@ class Handler(BaseHTTPRequestHandler):
 - 局部重读格式：[REREAD_KB]{{"chapter_ids":["章节ID"],"focus_texts":["用户指出有误的原文片段"],"correction":"用户说，实际上……不是……而是……"}}[/REREAD_KB]
   用途：当用户指出你对某个段落的理解整体有误、不是单个字段能改完时，调用局部重读。系统会只重读相关段落，并替换知识库里由这段误读产生的记录。
 
-当前章ID：{cid_chat or '未知'}
-
 【主动提议规则——非常重要】
 你必须在以下情况主动使用[PROPOSE_KB_EDIT]或[REREAD_KB]，不要等用户要求，也不要只口头说“我记住了/我会改”：
 1. 用户说的内容和你知识库中的记录有矛盾（例如：你记得是李四杀的，用户说是王五杀的）
@@ -3336,6 +3357,9 @@ class Handler(BaseHTTPRequestHandler):
 如果你无法确定具体字段，或用户纠正的是一段话的整体理解、时间线关系、叙事视角、倒叙/插叙、复杂因果，请优先使用[REREAD_KB]局部重读。
 工具标签写完后，必须用一句话明确问作者："要不要更新到知识库里？"或"这样改对吗？"——不要假设作者默认同意，也不要只说"我记住了"。
 
+【章节列表】
+{ch_list_ctx}
+
 """
 
                         is_first_round = not history_list
@@ -3344,7 +3368,7 @@ class Handler(BaseHTTPRequestHandler):
 
 当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
-【重要】你已经在系统里看到了用户当前正在写的章节正文（见下方「现有正文」），不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
+【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。不要让用户复制粘贴或上传稿子——你自己调用工具即可。
 
 【说话方式】
 谨言慎行。你所说的每一个字都很重要。
@@ -3372,13 +3396,9 @@ class Handler(BaseHTTPRequestHandler):
 【可用于知识库工具调用的记录ID】
 {kb_tool_context}
 
-此时，用户正在写最新的一章：
+用户当前正在浏览：{browse_ctx}
 
-【章节名】{ch_title_chat}
-【现有正文】
-{ch_content_chat}
-
-用户此时停了下来，对你发送了如下消息——
+用户对你发送了如下消息——
 
 {annotate_tool}"""
                         else:
@@ -3386,7 +3406,7 @@ class Handler(BaseHTTPRequestHandler):
 
 当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
-【重要】你已经在系统里看到了用户当前正在写的章节正文，不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
+【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。
 
 【说话方式】
 谨言慎行。温文尔雅，不卑不亢。惜字如金。
@@ -3400,6 +3420,8 @@ class Handler(BaseHTTPRequestHandler):
 
 【可用于知识库工具调用的记录ID】
 {kb_tool_context}
+
+用户当前正在浏览：{browse_ctx}
 
 请继续和用户对话。
 
@@ -3483,6 +3505,51 @@ class Handler(BaseHTTPRequestHandler):
                             reasoning_acc.clear()
 
                         result = re.sub(r'[#*`~]', '', full_text)
+
+                        # — 处理 [READ_CHAPTER] 工具调用
+                        _read_chapter_ids = []
+                        for _rc_m in re.finditer(r'\[READ_CHAPTER\](.*?)\[/READ_CHAPTER\]', result, re.S):
+                            try:
+                                _rc_cmd = json.loads(_rc_m.group(1).strip())
+                                _rc_id = _rc_cmd.get('chapter_id', '')
+                                if _rc_id and is_valid_id(_rc_id):
+                                    _read_chapter_ids.append(_rc_id)
+                            except Exception:
+                                pass
+                        if _read_chapter_ids:
+                            result = re.sub(r'\s*\[READ_CHAPTER\].*?\[/READ_CHAPTER\]\s*', '', result, flags=re.S).strip()
+                            _chapter_contents = []
+                            for _rcid in _read_chapter_ids[:3]:
+                                _rcp = os.path.join(bd_chat, 'chapters', f'{_rcid}.json')
+                                if os.path.exists(_rcp):
+                                    _rcd = load_json(_rcp, dict)
+                                    _rc_title = _rcd.get('title', '未命名')
+                                    _rc_content = _rcd.get('content', '')
+                                    if _rc_content:
+                                        _chapter_contents.append(f'【{_rc_title}】\n{_rc_content}')
+                            if _chapter_contents:
+                                _chapter_ctx_text = '\n\n'.join(_chapter_contents)
+                                msgs.append({'role': 'assistant', 'content': result or '让我看看正文。'})
+                                msgs.append({'role': 'user', 'content': f'[系统注入：以下是请求的章节正文]\n\n{_chapter_ctx_text}\n\n请基于以上正文内容继续回答。'})
+                                _rc_content_acc = []
+                                _rc_reasoning_acc = []
+                                def _rc_on_content(tk):
+                                    _rc_content_acc.append(tk)
+                                    bg_task_update(task_id, result=(result + '\n\n' if result else '') + ''.join(_rc_content_acc), progress=min(95, 60 + len(''.join(_rc_content_acc)) // 10))
+                                def _rc_on_reasoning(tk):
+                                    _rc_reasoning_acc.append(tk)
+                                    bg_task_update(task_id, reasoning=''.join(_rc_reasoning_acc))
+                                _rc_full, _rc_err = call_ai_stream(cfg_settings, msgs, mt, tp, timeout=120,
+                                                                    on_content_token=_rc_on_content,
+                                                                    on_reasoning_token=_rc_on_reasoning,
+                                                                    should_stop_fn=lambda: bg_task_should_stop(task_id))
+                                if _rc_err:
+                                    if not result:
+                                        result = '[读取章节后生成回复失败]'
+                                else:
+                                    _rc_result = re.sub(r'[#*`~]', '', _rc_full or '')
+                                    result = (result + '\n\n' if result else '') + _rc_result
+                                    reasoning_text = ''.join(_rc_reasoning_acc) or reasoning_text
 
                         # — 检测浏览请求（优先 tool_call 格式，其次 [BROWSE] 标签）
                         _browse_query = None
@@ -3769,6 +3836,7 @@ class Handler(BaseHTTPRequestHandler):
                             _replace_pending_chat_msg(book_id, task_id, result, reason, meta=meta)
                             bg_task_update(task_id, result=result, reasoning=reason, progress=100, needs_readthrough=needs_rt, needs_summary=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered, kb_reread_started=kb_reread_started, kb_citations=kb_citations, kb_proposals=kb_proposals, tool_calls=tool_calls)
                             bg_task_done(task_id)
+                            _schedule_idle_compress(book_id)
                     except Exception as e:
                         err_str = str(e)
                         if bg_task_should_stop(task_id):
@@ -4594,13 +4662,17 @@ class Handler(BaseHTTPRequestHandler):
             bid = unquote(parts[3]) if len(parts) > 3 else ''
             if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
                 self.json_resp(404, {'error': '书本不存在'}); return
-            date_str = data.get('date', datetime.now().strftime('%Y-%m-%d'))
-            msg_dir = os.path.join(get_book_dir(bid), 'messages')
-            os.makedirs(msg_dir, exist_ok=True)
-            msg_file = os.path.join(msg_dir, f'{date_str}.json')
             messages = data.get('messages', [])
-            save_json(msg_file, messages)
-            self.json_resp(200, {'saved': len(messages), 'date': date_str}); return
+            _save_chat_history(bid, messages, merge=True)
+            self.json_resp(200, {'saved': len(messages)}); return
+
+        if path.startswith('/api/book/') and path.endswith('/clear-chat'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            _save_chat_history(bid, [])
+            self.json_resp(200, {'ok': True}); return
 
         if path == '/api/fetch-models':
             base_url = data.get('base_url', '')
@@ -5059,6 +5131,13 @@ def bg_task_get_by_book_type(book_id, task_type):
                 return dict(t)
         return None
 
+def bg_task_get_running_luca_chat():
+    with _bg_lock:
+        for t in _bg_tasks.values():
+            if t.get('type') in ('chat', 'series-chat') and t.get('status') == 'running':
+                return dict(t)
+        return None
+
 def bg_task_cleanup_old():
     now = time.time()
     with _bg_lock:
@@ -5152,25 +5231,190 @@ def _build_chat_kb_tool_context(book_id, user_text='', current_chapter_id=''):
         log_action('CHAT_KB_TOOL_CONTEXT_ERROR', str(e)[:160])
         return '（知识库记录ID读取失败；必要时用 REREAD_KB。）'
 
-def _replace_pending_chat_msg(book_id, task_id, text, reasoning='', meta=None):
-    """替换 messages 文件中指定 task_id 的 pending AI 消息。"""
-    try:
-        today = datetime.now().strftime('%Y-%m-%d')
-        msg_file = os.path.join(get_book_dir(book_id), 'messages', f'{today}.json')
-        messages = load_json(msg_file, list)
-        replaced = False
-        item = {'text': text, 'type': 'ai', 'reasoning': reasoning}
-        if isinstance(meta, dict):
-            item.update(meta)
-        for i in range(len(messages) - 1, -1, -1):
-            m = messages[i]
-            if m.get('type') == 'ai' and m.get('_pending') and m.get('task_id') == task_id:
-                messages[i] = item
-                replaced = True
+def _find_series_for_book(book_id):
+    books_dir = BOOKS_DIR
+    if not os.path.isdir(books_dir):
+        return None
+    for d in os.listdir(books_dir):
+        dp = os.path.join(books_dir, d)
+        if not os.path.isdir(dp):
+            continue
+        meta = load_json(os.path.join(dp, 'meta.json'), dict)
+        if meta.get('type') == 'series' and book_id in (meta.get('series_books') or []):
+            return d
+    return None
+
+_chat_history_lock = threading.RLock()
+_CHAT_TRANSIENT_KEYS = {'_pollTick', '_reasoningOpen', '_kbModalShown', '_streaming'}
+
+def _clean_chat_message(m):
+    if not isinstance(m, dict):
+        return m
+    return {k: v for k, v in m.items() if k not in _CHAT_TRANSIENT_KEYS}
+
+def _chat_message_same(a, b):
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return a == b
+    keys = ('type', 'subtype', 'text', 'reasoning', 'task_id', '_pending')
+    return all(a.get(k) == b.get(k) for k in keys)
+
+def _chat_task_key(m):
+    if isinstance(m, dict) and m.get('task_id'):
+        return (m.get('type', ''), m.get('task_id'))
+    return None
+
+def _merge_chat_histories(existing, incoming):
+    existing = [_clean_chat_message(m) for m in (existing or []) if isinstance(m, dict)]
+    incoming = [_clean_chat_message(m) for m in (incoming or []) if isinstance(m, dict)]
+    if not incoming:
+        return existing
+    i = 0
+    max_i = min(len(existing), len(incoming))
+    while i < max_i and _chat_message_same(existing[i], incoming[i]):
+        i += 1
+    merged = list(existing)
+    task_pos = {}
+    for idx, m in enumerate(merged):
+        k = _chat_task_key(m)
+        if k:
+            task_pos[k] = idx
+    for m in incoming[i:]:
+        k = _chat_task_key(m)
+        if k and k in task_pos:
+            old = merged[task_pos[k]]
+            if old.get('_pending') and not m.get('_pending'):
+                merged[task_pos[k]] = m
+            elif len(str(m.get('text', ''))) >= len(str(old.get('text', ''))):
+                merged[task_pos[k]] = {**old, **m}
+        else:
+            if k:
+                task_pos[k] = len(merged)
+            merged.append(m)
+    return merged
+
+def _legacy_chat_history_path(entity_id):
+    meta = get_book_meta(entity_id)
+    if meta and meta.get('type') == 'series':
+        return os.path.join(get_book_dir(entity_id), 'chat_history.json')
+    sid = _find_series_for_book(entity_id)
+    if sid:
+        return os.path.join(get_book_dir(sid), 'chat_history.json')
+    return os.path.join(get_book_dir(entity_id), 'chat_history.json')
+
+def _iter_legacy_chat_history_paths():
+    paths = []
+    if os.path.isdir(BOOKS_DIR):
+        for d in sorted(os.listdir(BOOKS_DIR)):
+            bd = os.path.join(BOOKS_DIR, d)
+            if not os.path.isdir(bd):
+                continue
+            paths.append(os.path.join(bd, 'chat_history.json'))
+            msg_dir = os.path.join(bd, 'messages')
+            if os.path.isdir(msg_dir):
+                paths.extend(glob.glob(os.path.join(msg_dir, '*.json')))
+    if os.path.isdir(MESSAGES_DIR):
+        paths.extend(glob.glob(os.path.join(MESSAGES_DIR, '*.json')))
+    uniq = []
+    seen = set()
+    for p in paths:
+        if p == GLOBAL_CHAT_HISTORY_FILE or p in seen or not os.path.isfile(p):
+            continue
+        seen.add(p)
+        uniq.append(p)
+    uniq.sort(key=lambda p: (os.path.getmtime(p), p))
+    return uniq
+
+def _migrate_global_chat_history_locked():
+    if os.path.exists(GLOBAL_CHAT_HISTORY_FILE):
+        return
+    merged = []
+    seen_exact = set()
+    for p in _iter_legacy_chat_history_paths():
+        data = load_json(p, list)
+        if not isinstance(data, list):
+            continue
+        for m in data:
+            if not isinstance(m, dict):
+                continue
+            m = _clean_chat_message(m)
+            try:
+                sig = json.dumps(m, ensure_ascii=False, sort_keys=True)
+            except Exception:
+                sig = str(m)
+            if sig in seen_exact:
+                continue
+            seen_exact.add(sig)
+            merged.append(m)
+    if merged:
+        save_json(GLOBAL_CHAT_HISTORY_FILE, merged)
+
+def _get_chat_history_path(entity_id):
+    return GLOBAL_CHAT_HISTORY_FILE
+
+def _load_chat_history(entity_id):
+    path = _get_chat_history_path(entity_id)
+    with _chat_history_lock:
+        _migrate_global_chat_history_locked()
+        return load_json(path, list)
+
+def _save_chat_history(entity_id, messages, merge=False):
+    path = _get_chat_history_path(entity_id)
+    with _chat_history_lock:
+        _migrate_global_chat_history_locked()
+        clean = [_clean_chat_message(m) for m in (messages or []) if isinstance(m, dict)]
+        if merge:
+            clean = _merge_chat_histories(load_json(path, list), clean)
+        save_json(path, clean)
+
+def _append_chat_history(entity_id, items):
+    path = _get_chat_history_path(entity_id)
+    with _chat_history_lock:
+        _migrate_global_chat_history_locked()
+        messages = load_json(path, list)
+        messages.extend(_clean_chat_message(m) for m in (items or []) if isinstance(m, dict))
+        save_json(path, messages)
+
+def _saved_chat_to_ai_history(entity_id, pending_task_id=''):
+    messages = _load_chat_history(entity_id)
+    skip_user_idx = -1
+    if pending_task_id:
+        for i, m in enumerate(messages):
+            if m.get('type') == 'ai' and m.get('_pending') and m.get('task_id') == pending_task_id:
+                skip_user_idx = i - 1
                 break
-        if not replaced:
-            messages.append(item)
-        save_json(msg_file, messages)
+    history = []
+    for i, m in enumerate(messages):
+        if i == skip_user_idx:
+            continue
+        mtype = m.get('type')
+        if mtype == 'system' and m.get('subtype') == 'compressed_summary' and m.get('text'):
+            history.append({'role': 'system', 'content': m.get('text', '')})
+        elif mtype == 'user' and m.get('text'):
+            history.append({'role': 'user', 'content': m.get('text', '')})
+        elif mtype == 'ai' and not m.get('_pending') and not m.get('_streaming') and m.get('text'):
+            history.append({'role': 'assistant', 'content': m.get('text', '')})
+    return history
+
+def _replace_pending_chat_msg(book_id, task_id, text, reasoning='', meta=None):
+    try:
+        path = _get_chat_history_path(book_id)
+        with _chat_history_lock:
+            _migrate_global_chat_history_locked()
+            messages = load_json(path, list)
+            replaced = False
+            item = {'text': text, 'type': 'ai', 'reasoning': reasoning}
+            if isinstance(meta, dict):
+                item.update(meta)
+            item = _clean_chat_message(item)
+            for i in range(len(messages) - 1, -1, -1):
+                m = messages[i]
+                if m.get('type') == 'ai' and m.get('_pending') and m.get('task_id') == task_id:
+                    messages[i] = item
+                    replaced = True
+                    break
+            if not replaced:
+                messages.append(item)
+            save_json(path, messages)
     except Exception as e:
         log_action('CHAT_REPLACE_ERROR', f'{book_id}/{task_id}: {str(e)[:100]}')
 
@@ -5388,6 +5632,7 @@ def _browser_summarize(conv, query, cfg_settings, tid):
 def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
     set_conn_meta('series-chat', '系列AI对话', sid)
     try:
+        history_list = _saved_chat_to_ai_history(sid, task_id)
         s_meta = get_book_meta(sid)
         series_title = s_meta.get('title', '未命名系列') if s_meta else '未命名系列'
         series_book_ids = [x for x in (s_meta.get('series_books', []) if s_meta else []) if x]
@@ -5404,13 +5649,24 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
                 source_parts.append(f'【{b_title}】（共{cc}章，尚未通读）')
         source_ctx = '\n\n'.join(source_parts) if source_parts else '（系列中暂无阅读笔记）'
         tp = cfg_settings.get('ai_temperature', 0.7)
+        _series_ch_list_parts = []
+        for bid in series_book_ids:
+            b_meta = get_book_meta(bid)
+            b_title = b_meta.get('title', '未命名') if b_meta else '未命名'
+            _ch_order = (b_meta or {}).get('chapter_order', [])
+            for _ci, _cid in enumerate(_ch_order):
+                _cp = os.path.join(get_book_dir(bid), 'chapters', f'{_cid}.json')
+                if os.path.exists(_cp):
+                    _cd = load_json(_cp, dict)
+                    _series_ch_list_parts.append(f'id={_cid} [{b_title}] 第{_ci+1}章 {_cd.get("title", "未命名")}')
+        _series_ch_list_ctx = '\n'.join(_series_ch_list_parts[:80])
         is_first_round = not history_list
         if is_first_round:
             sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
 
 当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
-【重要】你已经在系统里看到了这个系列所有书本的阅读笔记（见下方），不需要让用户再发一遍。你直接就能看到每本书的内容概要。
+【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。
 
 【说话方式】
 谨言慎行。温文尔雅，不卑不亢。惜字如金。
@@ -5438,6 +5694,10 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 - 连贯性检查：各书之间是否有设定冲突或时间线问题
 - 读者体验：从读者角度审视系列的阅读节奏和期待管理
 
+你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。
+- 调用格式：[READ_CHAPTER]{{"chapter_id":"章节ID"}}[/READ_CHAPTER]
+- 你可以一次读取多个章节，每个章节调用一次。
+
 【隐藏功能】你可以主动启动系列通读进程。当你判断用户想要你通读整个系列（例如说"帮我把系列通读一遍""分析一下全系列""我要通读"等），或你认为需要全面了解所有细节才能回答当前问题时，请调用这个工具。调用后系统会自动逐书逐章阅读并生成完整的阅读笔记。
 - 调用格式：[START_SERIES_READTHROUGH][/START_SERIES_READTHROUGH]
 - 注意：调用前先简短告诉用户"好的，我这就启动系列通读"，然后输出工具标签。
@@ -5446,13 +5706,20 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 
 {source_ctx}
 
-用户对你发送了如下消息——"""
+用户当前正在浏览：{series_title}
+
+用户对你发送了如下消息——
+
+【章节列表】
+{_series_ch_list_ctx}
+
+"""
         else:
             sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
 
 当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
-【重要】你已经在系统里看到了这个系列所有书本的阅读笔记，不需要让用户再发一遍。
+【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。
 
 【输出风格】
 1. 谨言慎行。温文尔雅，不卑不亢。惜字如金
@@ -5472,6 +5739,9 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 
 【你的专长】系列小说的宏观顾问：架构规划、世界观补全、人物弧线、伏笔管理、连贯性检查、读者体验。
 
+你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。
+- 调用格式：[READ_CHAPTER]{{"chapter_id":"章节ID"}}[/READ_CHAPTER]
+
 【隐藏功能】你可以主动启动系列通读进程。当用户要求通读系列，或你判断需要全面了解细节才能回答时，请调用：
 - 调用格式：[START_SERIES_READTHROUGH][/START_SERIES_READTHROUGH]
 - 调用前先简短告诉用户"好的，我这就启动系列通读"，然后输出工具标签。
@@ -5480,7 +5750,14 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 
 {source_ctx}
 
-请继续和用户对话。"""
+用户当前正在浏览：{series_title}
+
+请继续和用户对话。
+
+【章节列表】
+{_series_ch_list_ctx}
+
+"""
         msgs = [{'role': 'system', 'content': sys_msg}]
         for h in history_list:
             role = h.get('role')
@@ -5536,6 +5813,54 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
             full_text = reasoning_text
             reasoning_text = ''
         result = re.sub(r'[#*`~]', '', full_text)
+        # — 处理 [READ_CHAPTER] 工具调用（系列对话）
+        _read_chapter_ids_s = []
+        for _rc_m in re.finditer(r'\[READ_CHAPTER\](.*?)\[/READ_CHAPTER\]', result, re.S):
+            try:
+                _rc_cmd = json.loads(_rc_m.group(1).strip())
+                _rc_id = _rc_cmd.get('chapter_id', '')
+                if _rc_id and is_valid_id(_rc_id):
+                    _read_chapter_ids_s.append(_rc_id)
+            except Exception:
+                pass
+        if _read_chapter_ids_s:
+            result = re.sub(r'\s*\[READ_CHAPTER\].*?\[/READ_CHAPTER\]\s*', '', result, flags=re.S).strip()
+            _chapter_contents_s = []
+            for _rcid in _read_chapter_ids_s[:3]:
+                for _bid in series_book_ids:
+                    _rcp = os.path.join(get_book_dir(_bid), 'chapters', f'{_rcid}.json')
+                    if os.path.exists(_rcp):
+                        _rcd = load_json(_rcp, dict)
+                        _rc_title = _rcd.get('title', '未命名')
+                        _rc_content = _rcd.get('content', '')
+                        if _rc_content:
+                            _b_meta = get_book_meta(_bid)
+                            _b_title = _b_meta.get('title', '') if _b_meta else ''
+                            _chapter_contents_s.append(f'【{_b_title} - {_rc_title}】\n{_rc_content}')
+                        break
+            if _chapter_contents_s:
+                _chapter_ctx_text_s = '\n\n'.join(_chapter_contents_s)
+                msgs.append({'role': 'assistant', 'content': result or '让我看看正文。'})
+                msgs.append({'role': 'user', 'content': f'[系统注入：以下是请求的章节正文]\n\n{_chapter_ctx_text_s}\n\n请基于以上正文内容继续回答。'})
+                _rc_content_acc_s = []
+                _rc_reasoning_acc_s = []
+                def _rc_on_content_s(tk):
+                    _rc_content_acc_s.append(tk)
+                    bg_task_update(task_id, result=(result + '\n\n' if result else '') + ''.join(_rc_content_acc_s), progress=min(95, 60 + len(''.join(_rc_content_acc_s)) // 10))
+                def _rc_on_reasoning_s(tk):
+                    _rc_reasoning_acc_s.append(tk)
+                    bg_task_update(task_id, reasoning=''.join(_rc_reasoning_acc_s))
+                _rc_full_s, _rc_err_s = call_ai_stream(cfg_settings, msgs, None, tp, timeout=120,
+                                                        on_content_token=_rc_on_content_s,
+                                                        on_reasoning_token=_rc_on_reasoning_s,
+                                                        should_stop_fn=lambda: bg_task_should_stop(task_id))
+                if _rc_err_s:
+                    if not result:
+                        result = '[读取章节后生成回复失败]'
+                else:
+                    _rc_result_s = re.sub(r'[#*`~]', '', _rc_full_s or '')
+                    result = (result + '\n\n' if result else '') + _rc_result_s
+                    reasoning_text = ''.join(_rc_reasoning_acc_s) or reasoning_text
         # 模型自重复检测：如果结果的前半段和后半段高度相似，截掉后半段
         if len(result) > 20:
             half = len(result) // 2
@@ -5556,6 +5881,7 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
         _replace_pending_chat_msg(sid, task_id, result, reasoning_text)
         bg_task_update(task_id, progress=100, result=result, reasoning=reasoning_text, needs_series_readthrough=needs_rt)
         bg_task_done(task_id)
+        _schedule_idle_compress(sid)
     except Exception as e:
         _replace_pending_chat_msg(sid, task_id, '[错误: ' + str(e) + ']')
         bg_task_done(task_id, str(e))
@@ -6814,7 +7140,7 @@ def _estimate_messages_tokens(messages):
 def _compress_messages_for_context(messages, max_ctx_tokens, settings=None):
     if not messages or max_ctx_tokens <= 0:
         return messages
-    reserve_ratio = 0.75
+    reserve_ratio = 0.6
     budget = int(max_ctx_tokens * reserve_ratio)
     if _estimate_messages_tokens(messages) <= budget:
         return messages
@@ -6841,6 +7167,33 @@ def _compress_messages_for_context(messages, max_ctx_tokens, settings=None):
         if len(text) <= max_chars:
             return text
         return text[:max_chars] + '\n…(内容已截断)'
+    def _summarize_chunk_ai(chunk_msgs, cfg_settings):
+        parts = []
+        for m in chunk_msgs:
+            role_label = '用户' if m.get('role') == 'user' else 'Luca'
+            content = m.get('content', '')
+            if len(content) > 500:
+                content = content[:500] + '...'
+            parts.append(f'{role_label}: {content}')
+        body = '\n'.join(parts)
+        if not cfg_settings or not cfg_settings.get('base_url') or not cfg_settings.get('model'):
+            return f'[此前对话已压缩]\n{body[:800]}'
+        prompt = f"""将以下对话记录压缩为简洁摘要。保留所有关键信息：用户的问题、Luca的核心回答、重要决定、设定讨论、伏笔提及。删除寒暄和重复。
+
+对话记录：
+{body}
+
+输出压缩摘要（200字以内）："""
+        try:
+            summary, err = call_ai(cfg_settings, [
+                {'role': 'system', 'content': '你是对话压缩专家。保留关键信息，删除冗余。'},
+                {'role': 'user', 'content': prompt}
+            ], 512, 0.2, timeout=30)
+            if err or not summary or not summary.strip():
+                return f'[此前对话已压缩]\n{body[:800]}'
+            return f'[此前对话已压缩，摘要如下]\n{summary.strip()}'
+        except Exception:
+            return f'[此前对话已压缩]\n{body[:800]}'
     def _summarize_chunk(chunk_msgs):
         parts = []
         for m in chunk_msgs:
@@ -6863,13 +7216,13 @@ def _compress_messages_for_context(messages, max_ctx_tokens, settings=None):
                 compressed_old.extend(chunk)
                 old_budget -= chunk_tokens
             else:
-                sm = _summarize_chunk(chunk)
+                sm = _summarize_chunk_ai(chunk, settings) if settings else _summarize_chunk(chunk)
                 compressed_old.append({'role': 'system', 'content': sm})
             i += chunk_size
         result.extend(compressed_old)
     else:
         if old:
-            sm = _summarize_chunk(old)
+            sm = _summarize_chunk_ai(old, settings) if settings else _summarize_chunk(old)
             result.append({'role': 'system', 'content': sm})
     current_budget = budget - _estimate_messages_tokens(result)
     for m in list(recent):
@@ -6880,6 +7233,73 @@ def _compress_messages_for_context(messages, max_ctx_tokens, settings=None):
         current_budget -= _estimate_tokens(m.get('content', ''))
         result.append(m)
     return result
+
+
+_compress_timers = {}
+_compress_lock = threading.Lock()
+
+def _schedule_idle_compress(entity_id):
+    """对话结束后 30 秒检查并压缩上下文。"""
+    with _compress_lock:
+        if entity_id in _compress_timers:
+            _compress_timers[entity_id].cancel()
+        t = threading.Timer(30.0, _do_idle_compress, args=[entity_id])
+        t.daemon = True
+        t.start()
+        _compress_timers[entity_id] = t
+
+def _do_idle_compress(entity_id):
+    """闲时压缩：如果对话历史超过阈值，用 AI 压缩旧消息。"""
+    with _compress_lock:
+        _compress_timers.pop(entity_id, None)
+    try:
+        settings = get_settings()
+        ctx_limit = _get_effective_context_length(settings)
+        if ctx_limit <= 0:
+            return
+        messages = _load_chat_history(entity_id)
+        if not messages:
+            return
+        hist_msgs = []
+        for m in messages:
+            if m.get('type') == 'user':
+                hist_msgs.append({'role': 'user', 'content': m.get('text', '')})
+            elif m.get('type') == 'ai' and not m.get('_pending') and m.get('text'):
+                hist_msgs.append({'role': 'assistant', 'content': m.get('text', '')})
+        if not hist_msgs:
+            return
+        threshold = int(ctx_limit * 0.6)
+        if _estimate_messages_tokens(hist_msgs) <= threshold:
+            return
+        log_action('IDLE_COMPRESS', f'entity={entity_id} tokens={_estimate_messages_tokens(hist_msgs)} limit={ctx_limit}')
+        compressed = _compress_messages_for_context(hist_msgs, ctx_limit, settings)
+        summary_parts = []
+        for m in compressed:
+            if m.get('role') == 'system' and '此前对话已压缩' in m.get('content', ''):
+                summary_parts.append(m['content'])
+        if summary_parts:
+            existing = _load_chat_history(entity_id)
+            summary_text = '\n\n'.join(summary_parts)
+            has_summary = False
+            for i, em in enumerate(existing):
+                if em.get('type') == 'system' and em.get('subtype') == 'compressed_summary':
+                    existing[i] = {'type': 'system', 'subtype': 'compressed_summary', 'text': summary_text}
+                    has_summary = True
+                    break
+            if not has_summary:
+                existing.insert(0, {'type': 'system', 'subtype': 'compressed_summary', 'text': summary_text})
+            cut_start = 0
+            for i, em in enumerate(existing):
+                if em.get('type') == 'user':
+                    cut_start = i
+                    break
+            keep_from = max(cut_start, len(existing) - 12)
+            new_messages = existing[:1] + existing[keep_from:] if has_summary or cut_start > 0 else existing
+            if len(new_messages) < len(existing):
+                _save_chat_history(entity_id, new_messages)
+                log_action('IDLE_COMPRESS_DONE', f'entity={entity_id} before={len(existing)} after={len(new_messages)}')
+    except Exception as e:
+        log_action('IDLE_COMPRESS_ERROR', f'{entity_id}: {str(e)[:160]}')
 
 
 class _SimpleEmbedding(EmbeddingFunction):

@@ -1582,6 +1582,89 @@ def consistency_check(book_id, chapter_id, text, settings):
     return {'alerts': saved, 'matched_entities': matched_names}
 
 
+def consistency_deep_check(book_id, alert_id, settings):
+    m = _lazy_main()
+    call_ai_full = m['call_ai_full']
+    _read_chapter_file = m['_read_chapter_file']
+    set_conn_meta = m['set_conn_meta']
+    set_conn_meta('auto_comment', '吃书深度确认', book_id)
+    init_db(book_id)
+    if not settings or not settings.get('base_url') or not settings.get('model'):
+        return {'error': '请先配置API'}
+    alerts = list_consistency_alerts(book_id, status=None, limit=50)
+    alert = None
+    for a in alerts:
+        if a['id'] == alert_id:
+            alert = a
+            break
+    if not alert:
+        return {'error': '找不到该提醒'}
+    cid = alert.get('chapter_id') or ''
+    ctx_parts = []
+    ctx_parts.append(f'## 雷达提醒\n- 类型：{alert.get("kind","")}\n- 严重度：{alert.get("severity","")}\n- 提醒内容：{alert.get("message","")}\n- 知识库依据：{alert.get("evidence","")}\n- 建议：{alert.get("suggestion","")}')
+    if cid:
+        ch = _read_chapter_file(book_id, cid)
+        if ch and ch.get('content'):
+            content = ch['content']
+            if len(content) > 6000:
+                content = content[-6000:]
+            ch_idx = '?'
+            meta = m['get_book_meta'](book_id) or {}
+            order = meta.get('chapter_order', [])
+            if cid in order:
+                ch_idx = order.index(cid) + 1
+            ctx_parts.append(f'## 当前章节（第{ch_idx}章：{ch.get("title","")}）原文\n{content}')
+        summary_fn = m.get('_extract_context_summary')
+        get_source = m.get('get_source')
+        if summary_fn and get_source:
+            source_text = get_source(book_id)
+            if source_text:
+                s = summary_fn(source_text)
+                if s:
+                    ctx_parts.append(f'## 前文摘要\n{s}')
+    matched = match_entities_by_name(book_id, alert.get('message', '') + ' ' + alert.get('evidence', ''))
+    if matched:
+        for ent in matched[:6]:
+            block = render_entity_block(book_id, ent, max_chars=1500)
+            ctx_parts.append(block)
+    rules = list_rules(book_id)[:20]
+    if rules:
+        ctx_parts.append('## 已确认规则\n' + '\n'.join([f"- {r.get('name')}: {r.get('body')[:200]}" for r in rules]))
+    tl = timeline_map(book_id, zoom=1)
+    focus_tl = []
+    for seg in tl.get('segments', [])[:6]:
+        for ev in seg.get('events', [])[:6]:
+            focus_tl.append(f"- 第{(ev.get('chapter_idx') or 0)+1}章 {ev.get('story_time','')}: {ev.get('what','')}")
+    if focus_tl:
+        ctx_parts.append('## 时间线参考\n' + '\n'.join(focus_tl[:25]))
+    if cid:
+        current = chapter_outline(book_id, cid)
+        if current.get('events'):
+            ctx_parts.append('## 本章已入库事件\n' + '\n'.join([f"- {e.get('story_time','')} {e.get('who','')}：{e.get('what','')}" for e in current['events'][:8]]))
+    context = '\n\n'.join(ctx_parts)
+    if len(context) > 14000:
+        context = context[:14000]
+    prompt = f"""你是小说写作搭档 Luca，正在帮作者深入分析一个"可能吃书"的提醒。
+
+相关知识库和原文：
+{context}
+
+请你深入分析这个矛盾点，把来龙去脉跟作者说清楚。要求：
+1. 找出具体冲突在哪里——哪些设定/描述前后不一致
+2. 引用原文出处——必须标注「第X章」并引用原文关键句子，用 > 引用格式
+3. 分析可能的原因——是作者写错了，还是倒叙/回忆/梦境/角色谎言等可解释情况
+4. 给出明确建议——如果确实吃书，建议怎么修；如果可以解释，说明理由
+
+语气：你是搭档不是裁判，用讨论的口吻，不要下定论。"""
+    raw, _, err = call_ai_full(settings, [
+        {'role': 'system', 'content': '你是小说写作搭档，帮作者深入分析设定矛盾。必须引用原文出处（章节号+原文片段）。'},
+        {'role': 'user', 'content': prompt},
+    ], 2000, 0.3, timeout=120)
+    if err:
+        return {'error': err}
+    return {'analysis': raw, 'alert_id': alert_id}
+
+
 def _focus_passages(content, focus_texts=None, max_chars=6000):
     content = content or ''
     focus_texts = [str(x).strip() for x in (focus_texts or []) if str(x).strip()]
