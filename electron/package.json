@@ -22,7 +22,7 @@
     "productName": "LucaWriter",
     "copyright": "Copyright © 2026 LucaWriter",
     "directories": {
-      "output": "../release/v1.1.0"
+      "output": "../release/v1.1.1"
     },
     "files": [
       "main.js",
