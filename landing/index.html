@@ -3,357 +3,426 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>LucaWriter — AI 长文本创作搭档</title>
-<link rel="icon" href="../frontend/icon.ico">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>LucaWriter | 小说写作工具</title>
+<meta name="description" content="LucaWriter 是给小说作者使用的写作工具。写正文，管章节，和 Luca 一起记住故事。">
+<link rel="icon" type="image/png" href="../icon_gold.png">
 <style>
+@font-face{font-family:"Playfair Display";font-style:normal;font-weight:400 700;font-display:swap;src:url("../frontend/fonts/PlayfairDisplay-Regular.woff2") format("woff2")}
+@font-face{font-family:"Playfair Display";font-style:italic;font-weight:400 600;font-display:swap;src:url("../frontend/fonts/PlayfairDisplay-Italic.woff2") format("woff2")}
 :root{
-  --bg:#080c18;--page-bg:radial-gradient(ellipse at 20% 10%, rgba(232,204,122,.08), transparent 40%),radial-gradient(ellipse at 80% 15%, rgba(240,216,137,.05), transparent 40%),linear-gradient(180deg,#050812 0%,#080c18 40%,#0a1020 100%);
-  --surface:rgba(15,27,46,.6);--surface2:rgba(15,27,46,.8);--surface3:#162a42;
-  --t1:#f0f2f8;--t2:#d0d6e6;--t3:#9098b0;
-  --accent:#E8CC7A;--accent2:#F0D889;
-  --accent-a10:rgba(232,204,122,.1);--accent-a20:rgba(232,204,122,.2);
-  --accent-a30:rgba(232,204,122,.3);--accent-a40:rgba(232,204,122,.4);
-  --accent-a60:rgba(232,204,122,.6);
-  --danger:#f27d7d;--warn:#f6c96d;
-  --border:rgba(255,255,255,.07);--border2:rgba(255,255,255,.12);
-  --r1:6px;--r2:8px;--r3:12px;--r4:20px;
-  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,'Noto Sans SC','Helvetica Neue',sans-serif;
-  --font-serif:'Playfair Display','Source Han Serif SC','Noto Serif SC',Georgia,serif;
-  --glass-bg:rgba(15,27,46,.45);--glass-border:rgba(255,255,255,.06);--glass-blur:blur(16px) saturate(180%);
+  --bg:#0b1220;
+  --page-bg:radial-gradient(circle at 18% 14%, rgba(232,204,122,.13), transparent 18%),radial-gradient(circle at 82% 10%, rgba(240,216,137,.08), transparent 24%),linear-gradient(180deg,#070b15 0%,#0b1220 64%,#09101d 100%);
+  --surface:#0f1b2e;
+  --surface2:#122235;
+  --t1:#f8f9ff;
+  --t2:#e6eaf2;
+  --t3:#bfc9dd;
+  --accent:#E8CC7A;
+  --accent2:#F0D889;
+  --accent-a08:rgba(232,204,122,.08);
+  --accent-a16:rgba(232,204,122,.16);
+  --border:rgba(255,255,255,.08);
+  --border2:rgba(255,255,255,.14);
+  --glass-bg:rgba(15,27,46,.58);
+  --glass-border:rgba(255,255,255,.09);
+  --glass-shadow:0 16px 48px rgba(0,0,0,.42);
+  --glass-blur:blur(14px) saturate(160%);
+  --paper-texture:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/><feComponentTransfer><feFuncA type='table' tableValues='0 0.06'/></feComponentTransfer></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.08'/></svg>");
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","Noto Sans SC","Helvetica Neue",Arial,sans-serif;
+  --font-serif:"Playfair Display","Source Han Serif SC","Noto Serif SC","Songti SC",Georgia,serif;
+  --r1:4px;
+  --r2:6px;
+  --r3:8px;
 }
 [data-theme="light"]{
-  --bg:#f5f3f0;--page-bg:radial-gradient(ellipse at 20% 10%, rgba(200,170,80,.06), transparent 40%),radial-gradient(ellipse at 80% 15%, rgba(200,170,80,.04), transparent 40%),linear-gradient(180deg,#fcfaf8 0%,#f5f3f0 100%);
-  --surface:rgba(255,255,255,.6);--surface2:rgba(255,255,255,.85);--surface3:#e8e4de;
-  --t1:#1a1a1a;--t2:#444444;--t3:#888888;
-  --accent:#c8aa50;--accent2:#d4b860;
-  --accent-a10:rgba(200,170,80,.1);--accent-a20:rgba(200,170,80,.2);
-  --accent-a30:rgba(200,170,80,.3);--accent-a40:rgba(200,170,80,.4);
-  --accent-a60:rgba(200,170,80,.6);
-  --border:rgba(0,0,0,.08);--border2:rgba(0,0,0,.14);
-  --glass-bg:rgba(255,255,255,.55);--glass-border:rgba(0,0,0,.06);--glass-blur:blur(16px) saturate(180%);
+  --bg:#f5f5f5;
+  --page-bg:radial-gradient(circle at 16% 10%, rgba(200,170,80,.12), transparent 20%),radial-gradient(circle at 82% 12%, rgba(200,170,80,.08), transparent 24%),linear-gradient(180deg,#ffffff 0%,#f5f5f5 100%);
+  --surface:#ffffff;
+  --surface2:#f5f5f5;
+  --t1:#111111;
+  --t2:#333333;
+  --t3:#666666;
+  --accent:#c8aa50;
+  --accent2:#d8bd6a;
+  --accent-a08:rgba(200,170,80,.1);
+  --accent-a16:rgba(200,170,80,.18);
+  --border:rgba(0,0,0,.1);
+  --border2:rgba(0,0,0,.16);
+  --glass-bg:rgba(255,255,255,.68);
+  --glass-border:rgba(0,0,0,.08);
+  --glass-shadow:0 10px 26px rgba(0,0,0,.08);
+  --paper-texture:none;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{scroll-behavior:smooth}
-body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-webkit-font-smoothing:antialiased;overflow-x:hidden;min-height:100vh}
-::selection{background:var(--accent);color:var(--bg)}
-::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
-
-/* Nav */
-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:space-between;padding:0 32px;height:56px;background:rgba(8,12,24,.6);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--border);transition:background .3s}
-[data-theme="light"] nav{background:rgba(255,255,255,.7)}
-.nav-brand{display:flex;align-items:center;gap:10px;font-family:var(--font-serif);font-size:18px;font-weight:700;letter-spacing:-.3px}
-.nav-brand svg{width:24px;height:24px;flex-shrink:0}
-.nav-links{display:flex;align-items:center;gap:6px}
-.nav-links a{color:var(--t2);text-decoration:none;font-size:13px;font-weight:500;padding:8px 16px;border-radius:var(--r2);transition:all .15s}
-.nav-links a:hover{color:var(--t1);background:var(--accent-a10)}
-.nav-actions{display:flex;align-items:center;gap:10px}
-.theme-btn{background:var(--accent-a10);border:1px solid var(--border);border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;color:var(--t2)}
-.theme-btn:hover{background:var(--accent-a20);color:var(--accent)}
-.theme-btn svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.cta-btn{background:var(--accent);color:var(--bg);border:none;border-radius:var(--r2);padding:8px 22px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
-.cta-btn:hover{opacity:.9;transform:translateY(-1px);box-shadow:0 6px 20px rgba(232,204,122,.2)}
-.cta-btn:active{transform:translateY(0)}
-
-/* Hero */
-.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:100px 32px 80px;text-align:center;position:relative}
-.hero-glow{position:absolute;top:20%;left:50%;transform:translateX(-50%);width:600px;height:400px;background:radial-gradient(ellipse, rgba(232,204,122,.06), transparent 60%);pointer-events:none}
-.hero-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 16px;background:var(--accent-a10);border:1px solid var(--accent-a20);border-radius:20px;font-size:12px;color:var(--accent);margin-bottom:24px}
-.hero h1{font-family:var(--font-serif);font-size:clamp(40px,7vw,72px);font-weight:700;letter-spacing:-1.5px;line-height:1.12;margin-bottom:20px}
-.hero h1 em{font-style:italic;color:var(--accent)}
-.hero p{font-size:clamp(16px,2vw,20px);color:var(--t2);max-width:640px;line-height:1.7;margin-bottom:36px}
-.hero-actions{display:flex;gap:14px;flex-wrap:wrap;justify-content:center}
-.hero-actions .cta-btn{font-size:15px;padding:12px 32px;border-radius:var(--r3)}
-.hero-actions .cta-outline{background:transparent;color:var(--t1);border:1.5px solid var(--border2);padding:12px 32px;border-radius:var(--r3);font-size:15px;font-weight:600;cursor:pointer;transition:all .2s;text-decoration:none}
-.hero-actions .cta-outline:hover{border-color:var(--accent-a40);color:var(--accent);background:var(--accent-a10)}
-.hero-mockup{margin-top:60px;width:100%;max-width:960px;border-radius:var(--r4);border:1px solid var(--glass-border);box-shadow:0 20px 60px rgba(0,0,0,.4);overflow:hidden;background:var(--bg)}
-.hero-mockup img,.hero-mockup video{width:100%;height:auto;display:block}
-.hero-mockup-placeholder{aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:14px;background:linear-gradient(180deg,var(--surface2),var(--bg))}
-
-/* Section common */
-.section{padding:80px 32px;max-width:1100px;margin:0 auto}
-.section-header{text-align:center;margin-bottom:56px}
-.section-header h2{font-family:var(--font-serif);font-size:clamp(28px,3.5vw,40px);font-weight:700;letter-spacing:-.8px;margin-bottom:12px}
-.section-header p{color:var(--t2);font-size:16px;max-width:560px;margin:0 auto;line-height:1.6}
-
-/* Features */
-.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
-.feature-card{padding:28px 24px;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-radius:var(--r3);transition:all .25s;position:relative;overflow:hidden}
-.feature-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent-a30),transparent);opacity:0;transition:opacity .3s}
-.feature-card:hover{transform:translateY(-3px);border-color:var(--accent-a20);box-shadow:0 12px 40px rgba(0,0,0,.15)}
-.feature-card:hover::before{opacity:1}
-.feature-icon{width:40px;height:40px;margin-bottom:16px;color:var(--accent)}
-.feature-card h3{font-size:16px;font-weight:600;margin-bottom:8px;letter-spacing:-.2px}
-.feature-card p{font-size:13.5px;color:var(--t2);line-height:1.65}
-.feature-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:12px}
-.feature-tags span{padding:2px 8px;background:var(--accent-a10);border-radius:10px;font-size:10.5px;color:var(--accent);font-weight:500}
-
-/* Divider */
-.divider{height:1px;max-width:600px;margin:0 auto;background:linear-gradient(90deg,transparent,var(--border2),transparent)}
-
-/* Steps */
-.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:24px;counter-reset:step}
-.step-card{text-align:center;padding:32px 20px;position:relative}
-.step-num{width:40px;height:40px;margin:0 auto 16px;border-radius:50%;background:var(--accent-a10);border:1.5px solid var(--accent-a20);display:flex;align-items:center;justify-content:center;font-family:var(--font-serif);font-size:18px;font-weight:700;color:var(--accent)}
-.step-card h3{font-size:15px;font-weight:600;margin-bottom:6px}
-.step-card p{font-size:13px;color:var(--t2);line-height:1.6}
-
-/* tech specs */
-.specs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
-.spec-item{text-align:center;padding:24px 16px;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-radius:var(--r3)}
-.spec-item .num{font-family:var(--font-serif);font-size:28px;font-weight:700;color:var(--accent);display:block;margin-bottom:4px}
-.spec-item .label{font-size:13px;color:var(--t2)}
-
-/* CTA section */
-.cta-section{text-align:center;padding:100px 32px;position:relative}
-.cta-section .glow{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:500px;height:300px;background:radial-gradient(ellipse, rgba(232,204,122,.04), transparent 60%);pointer-events:none}
-.cta-section h2{font-family:var(--font-serif);font-size:clamp(28px,3.5vw,42px);font-weight:700;margin-bottom:14px}
-.cta-section p{color:var(--t2);font-size:16px;margin-bottom:32px}
-.cta-section .cta-btn{font-size:16px;padding:14px 40px;border-radius:var(--r3)}
-
-/* Footer */
-footer{padding:40px 32px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;font-size:13px;color:var(--t3);max-width:1100px;margin:0 auto}
-footer a{color:var(--t2);text-decoration:none;transition:color .15s}
-footer a:hover{color:var(--accent)}
-
-/* Responsive */
-@media(max-width:640px){
-  nav{padding:0 16px}
-  .nav-links{display:none}
-  .hero{padding:80px 20px 60px}
-  .section{padding:60px 20px}
-  .features-grid{grid-template-columns:1fr}
-  .cta-section{padding:60px 20px}
+body{min-height:100vh;background:var(--page-bg);color:var(--t1);font-family:var(--font-sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button,a{font:inherit}
+a{color:inherit;text-decoration:none}
+::selection{background:var(--accent);color:#101010}
+.nav{position:fixed;z-index:20;top:0;left:0;right:0;height:56px;padding:0 22px;display:flex;align-items:center;justify-content:space-between;background:rgba(7,11,21,.56);border-bottom:1px solid var(--border);backdrop-filter:blur(14px) saturate(160%);-webkit-backdrop-filter:blur(14px) saturate(160%)}
+[data-theme="light"] .nav{background:rgba(255,255,255,.72)}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand img{width:26px;height:26px;border-radius:var(--r2);background:var(--accent)}
+.brand span{font-family:var(--font-serif);font-weight:700;font-size:18px;color:var(--t1)}
+.nav-actions{display:flex;align-items:center;gap:8px}
+.nav-link,.theme-btn{height:32px;border:1px solid var(--border);background:var(--glass-bg);color:var(--t2);border-radius:var(--r2);display:inline-flex;align-items:center;justify-content:center;transition:background .18s,color .18s,border-color .18s}
+.nav-link{padding:0 13px;font-size:13px;font-weight:650}
+.theme-btn{width:32px;cursor:pointer}
+.nav-link:hover,.theme-btn:hover{color:var(--t1);border-color:var(--border2);background:rgba(255,255,255,.06)}
+.theme-btn svg{width:15px;height:15px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.hero{min-height:88svh;position:relative;display:grid;align-items:center;padding:106px 22px 58px;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(7,11,21,.92) 0%,rgba(7,11,21,.78) 43%,rgba(7,11,21,.48) 100%);z-index:1}
+[data-theme="light"] .hero::before{background:linear-gradient(90deg,rgba(255,255,255,.9) 0%,rgba(255,255,255,.78) 45%,rgba(255,255,255,.42) 100%)}
+.product-scene{position:absolute;inset:58px -46px 0 34%;z-index:0;opacity:.92;transform:perspective(1200px) rotateY(-8deg) rotateX(2deg);transform-origin:center}
+.app-window{height:min(640px,74svh);min-height:430px;border:1px solid var(--glass-border);border-radius:var(--r3);background:var(--glass-bg);box-shadow:var(--glass-shadow);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);overflow:hidden;display:grid;grid-template-rows:38px 1fr 132px}
+.app-topbar{display:flex;align-items:center;gap:10px;padding:0 12px;border-bottom:1px solid var(--border);color:var(--t3);font-size:12px}
+.app-dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 14px var(--accent-a16)}
+.app-title{font-family:var(--font-serif);color:var(--t1);font-weight:700}
+.app-main{display:grid;grid-template-columns:238px 1fr 272px;min-height:0}
+.app-sidebar,.app-chat,.app-bottom{background:rgba(15,27,46,.5);border-color:var(--border)}
+[data-theme="light"] .app-sidebar,[data-theme="light"] .app-chat,[data-theme="light"] .app-bottom{background:rgba(255,255,255,.58)}
+.app-sidebar{border-right:1px solid var(--border);padding:14px 10px}
+.chapter{height:28px;border-radius:var(--r1);margin-bottom:7px;background:linear-gradient(90deg,var(--accent-a16),transparent);position:relative}
+.chapter:nth-child(2),.chapter:nth-child(5){opacity:.55}
+.chapter:nth-child(3){opacity:.72;width:84%}
+.chapter:nth-child(4){opacity:.44;width:68%}
+.chapter::before{content:"";position:absolute;left:10px;top:11px;width:7px;height:7px;border-radius:50%;border:1px solid var(--accent)}
+.editor{padding:32px 44px;background:rgba(8,13,24,.38);background-image:var(--paper-texture);min-width:0}
+[data-theme="light"] .editor{background:rgba(255,255,255,.45)}
+.editor-title{width:58%;height:18px;border-radius:var(--r1);background:var(--accent-a16);margin-bottom:28px}
+.line{height:12px;border-radius:var(--r1);background:rgba(255,255,255,.16);margin-bottom:16px}
+[data-theme="light"] .line{background:rgba(0,0,0,.1)}
+.line:nth-child(3){width:94%}.line:nth-child(4){width:88%}.line:nth-child(5){width:96%}.line:nth-child(6){width:74%}.line:nth-child(8){width:91%}.line:nth-child(9){width:66%}
+.app-chat{border-left:1px solid var(--border);padding:16px 14px;display:flex;flex-direction:column;gap:10px}
+.chat-bubble{border:1px solid var(--border);border-radius:var(--r2);padding:12px;background:rgba(255,255,255,.04)}
+[data-theme="light"] .chat-bubble{background:rgba(0,0,0,.035)}
+.chat-bubble strong{display:block;font-size:12px;color:var(--accent);margin-bottom:8px}
+.chat-text{height:9px;border-radius:var(--r1);background:rgba(255,255,255,.16);margin-top:8px}
+[data-theme="light"] .chat-text{background:rgba(0,0,0,.1)}
+.chat-text.short{width:62%}
+.app-bottom{border-top:1px solid var(--border);display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;padding:12px}
+.bottom-pane{border:1px solid var(--border);border-radius:var(--r2);padding:12px;background:rgba(255,255,255,.035)}
+[data-theme="light"] .bottom-pane{background:rgba(0,0,0,.025)}
+.bottom-pane b{display:block;color:var(--t2);font-size:12px;margin-bottom:12px}
+.mini-line{height:8px;border-radius:var(--r1);background:var(--accent-a16);margin-bottom:8px}
+.mini-line:nth-child(3){width:76%}.mini-line:nth-child(4){width:54%}
+.hero-content{position:relative;z-index:2;max-width:580px}
+h1{font-family:var(--font-serif);font-size:72px;line-height:.92;font-weight:700;color:var(--t1);letter-spacing:-1px;margin-bottom:18px}
+.hero-type{margin-bottom:32px}
+.hero-type p{margin:0}
+.hero-type .t1{font-size:15px;line-height:1.7;color:var(--t3);margin-bottom:10px}
+.hero-type .t2{font-size:26px;line-height:1.3;font-weight:600;color:var(--t1);margin-bottom:4px}
+.hero-type .t3{font-size:26px;line-height:1.3;font-weight:600;color:var(--t1);margin-bottom:24px}
+.hero-type .t4{font-size:14px;line-height:1.6;color:var(--t3);margin-bottom:8px}
+.hero-type .t5{font-size:48px;line-height:1.1;font-weight:700;font-family:var(--font-serif);color:var(--t1);max-width:500px;margin-top:8px}
+.hero-type .t5 .hl{color:var(--accent)}
+.hero-type .hl{color:var(--accent)}
+.lead{font-size:22px;line-height:1.62;color:var(--t2);max-width:540px;margin-bottom:34px}
+.download-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.download-btn{min-width:172px;min-height:52px;border-radius:var(--r3);border:1px solid var(--border2);background:var(--glass-bg);color:var(--t1);display:inline-flex;align-items:center;gap:12px;padding:9px 16px;box-shadow:0 12px 30px rgba(0,0,0,.2);transition:transform .18s,background .18s,border-color .18s}
+.download-btn.primary{background:var(--accent);border-color:var(--accent);color:#17140b}
+.download-btn:hover{transform:translateY(-2px);border-color:var(--border2);background:rgba(255,255,255,.06)}
+.download-btn.primary:hover{background:var(--accent2)}
+.download-btn svg{width:20px;height:20px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.download-copy{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+.download-copy strong{font-size:14px;line-height:1}
+.download-copy span{font-size:11px;color:currentColor;opacity:.7}
+.section{padding:72px 22px}
+.section-inner{max-width:1040px;margin:0 auto}
+.section-chip{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--accent);display:inline-block;margin-bottom:10px}
+.second-section{padding-top:96px;padding-bottom:96px}
+.second-inner{max-width:1040px;margin:0 auto;display:grid;grid-template-columns:1.25fr .9fr;gap:48px;align-items:start}
+.second-text p{font-size:15px;line-height:1.85;color:var(--t2);margin-bottom:14px}
+.second-text p:last-child{margin-bottom:0}
+.second-stack{position:relative;padding-top:0}
+.stack-cards{position:relative;height:295px}
+.stack-card,.stack-chat{position:absolute;width:80%;border:1px solid var(--border);border-radius:var(--r3);background:var(--surface);overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+.stack-chat{z-index:5;top:62px;left:20px;transform:rotate(.5deg)}
+.stack-chat .sc-head-chat{display:flex;align-items:center;gap:6px;padding:6px 12px;font-size:10px;font-weight:700;color:var(--t3);border-bottom:1px solid var(--border);background:var(--surface2)}
+.stack-chat .cfh-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);flex:none}
+.sc-chat-body{padding:6px 10px;display:flex;flex-direction:column;gap:4px}
+.stack-chat .cfb-msg{border-radius:var(--r2);padding:5px 7px}
+.stack-chat .cfb-luca{background:rgba(232,204,122,.06);border-left:2px solid var(--accent)}
+.stack-chat .cfb-label{font-size:7px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:1px}
+.stack-chat .cfb-msg p{font-size:10px;line-height:1.4;color:var(--t2);margin:0}
+.stack-card{padding:8px 0 6px;min-height:105px}
+.stack-card:nth-child(2){top:0;left:-14px;z-index:4;transform:rotate(-3.5deg)}
+.stack-card:nth-child(3){top:12px;left:150px;z-index:3;transform:rotate(4deg)}
+.stack-card:nth-child(4){top:160px;left:-12px;z-index:2;transform:rotate(-2.8deg)}
+.stack-card:nth-child(5){top:170px;left:148px;z-index:1;transform:rotate(3.5deg)}
+.sc-head{padding:8px 14px;font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--accent);border-bottom:1px solid var(--border);background:var(--surface2)}
+.sc-body{padding:10px 14px 12px;display:flex;flex-direction:column;gap:2px}
+.sc-row{display:flex;justify-content:space-between;padding:6px 0;font-size:12px;border-bottom:1px solid var(--border)}
+.sc-row:last-child{border-bottom:0}
+.sc-row span:first-child{color:var(--t3)}
+.sc-row span:last-child{color:var(--t1);font-weight:500}
+.stack-foot{font-size:11px;line-height:1.6;color:var(--t3);margin-top:40px;max-width:400px;font-style:italic;text-align:center;margin-left:auto;margin-right:auto}
+.soft-band{border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:rgba(255,255,255,.025)}
+.philosophy-section{padding-top:96px;padding-bottom:96px;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:rgba(255,255,255,.015)}
+.phil-inner{max-width:820px;margin:0 auto}
+.phil-h2{font-family:var(--font-serif);font-size:38px;line-height:1.2;font-weight:700;color:var(--t1);margin-bottom:24px}
+.phil-body{margin-bottom:40px}
+.phil-p{font-size:16px;line-height:1.85;color:var(--t2);margin-bottom:12px}
+.phil-p:last-child{margin-bottom:0}
+.phil-p strong{color:var(--t1)}
+.phil-pillars{display:grid;grid-template-columns:280px 280px;gap:36px;justify-content:center}
+.phil-pillar{border-top:1px solid var(--border2);padding-top:14px}
+.pp-num{font-size:10px;font-weight:700;color:var(--accent);letter-spacing:.1em;display:block;margin-bottom:6px}
+.phil-pillar h3{font-size:14px;font-weight:650;color:var(--t1);margin-bottom:6px}
+.phil-pillar p{font-size:13px;line-height:1.7;color:var(--t3)}
+[data-theme="light"] .soft-band{background:rgba(0,0,0,.025)}
+.two-col{max-width:1040px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:42px;align-items:start}
+.two-col h2,.download-section h2,.tech h2{font-family:var(--font-serif);font-size:36px;line-height:1.25;margin-bottom:16px}
+.two-col p,.tech p{font-size:16px;line-height:1.85;color:var(--t2)}
+.tech{max-width:1040px;margin:0 auto}
+.tech-panel{margin-top:26px;border:1px solid var(--glass-border);border-radius:var(--r3);background:var(--glass-bg);box-shadow:var(--glass-shadow);padding:24px}
+.tech-line{display:grid;grid-template-columns:160px 1fr;gap:18px;padding:14px 0;border-bottom:1px solid var(--border);font-size:14px;color:var(--t2)}
+.tech-line:last-child{border-bottom:0}
+.tech-line strong{color:var(--t1)}
+.download-section{text-align:center;padding-bottom:76px}
+.download-section p{color:var(--t2);font-size:16px;margin-bottom:24px}
+.download-section .download-row{justify-content:center}
+.footer{max-width:1040px;margin:0 auto;padding:24px 22px 34px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:14px;color:var(--t3);font-size:12px}
+.footer a{color:var(--t2)}
+.footer a:hover{color:var(--accent)}
+@media(max-width:980px){
+  .hero{min-height:86svh;padding-top:92px}
+  .product-scene{inset:190px -250px 0 12%;opacity:.42;transform:none}
+  h1{font-size:58px}
+  .lead{font-size:19px}
+  .second-inner{grid-template-columns:1fr;gap:28px}
+  .stack-cards{height:480px}
+  .chat-h2{font-size:34px}
+  .phil-pillars{grid-template-columns:1fr}
+  .phil-h2{font-size:32px}
 }
-
-/* Smooth reveal */
-.reveal{opacity:0;transform:translateY(20px);transition:all .6s ease}
-.reveal.visible{opacity:1;transform:translateY(0)}
+@media(max-width:640px){
+  .nav{padding:0 14px}
+  .nav-link{display:none}
+  .brand span{font-size:17px}
+  .hero{min-height:84svh;padding:84px 16px 44px}
+  .product-scene{inset:285px -340px 0 0;opacity:.25}
+  .app-window{min-height:360px}
+  h1{font-size:45px;margin-bottom:18px}
+  .lead{font-size:17px;margin-bottom:26px}
+  .download-btn{width:100%;justify-content:center}
+  .section{padding:54px 16px}
+  .pitch-section{padding:64px 16px}
+  .second-section{padding:64px 16px}
+  .second-inner{grid-template-columns:1fr;gap:24px}
+  .second-h2{font-size:28px}
+  .stack-cards{height:260px}
+  .stack-foot{margin-top:16px}
+  .philosophy-section{padding:64px 16px}
+  .phil-h2{font-size:28px}
+  .phil-pillars{grid-template-columns:1fr;gap:16px}
+  .chat-section{padding:64px 16px}
+  .chat-h2{font-size:30px}
+  .two-col h2,.download-section h2,.tech h2{font-size:29px}
+  .tech-line{grid-template-columns:1fr;gap:6px}
+  .footer{flex-direction:column;align-items:flex-start}
+}
 </style>
 </head>
 <body>
-
-<nav>
-  <div class="nav-brand">
-    <svg viewBox="0 0 32 32" fill="none"><rect x="2" y="2" width="28" height="28" rx="6" fill="var(--accent)" opacity=".15"/><path d="M10 10h12M10 16h10M10 22h8" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 20l4 4" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"/></svg>
-    LucaWriter
-  </div>
-  <div class="nav-links">
-    <a href="#features">功能</a>
-    <a href="#workflow">工作流</a>
-    <a href="#tech">技术</a>
-  </div>
+<nav class="nav" aria-label="主导航">
+  <a class="brand" href="#top" aria-label="LucaWriter 首页">
+    <img src="../frontend/logo-black.png" alt="">
+    <span>LucaWriter</span>
+  </a>
   <div class="nav-actions">
-    <button class="theme-btn" onclick="toggleTheme()" title="切换主题">
-      <svg id="navMoon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      <svg id="navSun" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>
+    <a class="nav-link" href="#download">下载</a>
+    <a class="nav-link" href="#tech">技术说明</a>
+    <a class="nav-link" href="https://github.com/chess20000/LucaWriter" target="_blank" rel="noreferrer">GitHub</a>
+    <button class="theme-btn" type="button" id="themeToggle" aria-label="切换深浅主题">
+      <svg id="moonIcon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg>
+      <svg id="sunIcon" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>
     </button>
-    <a href="../frontend/login.html" class="cta-btn">开始写作</a>
   </div>
 </nav>
 
-<section class="hero">
-  <div class="hero-glow"></div>
-  <div class="hero-badge">✦ v2.0 — 为长篇小说作者打造</div>
-  <h1>你的写作搭档<br><em>Luca</em>，永远在线</h1>
-  <p>LucaWriter 是一款面向小说作者的长文本创作辅助工具。内置 AI 搭档 Luca，陪你从第一章写到全书完结——管理章节、梳理大纲、追踪伏笔、检查设定一致性，让创作不再孤独。</p>
-  <div class="hero-actions">
-    <a href="../frontend/login.html" class="cta-btn">立即开始 →</a>
-    <a href="#features" class="cta-outline">了解功能</a>
-  </div>
-  <div class="hero-mockup">
-    <div class="hero-mockup-placeholder" style="padding:60px 20px;flex-direction:column;gap:12px">
-      <svg width="48" height="48" viewBox="0 0 48 48" fill="none" style="opacity:.3"><rect x="4" y="4" width="40" height="40" rx="8" stroke="currentColor" stroke-width="1.5"/><line x1="14" y1="18" x2="34" y2="18" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="14" y1="24" x2="30" y2="24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="14" y1="30" x2="26" y2="30" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-      <div style="font-size:15px;color:var(--t3)">启动应用后即可看到你的工作台</div>
+<main id="top">
+  <section class="hero" aria-labelledby="heroTitle">
+    <div class="product-scene" aria-hidden="true">
+      <div class="app-window">
+        <div class="app-topbar"><span class="app-dot"></span><span class="app-title">LucaWriter</span><span>小说工作台</span></div>
+        <div class="app-main">
+          <div class="app-sidebar">
+            <div class="chapter"></div><div class="chapter"></div><div class="chapter"></div><div class="chapter"></div><div class="chapter"></div>
+          </div>
+          <div class="editor">
+            <div class="editor-title"></div>
+            <div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div>
+          </div>
+          <div class="app-chat">
+            <div class="chat-bubble"><strong>Luca</strong><div class="chat-text"></div><div class="chat-text short"></div></div>
+            <div class="chat-bubble"><strong>故事提醒</strong><div class="chat-text"></div><div class="chat-text"></div><div class="chat-text short"></div></div>
+          </div>
+        </div>
+        <div class="app-bottom">
+          <div class="bottom-pane"><b>前文回顾</b><div class="mini-line"></div><div class="mini-line"></div><div class="mini-line"></div></div>
+          <div class="bottom-pane"><b>故事大纲</b><div class="mini-line"></div><div class="mini-line"></div><div class="mini-line"></div></div>
+          <div class="bottom-pane"><b>读者视角</b><div class="mini-line"></div><div class="mini-line"></div><div class="mini-line"></div></div>
+        </div>
+      </div>
     </div>
-  </div>
-</section>
+    <div class="hero-content">
+      <h1 id="heroTitle">LucaWriter</h1>
+      <div class="hero-type">
+        <p class="t1">专为<span class="hl">长篇小说</span>与<span class="hl">网文</span>设计的写作软件</p>
+        <p class="t2">帮助你高效管理</p>
+        <p class="t3">剧情、伏笔和世界观设定</p>
+        <p class="t4">不管有没有用大纲辅助书写的习惯</p>
+        <p class="t5">现在，你可以<br><span class="hl">扔掉大纲</span>了</p>
+      </div>
+      <div class="download-row" aria-label="下载 LucaWriter">
+        <a class="download-btn primary" href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe" target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          <span class="download-copy"><strong>下载 Windows</strong><span>最新版安装包</span></span>
+        </a>
+        <a class="download-btn" href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-mac-arm64.dmg" target="_blank" rel="noreferrer">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          <span class="download-copy"><strong>下载 macOS</strong><span>适用于M系列芯片</span></span>
+        </a>
+      </div>
+    </div>
+  </section>
 
-<div class="divider"></div>
+  <section class="section second-section" aria-labelledby="secondTitle">
+    <div class="second-inner">
+      <div class="second-text">
+        <p class="second-p">普通人想写小说往往不清楚该如何开始。我该选择什么工具？Word？WPS？Apple Pages？还是说打字机？钢笔？毛笔+宣纸？很好奇职业的作家用什么写书。</p>
+        <p class="second-p">除去工具，如何严谨地管理世界观设定也是一个令人头疼的问题。写小说，本质上是在创造一个新的世界。身为作家，你需要把这个世界的一切运行严谨地在脑中记录，推演。若不慎出现了矛盾，容易破坏作品的整体观感。</p>
+        <p class="second-p">但记录大纲是一个很复杂的工程，每提出新设定，都需要搁置手头的写作，转而记录大纲。LucaWriter 就是为了解决这一点出现的。有别于传统的大纲，使用 LucaWriter，你不需要花时间想这个放哪里，那个放哪里——Luca 会帮你把所有信息，用信息化的技术，事无巨细地记录进一个每本书独有的数据库。</p>
+        <p class="second-p">而且，这个过程与你的写作同时进行，在记录的同时，如果发现你新写下的内容中与以往的设定存在冲突，它也会及时地提醒你。</p>
+      </div>
+      <div class="second-stack">
+        <div class="stack-cards">
+          <div class="stack-chat" style="--si:5">
+            <div class="sc-head sc-head-chat"><span class="cfh-dot"></span>设定核查</div>
+            <div class="sc-chat-body">
+              <div class="cfb-msg cfb-luca">
+                <span class="cfb-label">Luca</span>
+                <p>等等，你前面已经把AAA写死了——他被BBB亲手所杀。如果后面又让他活着出现，这就是一个无法自圆其说的矛盾。</p>
+              </div>
+              <div class="cfb-msg cfb-luca">
+                <span class="cfb-label">Luca</span>
+                <p>注意——你把AAA设定成顶级战力，却在一条杂鱼面前断一条手臂，战力体系会出问题。</p>
+              </div>
+              <div class="cfb-msg cfb-luca">
+                <span class="cfb-label">Luca</span>
+                <p>你刚写AAA「历代最强」，又把BBB写得像神一样——那AAA这个「最强」就站不住了。</p>
+              </div>
+            </div>
+          </div>
+          <div class="stack-card" style="--si:0">
+            <div class="sc-head">人物</div>
+            <div class="sc-body">
+              <div class="sc-row"><span>姓名</span><span>AAA</span></div>
+              <div class="sc-row"><span>身份</span><span>BBB</span></div>
+              <div class="sc-row"><span>境界</span><span>CCC</span></div>
+              <div class="sc-row"><span>登场</span><span>第 D 章</span></div>
+            </div>
+          </div>
+          <div class="stack-card" style="--si:1">
+            <div class="sc-head">地点</div>
+            <div class="sc-body">
+              <div class="sc-row"><span>名称</span><span>EEE</span></div>
+              <div class="sc-row"><span>类型</span><span>FFF</span></div>
+              <div class="sc-row"><span>掌教</span><span>GGG</span></div>
+              <div class="sc-row"><span>首次提及</span><span>第 H 章</span></div>
+            </div>
+          </div>
+          <div class="stack-card" style="--si:2">
+            <div class="sc-head">事件</div>
+            <div class="sc-body">
+              <div class="sc-row"><span>名称</span><span>III</span></div>
+              <div class="sc-row"><span>参与</span><span>AAA、JJJ</span></div>
+              <div class="sc-row"><span>结果</span><span>KKK</span></div>
+              <div class="sc-row"><span>章节</span><span>第 L-M 章</span></div>
+            </div>
+          </div>
+          <div class="stack-card" style="--si:3">
+            <div class="sc-head">规则</div>
+            <div class="sc-body">
+              <div class="sc-row"><span>名称</span><span>NNN</span></div>
+              <div class="sc-row"><span>周期</span><span>OOO</span></div>
+              <div class="sc-row"><span>上次</span><span>PPP</span></div>
+              <div class="sc-row"><span>状态</span><span>QQQ</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="stack-foot">Luca 使用 AI 技术，也会犯错。取决于你用的模型，Luca 对内容理解的精确度也会有显著区别，但总归会犯错。</p>
+  </section>
 
-<section class="section" id="features">
-  <div class="section-header reveal">
-    <h2>为长篇创作而生</h2>
-    <p>从零散灵感到最后定稿，LucaWriter 为你覆盖创作全流程。</p>
-  </div>
-  <div class="features-grid">
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><rect x="4" y="8" width="32" height="24" rx="3" stroke="currentColor" stroke-width="1.8"/><line x1="12" y1="15" x2="28" y2="15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="20" x2="24" y2="20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="25" x2="20" y2="25" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-      <h3>章节管理</h3>
-      <p>多章节编辑，拖拽排序，回收站可恢复，自动保存。左侧悬停秒开，不打扰写作流。</p>
-      <div class="feature-tags"><span>拖拽排序</span><span>回收站</span><span>自动保存</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><circle cx="20" cy="18" r="10" stroke="currentColor" stroke-width="1.8"/><path d="M14 30l6-6 6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      <h3>AI 搭档 Luca</h3>
-      <p>一个 Luca，全应用共享对话。随时提问剧情、设定、人物，Luca 会根据全书知识库回答。</p>
-      <div class="feature-tags"><span>多轮对话</span><span>全局记忆</span><span>知识库引用</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><path d="M8 28l6-18 6 18M10 24h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="32" cy="16" r="6" stroke="currentColor" stroke-width="1.8"/><line x1="32" y1="14" x2="32" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="30" y1="16" x2="34" y2="16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-      <h3>全书摘要</h3>
-      <p>一键生成逐章摘要 + 全书笔记，自动提炼人物、事件、设定、伏笔和大纲。</p>
-      <div class="feature-tags"><span>source.md</span><span>outline.md</span><span>增量更新</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="12" stroke="currentColor" stroke-width="1.8"/><path d="M20 12v8l6 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-      <h3>吃书雷达</h3>
-      <p>自动检测设定矛盾并提醒。点击「你去确认」让 AI 深入分析，引用原文出处。</p>
-      <div class="feature-tags"><span>一致性检查</span><span>深度分析</span><span>原文引用</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><rect x="6" y="6" width="28" height="28" rx="4" stroke="currentColor" stroke-width="1.8"/><line x1="12" y1="14" x2="18" y2="14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="20" x2="28" y2="20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="26" x2="22" y2="26" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-      <h3>大纲 &amp; 世界观</h3>
-      <p>维护人物、设定、事件、物品。AI 可自动建议大纲更新，一键采纳。</p>
-      <div class="feature-tags"><span>实体管理</span><span>AI 建议</span><span>记忆更新</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><path d="M6 34l6-18 6 18M8 30h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M24 20l6 8 6-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="30" y1="12" x2="30" y2="28" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-      <h3>时间线</h3>
-      <p>事件泡泡沿脊骨排开，可视化故事内时间线。点击跳转到原文，滚轮水平漫游。</p>
-      <div class="feature-tags"><span>事件可视化</span><span>章节跳转</span><span>分类着色</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><path d="M10 10l6 4-6 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 18h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="20" cy="28" r="4" stroke="currentColor" stroke-width="1.8"/></svg></div>
-      <h3>读者预言</h3>
-      <p>基于全书笔记，AI 模拟资深读者写长评、预测剧情走向。知识库变动后自动提醒。</p>
-      <div class="feature-tags"><span>AI 预测</span><span>长评模拟</span><span>自动更新</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><path d="M8 8h24v16H8z" stroke="currentColor" stroke-width="1.8" rx="2"/><path d="M14 28l6-8 6 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="20" y1="20" x2="20" y2="28" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="12" y1="32" x2="28" y2="32" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-      <h3>导入 &amp; 导出</h3>
-      <p>支持 TXT、MD、DOCX、PDF、EPUB 导入，自动拆分章节。导出为 ZIP、MD、TXT、EPUB、LucaWrite。</p>
-      <div class="feature-tags"><span>多格式</span><span>自动拆分</span><span>EPUB 封面</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8"/><circle cx="28" cy="12" r="4" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="28" r="4" stroke="currentColor" stroke-width="1.8"/><circle cx="28" cy="28" r="4" stroke="currentColor" stroke-width="1.8"/></svg></div>
-      <h3>知识库编辑</h3>
-      <p>AI 在闲聊中可提请修改设定，弹窗逐条确认/拒绝。所有操作记录在案。</p>
-      <div class="feature-tags"><span>提议弹窗</span><span>逐条确认</span><span>操作日志</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><rect x="8" y="8" width="24" height="24" rx="3" stroke="currentColor" stroke-width="1.8"/><line x1="14" y1="14" x2="26" y2="14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="14" y1="20" x2="22" y2="20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M26 18l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-      <h3>搜索 &amp; 替换</h3>
-      <p>Ctrl+F 搜索、Ctrl+H 替换，匹配项高亮导航，支持方向键快速跳转。</p>
-      <div class="feature-tags"><span>实时高亮</span><span>替换全部</span><span>快捷键</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><circle cx="20" cy="14" r="8" stroke="currentColor" stroke-width="1.8"/><path d="M12 30c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="28" y1="28" x2="36" y2="36" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></div>
-      <h3>多 AI 提供商</h3>
-      <p>支持 LMStudio、DeepSeek、MiniMax、OpenAI 兼容接口。也可本地运行 llama.cpp。</p>
-      <div class="feature-tags"><span>远程 API</span><span>本地模型</span><span>一键下载</span></div>
-    </div>
-    <div class="feature-card reveal">
-      <div class="feature-icon"><svg viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="12" stroke="currentColor" stroke-width="1.8"/><path d="M20 8v4M20 28v4M8 20h4M28 20h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></div>
-      <h3>深/浅主题</h3>
-      <p>可切换深色/浅色模式，自定义主题色。编辑器独立字号、字重、字体。</p>
-      <div class="feature-tags"><span>自定义主题色</span><span>独立字号</span><span>自定义字体</span></div>
-    </div>
-  </div>
-</section>
+  <section class="section philosophy-section" aria-labelledby="philTitle">
+    <div class="phil-inner">
+      <span class="section-chip">设计哲学</span>
+      <h2 id="philTitle" class="phil-h2">归于情感的艺术创作，<br>应由人类自己完成。</h2>
+      <div class="phil-body">
+        <p class="phil-p">LucaWriter 选择了一条和大多数 AI 写作工具不同的路——它不替你写。</p>
+        <p class="phil-p">不是因为做不到，而是因为不该。<strong>LucaWriter 的思想比较守旧，我们认为，让机器插手艺术创作是一种僭越</strong>。我们认为，创作是寻找人群中同类的旅程，所以，创作的权力，应该是拥有感情的人类独享的。</p>
+        <p class="phil-p">这也是为什么 LucaWriter 的核心功能不是「自动生成」，而是「回顾」和「提醒」。这是一个传统的，可靠的，专为小说设计的文本编辑软件。但你写作时，会有一个伙伴，努力地帮你分担那些重复的工作，维护你笔下虚构世界的各项法则正常运转。</p>
+      </div>
 
-<div class="divider"></div>
+    </div>
+  </section>
 
-<section class="section" id="workflow">
-  <div class="section-header reveal">
-    <h2>三分钟上手</h2>
-    <p>简单四步，让 Luca 成为你的得力助手。</p>
-  </div>
-  <div class="steps">
-    <div class="step-card reveal">
-      <div class="step-num">1</div>
-      <h3>新建书本</h3>
-      <p>点击「新建书本」，创建空白书或导入已有文稿。每本书独立保存章节、笔记和 AI 对话。</p>
+  <section class="section tech" id="tech" aria-labelledby="techTitle">
+    <h2 id="techTitle">围绕「记设定」的信息化技术</h2>
+    <p>LucaWriter 用了一套不算复杂但实用的技术栈，把维护设定的工作量从人脑转移到电脑上。</p>
+    <div class="tech-panel">
+      <div class="tech-line"><strong>SQLite 知识库</strong><span>每本书独立一个数据库，结构化存储人物、地点、事件、规则、伏笔，支持增删改查和增量更新。</span></div>
+      <div class="tech-line"><strong>AI 自动提取</strong><span>你写正文，Luca 在后台用大模型从中提取新出现的人物、事件、设定，写入知识库，不需要你手动录入。</span></div>
+      <div class="tech-line"><strong>语义索引</strong><span>正文和摘要笔记分块后做 Embedding 向量化，存入 ChromaDB，支持语义搜索——不依赖关键词匹配，意思相近就能搜到。</span></div>
+      <div class="tech-line"><strong>RAG 检索增强</strong><span>你向 Luca 提问时，系统自动从知识库和语义索引中检索相关片段，作为上下文注入，回答有据可依，不是凭空猜测。</span></div>
+      <div class="tech-line"><strong>矛盾检测</strong><span>写完章节后自动扫描新内容与知识库已有设定，发现前后矛盾时弹出吃书雷达提醒，支持逐条深度核查。</span></div>
+      <div class="tech-line"><strong>增量摘要</strong><span>每章写完生成章节摘要，增量合并到全书摘要笔记，不重复处理已有内容，全书千万字也能逐步消化。</span></div>
     </div>
-    <div class="step-card reveal">
-      <div class="step-num">2</div>
-      <h3>开始写作</h3>
-      <p>在编辑器中专注写作，左侧悬停切换章节，自动保存不丢字。随时 Ctrl+F 搜索。</p>
-    </div>
-    <div class="step-card reveal">
-      <div class="step-num">3</div>
-      <h3>生成摘要</h3>
-      <p>完成一章后点「本章写完」或直接告诉 Luca。积累几章后运行「摘要全书」建立知识库。</p>
-    </div>
-    <div class="step-card reveal">
-      <div class="step-num">4</div>
-      <h3>和 Luca 聊</h3>
-      <p>问剧情、查设定、检查矛盾、预测读者反应。Luca 掌握全书，给你靠谱回答。</p>
-    </div>
-  </div>
-</section>
+  </section>
 
-<div class="divider"></div>
+  <section class="section download-section" id="download" aria-labelledby="downloadTitle">
+    <h2 id="downloadTitle">开始写作</h2>
+    <p>选择你的平台，下载最新版本。</p>
+    <div class="download-row">
+      <a class="download-btn primary" href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe" target="_blank" rel="noreferrer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        <span class="download-copy"><strong>Windows</strong><span>最新版安装包</span></span>
+      </a>
+      <a class="download-btn" href="https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-mac-arm64.dmg" target="_blank" rel="noreferrer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        <span class="download-copy"><strong>macOS</strong><span>适用于M系列芯片</span></span>
+      </a>
+    </div>
+  </section>
+</main>
 
-<section class="section" id="tech">
-  <div class="section-header reveal">
-    <h2>技术特性</h2>
-    <p>轻量、可离线、尊重隐私。一切为了更好的写作体验。</p>
-  </div>
-  <div class="specs-grid">
-    <div class="spec-item reveal">
-      <span class="num">100%</span>
-      <span class="label">本地优先，数据在你手中</span>
-    </div>
-    <div class="spec-item reveal">
-      <span class="num">~30MB</span>
-      <span class="label">前端体积，极速加载</span>
-    </div>
-    <div class="spec-item reveal">
-      <span class="num">7+</span>
-      <span class="label">导入/导出格式支持</span>
-    </div>
-    <div class="spec-item reveal">
-      <span class="num">5+</span>
-      <span class="label">AI 提供商可切换</span>
-    </div>
-  </div>
-</section>
-
-<section class="cta-section">
-  <div class="glow"></div>
-  <h2 class="reveal">现在就试试 LucaWriter</h2>
-  <p class="reveal">免费、开源、可离线的长文本创作工具。</p>
-  <div class="reveal">
-    <a href="../frontend/login.html" class="cta-btn">开始写作 →</a>
-  </div>
-</section>
-
-<footer>
+<footer class="footer">
   <span>© 2026 LucaWriter</span>
-  <a href="https://github.com/anomalyco/lucawriter" target="_blank">GitHub</a>
-  <span style="font-size:12px;color:var(--t3)">搭载 Luca AI · 为长篇小说创作而生</span>
+  <a href="https://github.com/chess20000/LucaWriter/releases/latest" target="_blank" rel="noreferrer">GitHub Releases</a>
 </footer>
 
 <script>
-var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;
-var theme=localStorage.getItem('lw_landing_theme')||(prefersDark?'dark':'light');
-document.documentElement.setAttribute('data-theme',theme);
-updateNavIcons();
+var savedTheme = localStorage.getItem("lw_landing_theme");
+var prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+document.documentElement.setAttribute("data-theme", savedTheme || (prefersDark ? "dark" : "light"));
+syncThemeIcon();
 
-function toggleTheme(){
-  var cur=document.documentElement.getAttribute('data-theme');
-  var next=cur==='dark'?'light':'dark';
-  document.documentElement.setAttribute('data-theme',next);
-  localStorage.setItem('lw_landing_theme',next);
-  updateNavIcons();
-}
-function updateNavIcons(){
-  var isLight=document.documentElement.getAttribute('data-theme')==='light';
-  var m=document.getElementById('navMoon'),s=document.getElementById('navSun');
-  if(m)m.style.display=isLight?'none':'';
-  if(s)s.style.display=isLight?'':'none';
-}
+document.getElementById("themeToggle").addEventListener("click", function(){
+  var current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  var next = current === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("lw_landing_theme", next);
+  syncThemeIcon();
+});
 
-// Scroll reveal
-var observer=new IntersectionObserver(function(entries){
-  entries.forEach(function(e){
-    if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)}
-  });
-},{threshold:0.08});
-document.querySelectorAll('.reveal').forEach(function(el){observer.observe(el)});
+function syncThemeIcon(){
+  var isLight = document.documentElement.getAttribute("data-theme") === "light";
+  document.getElementById("moonIcon").style.display = isLight ? "none" : "";
+  document.getElementById("sunIcon").style.display = isLight ? "" : "none";
+}
 </script>
 </body>
 </html>

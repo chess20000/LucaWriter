@@ -607,6 +607,78 @@ def is_valid_id(oid):
     return bool(re.match(r'^[a-zA-Z0-9_\-]+$', oid))
 
 
+_MD_TABLE_SEP_RE = re.compile(r'^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$')
+
+def _strip_md_tables(text):
+    """剥除 markdown 表格：分隔行整行删除，数据行把 | 替换成两个空格。"""
+    if not text or '|' not in text:
+        return text
+    out = []
+    for line in text.split('\n'):
+        if _MD_TABLE_SEP_RE.match(line):
+            continue
+        if line.count('|') >= 2:
+            out.append(re.sub(r'\s*\|\s*', '  ', line).strip())
+        else:
+            out.append(line)
+    return '\n'.join(out)
+
+
+def _clean_ai_text(text):
+    """统一清洗 AI 输出：去 markdown 修饰字符 + 剥表格。"""
+    if not text:
+        return text
+    return _strip_md_tables(re.sub(r'[#*`~]', '', text))
+
+
+def _resolve_chapter_id(raw_id, chapter_order):
+    """解析 AI 给的 chapter_id。AI 经常把'第N章'的 N 当 ID，做兜底映射。
+    返回真实存在于 chapter_order 中的 ID，找不到返回 None。
+    """
+    if not raw_id:
+        return None
+    raw = str(raw_id).strip()
+    order = list(chapter_order or [])
+    if raw in order:
+        return raw
+    m = re.match(r'^第?\s*(\d+)\s*章?$', raw)
+    if m:
+        n = int(m.group(1))
+        if 1 <= n <= len(order):
+            return order[n - 1]
+    return None
+
+
+def _read_chapter_subagent(settings, chapter_title, chapter_content, fallback_temperature):
+    """子代理：以客观第三人称阅读章节，返回结构化摘要，不代入 Luca 的身份或视角。"""
+    if not chapter_content or not settings or not settings.get('base_url') or not settings.get('model'):
+        return None
+    max_chars = 10000
+    text = chapter_content[:max_chars] if len(chapter_content) > max_chars else chapter_content
+    prompt = f"""你是一位不带立场的第三方文本分析员。请阅读以下小说章节，只陈述原文明确写出的内容，不做文学批评、不推测作者意图、不代入角色视角。
+
+章节标题：{chapter_title}
+
+正文：
+{text}
+
+请输出结构化 JSON，不要代码块：
+{{
+  "summary": "200-400 字的事实摘要，只包含原文明确陈述的信息",
+  "entities": [{"name": "出现的人物/实体名", "type": "人物/物品/地点/势力/概念", "facts": ["原文明确提到的事实"]}],
+  "events": [{"description": "章节中发生的具体事件"}],
+  "key_points": ["关键事实点（每条约 10-20 字）"]
+}}"""
+    msgs = [
+        {'role': 'system', 'content': '你是客观的第三方文本分析员。只陈述原文明确写出的内容。不推测、不评价、不代入任何角色或作者视角。输出严格 JSON。'},
+        {'role': 'user', 'content': prompt},
+    ]
+    result, _, err = call_ai_full(settings, msgs, 2000, 0.2, timeout=120)
+    if err:
+        return None
+    return result.strip()
+
+
 def is_safe_url(url):
     try:
         parsed = urlparse(url)
@@ -3580,6 +3652,7 @@ class Handler(BaseHTTPRequestHandler):
 被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
 严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
 你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
+                        严禁输出 markdown 表格。
 
 这本书大概是这样的：
 
@@ -3597,6 +3670,7 @@ class Handler(BaseHTTPRequestHandler):
                         result, err = call_ai(settings, msgs, mt, tp, timeout=60)
                         if err:
                             self.json_resp(500, {'error': err}); return
+                        result = _clean_ai_text(result or '')
                         self.json_resp(200, {'comment': result or '（AI未返回内容）'}); return
                     finally:
                         unregister_ai_connection(threading.current_thread().ident)
@@ -3721,6 +3795,7 @@ class Handler(BaseHTTPRequestHandler):
 被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
 严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
 你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
+                        严禁输出 markdown 表格。
 
 这本小说大概是这样的：
 
@@ -3745,20 +3820,21 @@ class Handler(BaseHTTPRequestHandler):
 谨言慎行。温文尔雅，不卑不亢。惜字如金。
 不要列选项，不要反问，不要结构化分析。
 看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
-避免用"呗""啦"结尾，显得轻浮。
+                            避免用"呗""啦"结尾，显得轻浮。
+                            严禁输出 markdown 表格。
 
-这本小说大概是这样的：
+                            这本小说大概是这样的：
 
-{source_ctx}
+                            {source_ctx}
 
-【可用于知识库工具调用的记录ID】
-{kb_tool_context}
+                            【可用于知识库工具调用的记录ID】
+                            {kb_tool_context}
 
-用户当前正在浏览：{browse_ctx}
+                            用户当前正在浏览：{browse_ctx}
 
-请继续和用户对话。
+                            请继续和用户对话。
 
-{annotate_tool}"""
+                            {annotate_tool}"""
                         msgs = [{'role': 'system', 'content': sys_msg}]
                         for h in history_list:
                             role = h.get('role')
@@ -3837,52 +3913,111 @@ class Handler(BaseHTTPRequestHandler):
                             reasoning_text = ''
                             reasoning_acc.clear()
 
-                        result = re.sub(r'[#*`~]', '', full_text)
+                        result = _clean_ai_text(full_text)
 
                         # — 处理 [READ_CHAPTER] 工具调用
-                        _read_chapter_ids = []
-                        for _rc_m in re.finditer(r'\[READ_CHAPTER\](.*?)\[/READ_CHAPTER\]', result, re.S):
+                        tool_calls = []
+                        _READ_CHAPTER_RE = re.compile(r'\[READ_CHAPTER\]\s*(\{.*?\})\s*(?:\[/READ_CHAPTER\]|(?=\n|$))', re.S)
+                        _read_chapter_raw_ids = []
+                        for _rc_m in _READ_CHAPTER_RE.finditer(result):
                             try:
                                 _rc_cmd = json.loads(_rc_m.group(1).strip())
                                 _rc_id = _rc_cmd.get('chapter_id', '')
-                                if _rc_id and is_valid_id(_rc_id):
-                                    _read_chapter_ids.append(_rc_id)
+                                if _rc_id:
+                                    _read_chapter_raw_ids.append(str(_rc_id))
                             except Exception:
                                 pass
-                        if _read_chapter_ids:
-                            result = re.sub(r'\s*\[READ_CHAPTER\].*?\[/READ_CHAPTER\]\s*', '', result, flags=re.S).strip()
+                        if _read_chapter_raw_ids:
+                            result = _READ_CHAPTER_RE.sub('', result).strip()
+                            _ch_order_chat = meta_chat.get('chapter_order', []) if isinstance(meta_chat, dict) else []
                             _chapter_contents = []
-                            for _rcid in _read_chapter_ids[:3]:
+                            _missing_ids = []
+                            for _raw in _read_chapter_raw_ids[:3]:
+                                _rcid = _resolve_chapter_id(_raw, _ch_order_chat)
+                                if not _rcid:
+                                    _missing_ids.append(_raw)
+                                    continue
                                 _rcp = os.path.join(bd_chat, 'chapters', f'{_rcid}.json')
-                                if os.path.exists(_rcp):
-                                    _rcd = load_json(_rcp, dict)
-                                    _rc_title = _rcd.get('title', '未命名')
-                                    _rc_content = _rcd.get('content', '')
-                                    if _rc_content:
-                                        _chapter_contents.append(f'【{_rc_title}】\n{_rc_content}')
-                            if _chapter_contents:
-                                _chapter_ctx_text = '\n\n'.join(_chapter_contents)
-                                msgs.append({'role': 'assistant', 'content': result or '让我看看正文。'})
-                                msgs.append({'role': 'user', 'content': f'[系统注入：以下是请求的章节正文]\n\n{_chapter_ctx_text}\n\n请基于以上正文内容继续回答。'})
-                                _rc_content_acc = []
-                                _rc_reasoning_acc = []
-                                def _rc_on_content(tk):
-                                    _rc_content_acc.append(tk)
-                                    bg_task_update(task_id, result=(result + '\n\n' if result else '') + ''.join(_rc_content_acc), progress=min(95, 60 + len(''.join(_rc_content_acc)) // 10))
-                                def _rc_on_reasoning(tk):
-                                    _rc_reasoning_acc.append(tk)
-                                    bg_task_update(task_id, reasoning=''.join(_rc_reasoning_acc))
-                                _rc_full, _rc_err = call_ai_stream(cfg_settings, msgs, mt, tp, timeout=120,
-                                                                    on_content_token=_rc_on_content,
-                                                                    on_reasoning_token=_rc_on_reasoning,
-                                                                    should_stop_fn=lambda: bg_task_should_stop(task_id))
-                                if _rc_err:
+                                if not os.path.exists(_rcp):
+                                    _missing_ids.append(_raw)
+                                    continue
+                                _rcd = load_json(_rcp, dict)
+                                _rc_title = _rcd.get('title', '未命名')
+                                _rc_content = _rcd.get('content', '')
+                                if _rc_content:
+                                    _sub_status_text = f'[子代理] 正在客观阅读「{_rc_title}」…'
                                     if not result:
-                                        result = '[读取章节后生成回复失败]'
+                                        bg_task_update(task_id, result=_sub_status_text, progress=60)
+                                    else:
+                                        bg_task_update(task_id, result=result + '\n\n' + _sub_status_text, progress=60)
+                                    tool_calls.append({'type': 'read_subagent', 'label': _sub_status_text, 'status': 'running'})
+                                    _sub_result = _read_chapter_subagent(cfg_settings, _rc_title, _rc_content, tp)
+                                    if _sub_result:
+                                        _chapter_contents.append(f'【{_rc_title}】子代理客观摘要\n{_sub_result}')
+                                    else:
+                                        # 子代理失败，回退到原文
+                                        _chapter_contents.append(f'【{_rc_title}】\n{_rc_content[:8000]}')
+                                    tool_calls[-1] = {'type': 'read_subagent', 'label': f'已读取「{_rc_title}」', 'status': 'done'}
+                                    bg_task_update(task_id, result=result or '', progress=65)
                                 else:
-                                    _rc_result = re.sub(r'[#*`~]', '', _rc_full or '')
-                                    result = (result + '\n\n' if result else '') + _rc_result
-                                    reasoning_text = ''.join(_rc_reasoning_acc) or reasoning_text
+                                    _missing_ids.append(_raw)
+
+                            # 即使没找到也续聊，让 AI 修正或道歉，不能静默停止
+                            _injection_parts = []
+                            if _chapter_contents:
+                                _injection_parts.append('[系统注入：子代理已客观阅读以下章节，以下是摘要]\n\n' + '\n\n'.join(_chapter_contents))
+                            if _missing_ids:
+                                _avail = '\n'.join(f'  - id={_o} 第{_i+1}章' for _i, _o in enumerate(_ch_order_chat[:50]))
+                                _injection_parts.append(
+                                    f'[系统提示：以下 chapter_id 未找到对应章节，请勿再次尝试同样的 ID]\n'
+                                    f'  未找到：{", ".join(_missing_ids)}\n'
+                                    f'  可用章节 ID 列表（必须用 id= 后面的字符串作为 chapter_id，不要用章节号数字）：\n{_avail}\n'
+                                    f'请直接基于你已有的信息回答用户，不要再调用 READ_CHAPTER 重试同一个 ID。严禁输出 markdown 表格。'
+                                )
+                            _injection = '\n\n'.join(_injection_parts) + '\n\n请直接回答，你已拥有正文内容，无需再次调用 READ_CHAPTER。'
+
+                            # 修改系统提示词：告知 AI 已读取到正文，避免再次输出 READ_CHAPTER
+                            if msgs and msgs[0].get('role') == 'system':
+                                _sys = msgs[0]['content']
+                                if '你无法直接看到章节正文' in _sys:
+                                    msgs[0] = dict(msgs[0])
+                                    msgs[0]['content'] = _sys.replace(
+                                        '你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。不要让用户复制粘贴或上传稿子——你自己调用工具即可。',
+                                        '你已通过[READ_CHAPTER]读取了章节正文，内容已在下方提供。请直接回答。'
+                                    ).replace(
+                                        '你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。',
+                                        '你已通过[READ_CHAPTER]读取了章节正文，内容已在下方提供。请直接回答。'
+                                    )
+
+                            msgs.append({'role': 'assistant', 'content': result or '让我看看正文。'})
+                            msgs.append({'role': 'user', 'content': _injection})
+                            _rc_content_acc = []
+                            _rc_reasoning_acc = []
+                            def _rc_on_content(tk):
+                                _rc_content_acc.append(tk)
+                                bg_task_update(task_id, result=(result + '\n\n' if result else '') + ''.join(_rc_content_acc), progress=min(95, 60 + len(''.join(_rc_content_acc)) // 10))
+                            def _rc_on_reasoning(tk):
+                                _rc_reasoning_acc.append(tk)
+                                bg_task_update(task_id, reasoning=''.join(_rc_reasoning_acc))
+                            _rc_full, _rc_err = call_ai_stream(cfg_settings, msgs, mt, tp, timeout=120,
+                                                                on_content_token=_rc_on_content,
+                                                                on_reasoning_token=_rc_on_reasoning,
+                                                                should_stop_fn=lambda: bg_task_should_stop(task_id))
+                            if _rc_err:
+                                if not result:
+                                    result = '[读取章节后生成回复失败]'
+                            else:
+                                _rc_result = _clean_ai_text(_rc_full or '')
+                                # 防止续聊又输出 READ_CHAPTER（递归防御）
+                                _rc_result = _READ_CHAPTER_RE.sub('', _rc_result).strip()
+                                result = (result + '\n\n' if result else '') + _rc_result
+                                reasoning_text = ''.join(_rc_reasoning_acc) or reasoning_text
+                            if not result.strip():
+                                # 兜底：续聊也没出内容，给一句明确提示，避免空白
+                                if _missing_ids and not _chapter_contents:
+                                    result = '抱歉，未能定位到你提到的章节，请直接告诉我章节标题或问题本身。'
+                                else:
+                                    result = '（未生成内容）'
 
                         # — 检测浏览请求（优先 tool_call 格式，其次 [BROWSE] 标签）
                         _browse_query = None
@@ -3918,7 +4053,6 @@ class Handler(BaseHTTPRequestHandler):
                             indicators = ['还没读过', '还没看过', '尚未通读', '没有读过', '不了解全书', '不清楚全书', '需要通读', '我还没看过这本书', '尚未阅读', '没有阅读']
                             if any(ind in result for ind in indicators):
                                 needs_rt = True
-                        tool_calls = []
                         if needs_rt:
                             tool_calls.append({'type': 'suggest_readthrough', 'label': '建议通读', 'status': 'ready'})
 
@@ -6034,6 +6168,7 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
 严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
 你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
+                        严禁输出 markdown 表格。
 
 【你的专长】
 你是系列小说的宏观顾问，擅长：
@@ -6086,6 +6221,7 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
 严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
 你的品格从言行中流露。
+                        严禁输出 markdown 表格。
 
 【你的专长】系列小说的宏观顾问：架构规划、世界观补全、人物弧线、伏笔管理、连贯性检查、读者体验。
 
@@ -6162,55 +6298,114 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
         if not full_text and reasoning_text:
             full_text = reasoning_text
             reasoning_text = ''
-        result = re.sub(r'[#*`~]', '', full_text)
+        result = _clean_ai_text(full_text)
         # — 处理 [READ_CHAPTER] 工具调用（系列对话）
-        _read_chapter_ids_s = []
-        for _rc_m in re.finditer(r'\[READ_CHAPTER\](.*?)\[/READ_CHAPTER\]', result, re.S):
+        _READ_CHAPTER_RE_S = re.compile(r'\[READ_CHAPTER\]\s*(\{.*?\})\s*(?:\[/READ_CHAPTER\]|(?=\n|$))', re.S)
+        _read_chapter_raw_ids_s = []
+        for _rc_m in _READ_CHAPTER_RE_S.finditer(result):
             try:
                 _rc_cmd = json.loads(_rc_m.group(1).strip())
                 _rc_id = _rc_cmd.get('chapter_id', '')
-                if _rc_id and is_valid_id(_rc_id):
-                    _read_chapter_ids_s.append(_rc_id)
+                if _rc_id:
+                    _read_chapter_raw_ids_s.append(str(_rc_id))
             except Exception:
                 pass
-        if _read_chapter_ids_s:
-            result = re.sub(r'\s*\[READ_CHAPTER\].*?\[/READ_CHAPTER\]\s*', '', result, flags=re.S).strip()
+        if _read_chapter_raw_ids_s:
+            result = _READ_CHAPTER_RE_S.sub('', result).strip()
+            # 拼接整个系列的章节 order 用于回退匹配
+            _series_order_s = []  # list of (chapter_id, book_id)
+            for _bid in series_book_ids:
+                _bm = get_book_meta(_bid) or {}
+                for _cid in (_bm.get('chapter_order') or []):
+                    _series_order_s.append((_cid, _bid))
+            _series_id_list = [t[0] for t in _series_order_s]
             _chapter_contents_s = []
-            for _rcid in _read_chapter_ids_s[:3]:
-                for _bid in series_book_ids:
+            _missing_ids_s = []
+            for _raw in _read_chapter_raw_ids_s[:3]:
+                _rcid = _resolve_chapter_id(_raw, _series_id_list)
+                if not _rcid:
+                    _missing_ids_s.append(_raw)
+                    continue
+                _hit = False
+                for _cid, _bid in _series_order_s:
+                    if _cid != _rcid:
+                        continue
                     _rcp = os.path.join(get_book_dir(_bid), 'chapters', f'{_rcid}.json')
-                    if os.path.exists(_rcp):
-                        _rcd = load_json(_rcp, dict)
-                        _rc_title = _rcd.get('title', '未命名')
-                        _rc_content = _rcd.get('content', '')
-                        if _rc_content:
-                            _b_meta = get_book_meta(_bid)
-                            _b_title = _b_meta.get('title', '') if _b_meta else ''
-                            _chapter_contents_s.append(f'【{_b_title} - {_rc_title}】\n{_rc_content}')
+                    if not os.path.exists(_rcp):
                         break
+                    _rcd = load_json(_rcp, dict)
+                    _rc_title = _rcd.get('title', '未命名')
+                    _rc_content = _rcd.get('content', '')
+                    if _rc_content:
+                        _b_meta = get_book_meta(_bid)
+                        _b_title = _b_meta.get('title', '') if _b_meta else ''
+                        _sub_status_text_s = f'[子代理] 正在客观阅读「{_b_title} - {_rc_title}」…'
+                        if not result:
+                            bg_task_update(task_id, result=_sub_status_text_s, progress=60)
+                        else:
+                            bg_task_update(task_id, result=result + '\n\n' + _sub_status_text_s, progress=60)
+                        _sub_result_s = _read_chapter_subagent(cfg_settings, f'{_b_title} - {_rc_title}', _rc_content, tp)
+                        if _sub_result_s:
+                            _chapter_contents_s.append(f'【{_b_title} - {_rc_title}】子代理客观摘要\n{_sub_result_s}')
+                        else:
+                            _chapter_contents_s.append(f'【{_b_title} - {_rc_title}】\n{_rc_content[:8000]}')
+                        bg_task_update(task_id, result=result or '', progress=65)
+                        _hit = True
+                    break
+                if not _hit:
+                    _missing_ids_s.append(_raw)
+
+            _injection_parts_s = []
             if _chapter_contents_s:
-                _chapter_ctx_text_s = '\n\n'.join(_chapter_contents_s)
-                msgs.append({'role': 'assistant', 'content': result or '让我看看正文。'})
-                msgs.append({'role': 'user', 'content': f'[系统注入：以下是请求的章节正文]\n\n{_chapter_ctx_text_s}\n\n请基于以上正文内容继续回答。'})
-                _rc_content_acc_s = []
-                _rc_reasoning_acc_s = []
-                def _rc_on_content_s(tk):
-                    _rc_content_acc_s.append(tk)
-                    bg_task_update(task_id, result=(result + '\n\n' if result else '') + ''.join(_rc_content_acc_s), progress=min(95, 60 + len(''.join(_rc_content_acc_s)) // 10))
-                def _rc_on_reasoning_s(tk):
-                    _rc_reasoning_acc_s.append(tk)
-                    bg_task_update(task_id, reasoning=''.join(_rc_reasoning_acc_s))
-                _rc_full_s, _rc_err_s = call_ai_stream(cfg_settings, msgs, None, tp, timeout=120,
-                                                        on_content_token=_rc_on_content_s,
-                                                        on_reasoning_token=_rc_on_reasoning_s,
-                                                        should_stop_fn=lambda: bg_task_should_stop(task_id))
-                if _rc_err_s:
-                    if not result:
-                        result = '[读取章节后生成回复失败]'
+                _injection_parts_s.append('[系统注入：子代理已客观阅读以下章节，以下是摘要]\n\n' + '\n\n'.join(_chapter_contents_s))
+            if _missing_ids_s:
+                _avail_s = '\n'.join(f'  - id={_cid}' for _cid, _ in _series_order_s[:80])
+                _injection_parts_s.append(
+                    f'[系统提示：以下 chapter_id 未找到对应章节]\n'
+                    f'  未找到：{", ".join(_missing_ids_s)}\n'
+                    f'  可用章节 ID 列表（必须用 id= 后面的字符串作为 chapter_id，不要用章节号数字）：\n{_avail_s}\n'
+                    f'请直接基于已有信息回答用户，不要再调用 READ_CHAPTER 重试同一个 ID。严禁输出 markdown 表格。'
+                )
+            _injection_s = '\n\n'.join(_injection_parts_s) + '\n\n请直接回答，你已拥有正文内容，无需再次调用 READ_CHAPTER。'
+
+            # 修改系统提示词：告知 AI 已读取到正文
+            if msgs and msgs[0].get('role') == 'system':
+                _sys = msgs[0]['content']
+                if '你无法直接看到章节正文' in _sys:
+                    msgs[0] = dict(msgs[0])
+                    msgs[0]['content'] = _sys.replace(
+                        '你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。',
+                        '你已通过[READ_CHAPTER]读取了章节正文，内容已在下方提供。请直接回答。'
+                    )
+
+            msgs.append({'role': 'assistant', 'content': result or '让我看看正文。'})
+            msgs.append({'role': 'user', 'content': _injection_s})
+            _rc_content_acc_s = []
+            _rc_reasoning_acc_s = []
+            def _rc_on_content_s(tk):
+                _rc_content_acc_s.append(tk)
+                bg_task_update(task_id, result=(result + '\n\n' if result else '') + ''.join(_rc_content_acc_s), progress=min(95, 60 + len(''.join(_rc_content_acc_s)) // 10))
+            def _rc_on_reasoning_s(tk):
+                _rc_reasoning_acc_s.append(tk)
+                bg_task_update(task_id, reasoning=''.join(_rc_reasoning_acc_s))
+            _rc_full_s, _rc_err_s = call_ai_stream(cfg_settings, msgs, None, tp, timeout=120,
+                                                    on_content_token=_rc_on_content_s,
+                                                    on_reasoning_token=_rc_on_reasoning_s,
+                                                    should_stop_fn=lambda: bg_task_should_stop(task_id))
+            if _rc_err_s:
+                if not result:
+                    result = '[读取章节后生成回复失败]'
+            else:
+                _rc_result_s = _clean_ai_text(_rc_full_s or '')
+                # 防止续聊又输出 READ_CHAPTER
+                _rc_result_s = _READ_CHAPTER_RE_S.sub('', _rc_result_s).strip()
+                result = (result + '\n\n' if result else '') + _rc_result_s
+                reasoning_text = ''.join(_rc_reasoning_acc_s) or reasoning_text
+            if not result.strip():
+                if _missing_ids_s and not _chapter_contents_s:
+                    result = '抱歉，未能定位到你提到的章节，请直接告诉我章节标题或问题本身。'
                 else:
-                    _rc_result_s = re.sub(r'[#*`~]', '', _rc_full_s or '')
-                    result = (result + '\n\n' if result else '') + _rc_result_s
-                    reasoning_text = ''.join(_rc_reasoning_acc_s) or reasoning_text
+                    result = '（未生成内容）'
         # 模型自重复检测：如果结果的前半段和后半段高度相似，截掉后半段
         if len(result) > 20:
             half = len(result) // 2

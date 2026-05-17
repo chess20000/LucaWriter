@@ -1872,7 +1872,7 @@ def reread_passages(book_id, chapter_ids, correction, focus_texts, settings):
   "note":"一句话说明你改了什么"
 }}"""
         raw_result, _, err = call_ai_full(settings, [
-            {'role': 'system', 'content': '你是严谨的知识库局部重读器。只输出严格 JSON。只修正用户指出的误读，不碰无关内容。'},
+            {'role': 'system', 'content': '你是严谨的知识库局部重读器。只输出严格 JSON。只修正用户指出的误读，不碰无关内容。警告：你已有的知识库信息可能是错的，暂时抛弃它们，严格基于原文段落重新判断。'},
             {'role': 'user', 'content': prompt},
         ], 4000, 0.2, timeout=180)
         if err:

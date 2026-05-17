@@ -5,6 +5,7 @@
   "main": "main.js",
   "author": "LucaWriter",
   "license": "Apache-2.0",
+  "_releaseArtifactNameComment": "Keep installer artifact names versionless. Landing uses /releases/latest/download/LucaWriter-Setup.exe and LucaWriter-mac-${arch}.dmg fixed links, so do not add ${version} back to artifactName.",
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win",
@@ -77,7 +78,7 @@
           "arch": ["x64"]
         }
       ],
-      "artifactName": "LucaWriter-Setup-${version}.${ext}"
+      "artifactName": "LucaWriter-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -98,7 +99,7 @@
           "arch": ["x64", "arm64"]
         }
       ],
-      "artifactName": "LucaWriter-${version}-mac-${arch}.${ext}",
+      "artifactName": "LucaWriter-mac-${arch}.${ext}",
       "extendInfo": {
         "CFBundleDocumentTypes": [],
         "NSRequiresAquaSystemAppearance": false
