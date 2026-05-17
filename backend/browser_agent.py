@@ -147,8 +147,81 @@ def _find_electron_cdp_target() -> Optional[str]:
     return None
 
 
+def _default_browser_profile_dir() -> str:
+    """源码启动模式下用的独立浏览器用户目录，避免与用户日常 Chrome 冲突。"""
+    data_dir = os.environ.get('DATA_DIR')
+    if not data_dir:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        data_dir = os.path.normpath(os.path.join(script_dir, '..', 'usrdata'))
+    p = os.path.join(data_dir, 'browser_profile')
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _find_free_port() -> int:
+    """随机分配一个空闲端口给 CDP 用，避免端口冲突。"""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
+
+
+def _init_browser_standalone(user_data_dir: Optional[str] = None) -> tuple[bool, str]:
+    """源码启动模式：用 DrissionPage 启动一个独立的本地 Chromium（headless 后台运行）。"""
+    global _browser_instance, _browser_enabled, _browser_user_data_dir
+
+    chrome_path = _find_chromium_path()
+    if not chrome_path:
+        return False, '未找到本地浏览器：请安装 Edge / Chrome / Brave 后重试'
+
+    try:
+        co = ChromiumOptions()
+        co.set_browser_path(chrome_path)
+        # 后台模式
+        try:
+            co.headless(True)
+        except Exception:
+            co.set_argument('--headless=new')
+        # 降扰参数
+        co.set_argument('--no-first-run')
+        co.set_argument('--no-default-browser-check')
+        co.set_argument('--disable-extensions')
+        co.set_argument('--disable-blink-features=AutomationControlled')
+        co.set_argument('--mute-audio')
+        co.set_argument('--disable-gpu')
+        # 独立用户数据目录，避免和用户日常 Chrome 冲突
+        udd = user_data_dir or _default_browser_profile_dir()
+        try:
+            co.set_user_data_path(udd)
+        except Exception:
+            pass
+        _browser_user_data_dir = udd
+        # 独立 CDP 端口避免冲突
+        try:
+            co.set_local_port(_find_free_port())
+        except Exception:
+            pass
+
+        _browser_instance = ChromiumPage(co)
+        _browser_enabled = True
+        _notify_operation('init', {'mode': 'standalone', 'success': True, 'headless': True})
+        print(f'[browser] 源码模式：后台启动 {os.path.basename(chrome_path)}（headless）')
+        return True, '浏览器后台启动成功'
+    except Exception as e:
+        _browser_instance = None
+        _browser_enabled = False
+        _notify_operation('init', {'mode': 'standalone', 'success': False, 'error': str(e)})
+        return False, f'浏览器启动失败: {e}'
+
+
 def init_browser(user_data_dir: Optional[str] = None) -> tuple[bool, str]:
-    """初始化浏览器。仅支持 Electron 桌面版内置 Chromium（通过 CDP 连接）。"""
+    """初始化浏览器。
+    - Electron 桌面版：通过 CDP 接管内置 Chromium 标签页
+    - 源码启动：用 DrissionPage 启动独立本地 Chromium（headless 后台）
+    """
     global _browser_instance, _browser_enabled, _browser_user_data_dir
 
     if not HAS_DRISSION:
@@ -158,21 +231,21 @@ def init_browser(user_data_dir: Optional[str] = None) -> tuple[bool, str]:
         if _browser_instance is not None:
             return True, '浏览器已初始化'
 
-        if not _IS_ELECTRON:
-            return False, '浏览器功能仅在桌面版可用'
+        if _IS_ELECTRON:
+            electron_target_id = _find_electron_cdp_target()
+            if electron_target_id:
+                try:
+                    debug_port = int(os.environ.get('BROWSER_DEBUG_PORT', '0'))
+                    _browser_instance = ChromiumPage(debug_port, tab_id=electron_target_id)
+                    _browser_enabled = True
+                    _notify_operation('init', {'mode': 'electron_cdp', 'success': True})
+                    return True, '浏览器初始化成功'
+                except Exception as e:
+                    print(f'[browser] Electron CDP 连接失败: {e}')
+            return False, '无法连接浏览器，请重启 LucaWriter'
 
-        electron_target_id = _find_electron_cdp_target()
-        if electron_target_id:
-            try:
-                debug_port = int(os.environ.get('BROWSER_DEBUG_PORT', '0'))
-                _browser_instance = ChromiumPage(debug_port, tab_id=electron_target_id)
-                _browser_enabled = True
-                _notify_operation('init', {'mode': 'electron_cdp', 'success': True})
-                return True, '浏览器初始化成功'
-            except Exception as e:
-                print(f'[browser] Electron CDP 连接失败: {e}')
-
-        return False, '无法连接浏览器，请重启 LucaWriter'
+        # 源码启动：用 DrissionPage 启动独立 Chromium
+        return _init_browser_standalone(user_data_dir)
 
 
 def close_browser():

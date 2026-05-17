@@ -38,9 +38,12 @@
  --border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.12);
  --r1:4px;--r2:6px;--r3:8px;--r4:12px;
  --font-mono:"SF Mono","Fira Code",Menlo,monospace;
- --font-sans:-apple-system,BlinkMacSystemFont,"Noto Sans SC","Helvetica Neue",sans-serif;
+ --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","Noto Sans SC","Helvetica Neue",Arial,sans-serif;
  --font-serif:"Playfair Display","Source Han Serif SC","Noto Serif SC","Songti SC",Georgia,serif;
+ --editor-font-family:var(--font-sans);
+ --editor-font-weight:400;
  --scrollbar:rgba(255,255,255,.14);--scrollbar-hover:rgba(232,204,122,.22);
+ --z-bottom-panel:60;--z-main-row:70;--z-chapter-overlay:95;
  /* text-on-surface colors for better contrast */
  --on-accent:#1a1a1a;
  --t-on-surface:#ffffff;--t-on-surface-weak:rgba(255,255,255,.85);--t-on-surface-muted:rgba(255,255,255,.68);
@@ -192,18 +195,18 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 }
 
 .main{display:flex;flex:1;flex-direction:column;overflow:hidden}
-.main-row{display:flex;flex:1;overflow:visible;min-height:0;position:relative;z-index:40;padding-left:18px}
+.main-row{display:flex;flex:1;overflow:visible;min-height:0;position:relative;z-index:var(--z-main-row);padding-left:18px}
 
 .resize-handle{width:5px;flex-shrink:0;cursor:col-resize;position:relative;z-index:10;background:transparent;margin:0 -2px}
 .resize-handle::after{content:'';position:absolute;top:0;bottom:0;left:50%;transform:translateX(-50%);width:1px;background:var(--border);transition:background .15s}
 .resize-handle:hover::after,.resize-handle.dragging::after{background:var(--accent)}
 
 .left-stack{width:320px;flex-shrink:0;position:relative;overflow:hidden;height:100%;align-self:stretch}
-.left-sidebar{position:fixed;left:18px;top:38px;bottom:30px;width:fit-content;min-width:180px;max-width:320px;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;z-index:90;border:none;color:var(--t-on-surface);background:transparent;box-shadow:none;isolation:isolate}
-.left-sidebar::before{content:'';position:absolute;inset:0;z-index:-1;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);-webkit-mask-image:linear-gradient(to right,#000 0%,#000 75%,transparent 100%);mask-image:linear-gradient(to right,#000 0%,#000 75%,transparent 100%);pointer-events:none}
+.left-sidebar{position:fixed;left:18px;top:38px;bottom:0;width:fit-content;min-width:180px;max-width:320px;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;z-index:var(--z-chapter-overlay);border:none;color:var(--t-on-surface);background:transparent;box-shadow:none;isolation:isolate;transform:translateZ(0)}
+.left-sidebar::before{content:'';position:absolute;inset:0;z-index:-1;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);-webkit-mask-image:linear-gradient(to right,#000 0,#000 var(--chapter-sidebar-glass-solid,75%),transparent 100%);mask-image:linear-gradient(to right,#000 0,#000 var(--chapter-sidebar-glass-solid,75%),transparent 100%);pointer-events:none}
 .left-sidebar::after{content:'';position:absolute;top:14px;bottom:14px;right:0;width:1px;background:linear-gradient(to bottom,transparent 0%,var(--border) 22%,var(--border) 78%,transparent 100%);opacity:.25;pointer-events:none}
 .left-sidebar.collapsed{opacity:0;pointer-events:none}
-.sidebar-trigger{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:90;background:var(--surface);border-right:1px solid var(--border);color:var(--t3);position:absolute;left:0;top:38px;bottom:30px}
+.sidebar-trigger{width:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:var(--z-chapter-overlay);background:var(--surface);border-right:1px solid var(--border);color:var(--t3);position:fixed;left:0;top:38px;bottom:0;transform:translateZ(0)}
 .app:not(.writing-active) .sidebar-trigger,.app:not(.writing-active) .left-sidebar{display:none}
 .sidebar-trigger:hover{background:var(--surface2);color:var(--t-on-surface)}
 .sidebar-trigger svg{width:12px;height:12px;transform:rotate(0deg);transition:transform .25s ease}
@@ -216,10 +219,12 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .trash-toggle:hover{color:var(--danger)}
 .trash-toggle.open{color:var(--danger)}
 
-.sidebar-search{padding:6px 8px;flex-shrink:0}
-.sidebar-search input{width:66%;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r1);padding:4px 10px;font-size:12px;height:24px;color:var(--t-on-surface);outline:none;transition:border-color .15s}
+.sidebar-search{padding:6px 8px;flex-shrink:0;display:flex;align-items:center;gap:6px}
+.sidebar-search input{flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r1);padding:4px 10px;font-size:12px;height:24px;color:var(--t-on-surface);outline:none;transition:border-color .15s}
 .sidebar-search input::placeholder{color:var(--t-on-surface-muted)}
 .sidebar-search input:focus{border-color:var(--accent)}
+.sidebar-search-action{flex-shrink:0;background:transparent;border:none;color:var(--t3);font-size:11px;padding:2px 6px;border-radius:var(--r1);cursor:pointer;transition:color .12s;height:24px;line-height:1}
+.sidebar-search-action:hover{color:var(--t-on-surface)}
 
 .chapter-list{flex:1;overflow-y:auto;padding:6px 0 14px 0;width:100%;max-width:none;position:relative;direction:rtl;scrollbar-gutter:stable}
 .chapter-list>*{direction:ltr}
@@ -306,15 +311,15 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .save-indicator{font-size:11px;color:var(--t3);flex-shrink:0;font-family:var(--font-sans);opacity:0;transition:opacity .2s;min-width:42px}
 .save-indicator.show{opacity:1}.save-indicator.err{color:var(--danger)}
 .editor-body{flex:1;overflow:hidden;position:relative;background:transparent;padding:0;border:none}
-.editor-body textarea{width:100%;height:100%;resize:none;background:var(--surface);border:none;font-family:var(--font-serif);line-height:var(--content-line-height);font-size:var(--editor-font-size);color:var(--t-on-surface);outline:none;padding:24px 36px;border-radius:0;letter-spacing:.3px;caret-color:var(--accent);position:relative;z-index:1;box-shadow:none}
+.editor-body textarea{width:100%;height:100%;resize:none;background:var(--surface);border:none;font-family:var(--editor-font-family);font-weight:var(--editor-font-weight);line-height:var(--content-line-height);font-size:var(--editor-font-size);color:var(--t-on-surface);outline:none;padding:24px 36px;border-radius:0;letter-spacing:.3px;caret-color:var(--accent);position:relative;z-index:1;box-shadow:none}
 .editor-body textarea::placeholder{color:var(--t3)}
 .editor-body textarea::selection{background:var(--t3);color:#fff}
 
 .right-sidebar{width:100%;height:100%;display:flex;flex-direction:column;overflow:hidden;border:none}
 .right-sidebar-header{padding:10px 14px;font-size:11px;font-weight:700;color:var(--t2);letter-spacing:.5px;border-bottom:1px solid var(--border);flex-shrink:0}
-.luca-focus-notice{align-self:center;max-width:96%;padding:2px 0;background:transparent;border:none;color:var(--t3);font-size:10px;line-height:1.5;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.luca-focus-notice span{color:var(--accent);font-weight:600}
-.luca-focus-notice em{font-style:italic;color:var(--t2)}
+.luca-focus-notice{align-self:center;max-width:92%;margin:8px auto;padding:4px 12px;background:var(--accent-a08);border:1px solid var(--accent-a15);border-radius:100px;color:var(--t2);font-size:11px;line-height:1.4;display:inline-flex;align-items:center;gap:8px;flex-shrink:0}
+.luca-focus-notice span{color:var(--t3);font-weight:500;font-size:10px;letter-spacing:.5px;flex-shrink:0;text-transform:none}
+.luca-focus-notice em{font-style:normal;color:var(--t1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;display:inline-block;max-width:100%}
 .right-content{flex:1;overflow-y:auto;display:flex;flex-direction:column}
 
 .ai-suggest-box{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border)}
@@ -328,7 +333,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .ai-dismiss:hover{color:var(--danger);border-color:var(--danger)}
 
 .editor-highlight-layer{position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:none}
-.editor-highlight-content{padding:24px 36px;font-family:var(--font-serif);line-height:var(--content-line-height);font-size:var(--editor-font-size);letter-spacing:.3px;white-space:pre-wrap;word-wrap:break-word;color:transparent}
+.editor-highlight-content{padding:24px 36px;font-family:var(--editor-font-family);font-weight:var(--editor-font-weight);line-height:var(--content-line-height);font-size:var(--editor-font-size);letter-spacing:.3px;white-space:pre-wrap;word-wrap:break-word;color:transparent}
 .editor-highlight-content mark{background:rgba(232,204,122,.24);color:transparent;border-bottom:2px solid var(--accent);border-radius:2px}
 .editor-highlight-content mark.green{background:rgba(95,184,120,.22);border-bottom-color:#5fb878}
 .editor-highlight-content mark.pink{background:rgba(212,107,139,.24);border-bottom-color:#d46b8b}
@@ -399,7 +404,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 @keyframes kbJumpFlash{0%{background:var(--accent)}100%{background:var(--accent-a25)}}
 .ctx-tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--surface2);color:var(--t3);font-size:10px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle}
 
-.bottom-panel{z-index:20;display:flex;flex-direction:column;overflow:hidden;transition:height .2s cubic-bezier(.4,0,.2,1);height:30px;padding-left:18px}
+.bottom-panel{position:relative;z-index:var(--z-bottom-panel);display:flex;flex-direction:column;overflow:hidden;transition:height .2s cubic-bezier(.4,0,.2,1);height:30px;padding-left:18px}
 .bottom-panel.collapsed{overflow:hidden;box-shadow:none;max-height:none}
 .bottom-handle{display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 0;height:30px;flex-shrink:0;gap:0;user-select:none;position:relative}
 .handle-grip{display:flex;align-items:center;position:absolute;left:50%;transform:translateX(-50%);gap:12px;cursor:ns-resize}
@@ -646,6 +651,57 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px) saturate(160%);-webkit-backdrop-filter:blur(6px) saturate(160%);z-index:100;justify-content:center;align-items:center}
 .modal-bg.open{display:flex}
 .modal{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);padding:24px 20px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5);scrollbar-width:none}
+
+/* 导入校验弹窗 */
+.modal.import-verify{max-width:640px;width:86%;max-height:78vh;display:flex;flex-direction:column;padding:20px 20px 14px;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-color:var(--glass-border)}
+.iv-head{margin-bottom:10px;flex-shrink:0}
+.iv-head h2{margin:0 0 6px;font-size:15px;font-weight:700;letter-spacing:-.3px}
+.iv-confidence{font-size:11px;color:var(--t3);font-weight:500;letter-spacing:.5px}
+.iv-reasoning{font-size:12px;color:var(--t2);background:var(--surface2);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px;margin-bottom:10px;line-height:1.55;flex-shrink:0}
+.iv-stats{font-size:11px;color:var(--t3);margin-bottom:8px;flex-shrink:0}
+.iv-list-head{font-size:11px;color:var(--t2);font-weight:600;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.iv-list{flex:1;min-height:0;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r2);padding:4px;background:var(--surface2)}
+.iv-list::-webkit-scrollbar{width:6px}
+.iv-list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:3px}
+.iv-row{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:var(--r1);margin:1px 0;cursor:pointer;transition:background .12s}
+.iv-row:hover{background:var(--surface3,rgba(255,255,255,.05))}
+.iv-row input[type=checkbox]{flex-shrink:0;cursor:pointer;accent-color:var(--accent)}
+.iv-row .iv-num{flex-shrink:0;width:36px;font-size:11px;color:var(--t3);text-align:right;font-variant-numeric:tabular-nums}
+.iv-row .iv-title{flex:1;min-width:0;font-size:13px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.iv-row .iv-meta{flex-shrink:0;font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums}
+.iv-row.suggested .iv-title{color:var(--t1)}
+.iv-foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px;flex-shrink:0;gap:8px}
+.iv-foot .iv-link{background:none;border:none;color:var(--t3);font-size:11px;cursor:pointer;text-decoration:underline;padding:4px 8px}
+.iv-foot .iv-link:hover{color:var(--t2)}
+.iv-foot-right{display:flex;gap:8px}
+.iv-confirm-btn{background:var(--accent);color:var(--on-accent);border:1px solid var(--accent);padding:6px 16px;font-size:12px;font-weight:600;border-radius:var(--r1);cursor:pointer;transition:opacity .12s}
+.iv-confirm-btn:hover{opacity:.85}
+.iv-confirm-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* 目录管理 */
+.modal.chapter-manager{max-width:760px;width:86%;max-height:82vh;display:flex;flex-direction:column;padding:18px 18px 14px;background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-color:var(--glass-border)}
+.cm-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;flex-shrink:0}
+.cm-head h2{margin:0;font-size:15px;font-weight:700;letter-spacing:-.3px}
+.cm-count{font-size:11px;color:var(--t3);font-weight:500;letter-spacing:.5px}
+.cm-list{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:2px 4px 2px 2px;scrollbar-gutter:stable}
+.cm-list::-webkit-scrollbar{width:6px}
+.cm-list::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb,rgba(255,255,255,.1));border-radius:3px}
+.cm-row{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:var(--r1);border:1px solid transparent;transition:border-color .15s,background .15s;margin:1px 0}
+.cm-row:hover{background:var(--surface2);border-color:var(--border)}
+.cm-row.dragging{opacity:.4}
+.cm-row.drag-over-top{border-top-color:var(--accent)}
+.cm-row.drag-over-bottom{border-bottom-color:var(--accent)}
+.cm-handle{flex-shrink:0;width:14px;color:var(--t3);font-size:14px;line-height:1;cursor:grab;user-select:none;text-align:center;letter-spacing:-2px}
+.cm-handle:active{cursor:grabbing}
+.cm-num{flex-shrink:0;width:30px;font-size:11px;color:var(--t3);text-align:right;font-variant-numeric:tabular-nums}
+.cm-title{flex-shrink:0;width:230px;background:transparent;color:var(--t1);border:1px solid transparent;padding:4px 8px;font-size:13px;font-weight:500;border-radius:var(--r1);outline:none;font-family:inherit;transition:border-color .12s,background .12s}
+.cm-title:hover{border-color:var(--border)}
+.cm-title:focus{border-color:var(--accent);background:var(--surface2)}
+.cm-preview{flex:1;min-width:0;font-size:12px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 4px}
+.cm-preview.empty{font-style:italic;color:var(--t3);opacity:.6}
+.cm-del{flex-shrink:0;background:none;border:none;color:var(--t3);font-size:12px;cursor:pointer;padding:4px 8px;border-radius:var(--r1);transition:all .12s}
+.cm-del:hover{color:var(--danger);background:var(--surface2)}
+.cm-empty{padding:40px 0;text-align:center;color:var(--t3);font-size:12px;font-style:italic}
 .modal::-webkit-scrollbar{display:none}
 .modal::-webkit-scrollbar{display:none}
 .modal h2{font-size:16px;font-weight:700;margin-bottom:16px;letter-spacing:-.3px}
@@ -670,6 +726,16 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 .zoom-btn{display:inline-flex;align-items:center;justify-content:center;min-width:28px;padding:6px 10px;background:transparent;color:var(--t-on-surface-muted);border:none;border-radius:var(--r1);cursor:pointer;font-family:var(--font-serif);line-height:1;outline:none}
 .zoom-btn:hover{color:var(--t-on-surface);background:var(--surface3)}
 .zoom-btn.active{color:var(--accent);background:var(--accent-a12);font-weight:700}
+.font-preset-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.font-preset-list{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0;flex:1}
+.font-preset-btn{display:inline-flex;align-items:center;gap:6px;max-width:170px;height:30px;padding:0 10px;border:1px solid var(--border);border-radius:var(--r1);background:transparent;color:var(--t-on-surface-muted);font-size:12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.font-preset-btn:hover{color:var(--t-on-surface);background:var(--surface3)}
+.font-preset-btn.active{color:var(--accent);border-color:var(--accent-a30);background:var(--accent-a12);font-weight:700}
+.font-preset-name{overflow:hidden;text-overflow:ellipsis}
+.font-remove{border:none;background:transparent;color:var(--t3);cursor:pointer;font-size:14px;line-height:1;padding:0 0 1px 2px}
+.font-remove:hover{color:var(--danger)}
+.font-upload-btn{height:30px;padding:0 10px;border:1px solid var(--accent-a25);border-radius:var(--r1);background:var(--accent-a12);color:var(--t-on-surface);font-size:12px;cursor:pointer;white-space:nowrap}
+.font-upload-btn:hover{background:var(--accent-a20)}
 .toggle-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
 .mg .toggle-switch{display:inline-flex}
 .toggle-switch input{display:none}
@@ -860,7 +926,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
       <svg id="tglMoon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       <svg id="tglSun" viewBox="0 0 24 24" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
     </button>
-    <span class="topbar-device" id="topbarDevice" title="当前设备" style="display:none"></span>
     <button class="topbar-btn" id="topbarSettingsBtn" onclick="openSettings()">设置</button>
     </div>
     <div class="win-controls" id="winControls">
@@ -869,14 +934,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
       <button class="wc-close" onclick="electronAPI.close()" title="关闭"><svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10"/><line x1="10" y1="0" x2="0" y2="10"/></svg></button>
     </div>
  </div>
- <div class="device-name-bar" id="deviceNameBar" style="display:none">
-   <span class="dnb-label">设备名称</span>
-   <input class="dnb-input" id="dnbInput" maxlength="50" onkeydown="if(event.key==='Enter')confirmDeviceName()">
-   <button class="dnb-refresh" onclick="refreshDeviceName()" title="换一个名字">&#8635;</button>
-   <button class="dnb-ok" onclick="confirmDeviceName()">确认</button>
-   <button class="dnb-close" onclick="skipDeviceName()">&#10005;</button>
- </div>
-
  <div class="main" id="mainArea">
  <div class="bookshelf-view active" id="bookshelfView">
  <div class="bookshelf-header">
@@ -959,6 +1016,7 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="left-sidebar collapsed" id="leftSidebar">
  <div class="sidebar-search" id="sidebar-search">
           <input id="chSearch" placeholder="搜索..." oninput="filterChapters()">
+          <button class="sidebar-search-action" onclick="openChapterManager()" title="目录管理">目录</button>
  </div>
         <div class="sidebar-footer">
           <button onclick="addChapter()">+ 新建章节</button>
@@ -1108,10 +1166,33 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 <div class="prompt-bg" id="promptBg">
 <div class="prompt-box"><h3 id="promptTitle">输入</h3><input id="promptInput" placeholder=""><div class="prompt-btns"><button class="prompt-cancel" onclick="closePrompt()">取消</button><button class="prompt-ok" onclick="doPromptOk()">确定</button></div></div></div>
 
+<div class="modal-bg" id="importVerifyModal">
+<div class="modal import-verify">
+<div class="iv-head"><h2>导入校验</h2><span class="iv-confidence" id="ivConfidence"></span></div>
+<div class="iv-reasoning" id="ivReasoning"></div>
+<div class="iv-stats" id="ivStats"></div>
+<div class="iv-list-head"><span>AI 建议删除的章节（取消勾选则保留）</span><button class="iv-link" onclick="ivToggleAll()">全选/全不选</button></div>
+<div class="iv-list" id="ivList"></div>
+<div class="iv-foot">
+ <button class="iv-link" onclick="closeModal('importVerifyModal')">忽略，先保留全部</button>
+ <div class="iv-foot-right">
+  <button class="prompt-cancel" onclick="closeModal('importVerifyModal')">取消</button>
+  <button class="iv-confirm-btn" id="ivConfirmBtn" onclick="ivDoDelete()">删除选中</button>
+ </div>
+</div>
+</div></div>
+
+<div class="modal-bg" id="chapterManagerModal">
+<div class="modal chapter-manager">
+<div class="cm-head"><h2>目录管理</h2><span class="cm-count" id="cmCount"></span></div>
+<div class="cm-list" id="cmList"></div>
+<div style="display:flex;justify-content:flex-end;margin-top:8px;flex-shrink:0"><button class="prompt-cancel" onclick="closeModal('chapterManagerModal')">关闭</button></div>
+</div></div>
+
 <div class="modal-bg" id="settingsModal">
 <div class="modal">
 <h2>设置</h2>
-<div class="tab-row"><button class="tab-b active" onclick="switchSTab(this,'stAPI')">提供商</button><button class="tab-b" onclick="switchSTab(this,'stAI')">AI参数</button><button class="tab-b" onclick="switchSTab(this,'stAuto')">自动触发</button><button class="tab-b" onclick="switchSTab(this,'stSearch')">搜索</button><button class="tab-b" onclick="switchSTab(this,'stAppearance')"><span style="color:var(--accent);margin-right:3px">●</span> 外观</button><button class="tab-b" onclick="switchSTab(this,'stNetwork')">网络</button><button class="tab-b" onclick="switchSTab(this,'stSessions')">设备</button></div>
+<div class="tab-row"><button class="tab-b active" onclick="switchSTab(this,'stAPI')">提供商</button><button class="tab-b" onclick="switchSTab(this,'stAppearance')"><span style="color:var(--accent);margin-right:3px">●</span> 外观</button><button class="tab-b" onclick="switchSTab(this,'stNetwork')">网络</button></div>
 <div id="stAPI">
  <div class="local-llm-box" id="localLLMBox">
  <div class="local-llm-title"> 内置模型</div>
@@ -1149,9 +1230,8 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
  <div class="mg" id="ctxLenRow">
   <label>上下文长度（token）<span class="ctx-tip" title="设定模型的上下文窗口大小。Luca 会根据此值自动控制注入的实体数量和笔记长度，确保不超限。不知道的话留空即可。">ⓘ</span></label>
   <div style="display:flex;align-items:center;gap:8px">
-   <input id="sPresetCtxLen" type="number" min="0" step="1" placeholder="如 128000" style="flex:1">
+   <input id="sPresetCtxLen" type="number" min="0" step="1" placeholder="如 128000" style="flex:1" oninput="scheduleContextEstimate()">
    <span id="ctxEstimate" style="font-size:11px;color:var(--t3);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis">-</span>
-   <button class="topbar-btn" style="padding:6px 10px;font-size:11px;white-space:nowrap" onclick="refreshContextEstimate()" title="刷新估算">📊</button>
   </div>
   <p id="ctxWarn" style="font-size:11px;color:var(--warn);display:none;margin-top:2px"></p>
  </div>
@@ -1167,18 +1247,6 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
   </div>
 </div>
 </div>
-<div id="stAI" style="display:none">
-  <div class="mg"><label>温度</label><input id="sTemp" type="number" min="0" max="1" step="0.1" value="0.7"></div>
-</div>
-<div id="stAuto" style="display:none">
-  <div class="mg-toggle"><label>自动建议</label><label class="toggle-switch"><input type="checkbox" id="sAutoC" checked><span class="ts-slider"></span></label></div>
-  <div class="mg"><label>等待时间（秒）</label><input id="sIdle" type="number" min="1" max="60" step="1" value="10"></div>
-  <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">写作时自动调用 Luca 给出建议。强烈建议只使用本地模型。否则可能会用掉很多钱。</p>
-</div>
-<div id="stSearch" style="display:none">
-  <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--accent)">🌐 网络搜索能力</div>
-  <div class="mg-toggle"><label>网络搜索</label><label class="toggle-switch"><input type="checkbox" id="sBrowserEnabled"><span class="ts-slider"></span></label></div>
-</div>
 <div id="stNetwork" style="display:none">
   <div class="mg"><label>访问范围</label><div class="cs-wrap" id="csWrap_sAccessScope"><button class="cs-trigger" type="button" onclick="toggleCS(this)"><span class="cs-label">仅本机 (127.0.0.1)</span><svg class="cs-arrow" viewBox="0 0 10 6"><path d="M0 0l5 6 5-6z"/></svg></button><div class="cs-dropdown"></div><select id="sAccessScope" class="cs-src" style="display:none" onchange="onAccessScopeChange()"><option value="127.0.0.1" selected>仅本机 (127.0.0.1)</option><option value="0.0.0.0">全部 (0.0.0.0)</option></select></div></div>
   <p id="accessScopeNote" style="font-size:11px;color:var(--warn);line-height:1.5;margin-top:4px;display:none">⚠ 更改访问范围后需重启后端才能生效</p>
@@ -1188,17 +1256,12 @@ body.electron .win-controls{display:flex;align-items:stretch;height:44px}
 <div id="stAppearance" style="display:none">
   <p style="font-size:11px;color:var(--accent);line-height:1.5;margin-bottom:12px">● 外观设置即时生效，无需保存</p>
   <div class="mg"><label>编辑器字号</label><div class="zoom-row" id="fontSizeRow"><button class="zoom-btn" data-fs="14" onclick="applyFontSize(14,this)"><span style="font-size:11px">14</span></button><button class="zoom-btn" data-fs="16" onclick="applyFontSize(16,this)"><span style="font-size:12px">16</span></button><button class="zoom-btn" data-fs="18" onclick="applyFontSize(18,this)"><span style="font-size:13px">18</span></button><button class="zoom-btn active" data-fs="20" onclick="applyFontSize(20,this)"><span style="font-size:14px">20</span></button><button class="zoom-btn" data-fs="22" onclick="applyFontSize(22,this)"><span style="font-size:15px">22</span></button><button class="zoom-btn" data-fs="24" onclick="applyFontSize(24,this)"><span style="font-size:16px">24</span></button><button class="zoom-btn" data-fs="28" onclick="applyFontSize(28,this)"><span style="font-size:18px">28</span></button></div><input id="sFontSize" type="hidden" value="20"></div>
+  <div class="mg"><label>编辑器字体</label><div class="font-preset-bar"><div class="font-preset-list" id="editorFontPresetList"></div><button class="font-upload-btn" type="button" onclick="$('editorFontFile').click()">上传字体</button><input id="editorFontFile" type="file" accept=".ttf,.otf,font/ttf,font/otf" style="display:none" onchange="uploadEditorFont(this.files&&this.files[0])"></div><input id="sEditorFontPreset" type="hidden" value=""></div>
+  <div class="mg"><label>编辑器字重</label><div class="zoom-row" id="fontWeightRow"><button class="zoom-btn" data-fw="300" onclick="applyEditorFontWeight(300,this)">细</button><button class="zoom-btn active" data-fw="400" onclick="applyEditorFontWeight(400,this)">常规</button><button class="zoom-btn" data-fw="500" onclick="applyEditorFontWeight(500,this)">中</button><button class="zoom-btn" data-fw="600" onclick="applyEditorFontWeight(600,this)">半粗</button><button class="zoom-btn" data-fw="700" onclick="applyEditorFontWeight(700,this)">粗</button></div><input id="sEditorFontWeight" type="hidden" value="400"></div>
   <div class="mg"><label>界面缩放</label><div class="zoom-row" id="zoomRow"><button class="zoom-btn" data-z="0.75" onclick="applyZoom(0.75,this)"><span style="font-size:12px">永</span></button><button class="zoom-btn" data-z="0.9" onclick="applyZoom(0.9,this)"><span style="font-size:14px">永</span></button><button class="zoom-btn active" data-z="1.0" onclick="applyZoom(1.0,this)"><span style="font-size:16px">永</span></button><button class="zoom-btn" data-z="1.15" onclick="applyZoom(1.15,this)"><span style="font-size:19px">永</span></button><button class="zoom-btn" data-z="1.35" onclick="applyZoom(1.35,this)"><span style="font-size:23px">永</span></button><button class="zoom-btn" data-z="1.6" onclick="applyZoom(1.6,this)"><span style="font-size:28px">永</span></button><button class="zoom-btn" data-z="1.9" onclick="applyZoom(1.9,this)"><span style="font-size:33px">永</span></button></div><input id="sZoom" type="hidden" value="1.0"></div>
-  <div class="mg"><label>LUCA对话快捷键</label><div class="cs-wrap" id="csWrap_sShortcut"><button class="cs-trigger" type="button" onclick="toggleCS(this)"><span class="cs-label">无</span><svg class="cs-arrow" viewBox="0 0 10 6"><path d="M0 0l5 6 5-6z"/></svg></button><div class="cs-dropdown"></div><select id="sShortcut" class="cs-src" style="display:none"><option value="none">无</option><option value="minus">- 键</option><option value="backslash">\ 键</option><option value="alt">Alt</option></select></div></div>
+  <div class="mg"><label>LUCA对话快捷键</label><div class="cs-wrap" id="csWrap_sShortcut"><button class="cs-trigger" type="button" onclick="toggleCS(this)"><span class="cs-label">无</span><svg class="cs-arrow" viewBox="0 0 10 6"><path d="M0 0l5 6 5-6z"/></svg></button><div class="cs-dropdown"></div><select id="sShortcut" class="cs-src" style="display:none"><option value="none">无</option><option value="minus">- 键</option><option value="backslash">\ 键</option><option value="alt">Alt</option><option value="meta">Command</option></select></div></div>
   <div class="mg-toggle"><label>主题色</label><div style="display:flex;align-items:center;gap:8px"><input id="sThemeAccent" type="text" maxlength="7" placeholder="#E8CC7A" style="width:120px;background:var(--surface3);border:1px solid var(--border);color:var(--t1);padding:6px 10px;border-radius:var(--r1);font-family:var(--font-mono);font-size:14px" oninput="onThemeAccentInput(this.value)"><div id="themeColorPreview" style="width:32px;height:32px;border-radius:50%;border:2px solid var(--border);flex-shrink:0;background:#E8CC7A"></div></div></div>
   <p style="font-size:11px;color:var(--t3);line-height:1.5;margin-top:4px">可使用 Ctrl + +/- 或 Ctrl + 0 快速调整缩放。</p>
-</div>
-<div id="stSessions" style="display:none">
-  <p style="font-size:11px;color:var(--accent);line-height:1.5;margin-bottom:12px">● 活跃的登录设备</p>
-  <div id="sessionsList" style="display:flex;flex-direction:column;gap:8px">
-    <p style="font-size:12px;color:var(--t3);text-align:center;padding:20px">加载中...</p>
-  </div>
-  <button class="topbar-btn" onclick="revokeAllSessions()" style="margin-top:12px;color:var(--danger);font-size:12px">退出所有其他设备</button>
 </div>
 <div class="ma">
   <button class="prompt-ok" onclick="saveSettings()">保存</button>
@@ -1585,11 +1648,23 @@ function _maybeAddLucaFocusNotice(){
  if(!text)return;
  var messages=_activeLucaMessages();
  if(!messages)return;
- var lastNotice=_latestFocusNoticeText(messages);
- if(_lastLucaFocusText===text||lastNotice===text){
+ // 末尾连续 focus_notice 视为一个"焦点块"。如果末尾的焦点块已经包含当前 text，无需更新；
+ // 否则把末尾连续的 focus_notice 全部替换成单条新 text，避免聊天里堆一串"当前焦点"。
+ var endHasSame=false;
+ var removeFrom=messages.length;
+ for(var i=messages.length-1;i>=0;i--){
+  var m=messages[i];
+  if(m&&m.type==='system'&&m.subtype==='focus_notice'){
+   if((m.text||'')===text)endHasSame=true;
+   removeFrom=i;
+  }else break;
+ }
+ if(endHasSame&&removeFrom===messages.length-1){
+  // 末尾恰好就是同 text 的单条 notice，不动
   _lastLucaFocusText=text;
   return;
  }
+ if(removeFrom<messages.length){messages.splice(removeFrom,messages.length-removeFrom)}
  messages.push({type:'system',subtype:'focus_notice',text:text});
  _lastLucaFocusText=text;
  _renderAndSaveActiveLucaMessages();
@@ -1658,7 +1733,7 @@ function setWritingViewActive(on){
  }
 }
 
-function init(){initAllCS();loadSettings();loadThemedIcon();_startAIActivity();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
+function init(){initAllCS();loadSettings();loadThemedIcon();_startAIActivity();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();window.addEventListener('resize',scheduleChapterSidebarWidthSync);document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
 
 function setupModals(){
  document.querySelectorAll('.modal-bg,.confirm-bg,.prompt-bg').forEach(function(bg){
@@ -1933,9 +2008,40 @@ function renderChapterList(){
  div.innerHTML='<span class="ch-dot"></span><span class="ch-meta"><span class="ch-wc">'+(ch.content?ch.content.length:'0')+'</span><button class="ch-del" onclick="event.stopPropagation();delChapter(\''+esc(ch.id)+'\')" title="删除">&#10005;</button></span><span class="ch-title">'+esc(ch.title||'未命名')+'</span>';
  div.onclick=function(){selectChapter(ch.id)};list.appendChild(div);
  });
+ scheduleChapterSidebarWidthSync();
 }
 
 function filterChapters(){renderChapterList()}
+
+function scheduleChapterSidebarWidthSync(){
+ requestAnimationFrame(syncChapterSidebarWidth);
+ setTimeout(syncChapterSidebarWidth,80);
+}
+
+function syncChapterSidebarWidth(){
+ var sidebar=$('leftSidebar'),list=$('chapterList');
+ if(!sidebar||!list||list.style.display==='none')return;
+ var items=Array.prototype.slice.call(list.querySelectorAll('.ch-item'));
+ if(!items.length){
+  sidebar.style.width='180px';
+  sidebar.style.setProperty('--chapter-sidebar-glass-solid','142px');
+  return;
+ }
+ var sidebarRect=sidebar.getBoundingClientRect();
+ var maxTitleEnd=0;
+ items.forEach(function(item){
+  var title=item.querySelector('.ch-title');
+  if(!title)return;
+  var r=title.getBoundingClientRect();
+  var titleW=Math.max(title.scrollWidth||0,r.width||0);
+  var titleEnd=(r.left-sidebarRect.left)+titleW;
+  if(titleEnd>maxTitleEnd)maxTitleEnd=titleEnd;
+ });
+ var target=Math.ceil(Math.max(180,Math.min(320,maxTitleEnd+36)));
+ var solid=Math.ceil(Math.max(120,Math.min(target-18,maxTitleEnd+10)));
+ sidebar.style.width=target+'px';
+ sidebar.style.setProperty('--chapter-sidebar-glass-solid',solid+'px');
+}
 
 function topbarBack(){
  if(seriesId&&!bookId){closeSeriesView();return}
@@ -2026,7 +2132,7 @@ function loadChapterData(ch){
 
 function addChapter(){var id='ch_'+Date.now();var title='新章节';api('POST','/api/book/'+bookId+'/chapter',{id:id,title:title,content:''},function(d,s){if(s===200){_focusTitleAfterLoad=true;loadChapters();selectChapter(id)}else{toast('创建章节失败','error')}})}
 
-function delChapter(id){showConfirm('删除','移到回收站？',function(){api('POST','/api/book/'+bookId+'/delete',{id:id},function(){if(chapterId===id){chapterId=null;currentChapter=null;$('chTitleInput').value='';$('editorArea').value='';$('wordCount').textContent='0';$('saveIndicator').className='save-indicator';updateBreadcrumb();saveAppState()}loadChapters()})},true)}
+function delChapter(id){api('POST','/api/book/'+bookId+'/delete',{id:id},function(){if(chapterId===id){chapterId=null;currentChapter=null;$('chTitleInput').value='';$('editorArea').value='';$('wordCount').textContent='0';$('saveIndicator').className='save-indicator';updateBreadcrumb();saveAppState()}loadChapters()})}
 
 function doSaveNow(cb){
  if(!bookId||!chapterId||!currentChapter){if(cb)cb();return}
@@ -2768,10 +2874,333 @@ function toggleTrash(){
  else{btn.textContent='回收站';btn.classList.remove('open');trashEl.classList.remove('open')}
 }
 
-function restoreChapter(id){api('POST','/api/book/'+bookId+'/restore',{id:id},function(){toggleTrash();toggleTrash()})}
+function restoreChapter(id){api('POST','/api/book/'+bookId+'/restore',{id:id},function(){toggleTrash();toggleTrash();loadChapters()})}
+
+/* ---------- 导入校验 ---------- */
+var _ivData=null; // {broken_confidence, reasoning, suspicious_chapter_ids, summary, chapters_snapshot}
+var _ivPollTimer=null;
+
+function startImportVerify(bid){
+ if(!bid)return;
+ api('POST','/api/book/'+bid+'/import-verify',{},function(d,s){
+  if(s!==200||!d.task_id){return}
+  _ivPollVerify(bid,d.task_id,0);
+ });
+}
+function _ivPollVerify(bid,tid,tries){
+ if(_ivPollTimer){clearTimeout(_ivPollTimer);_ivPollTimer=null}
+ if(tries>40)return; // 最多 ~80s
+ _ivPollTimer=setTimeout(function(){
+  api('GET','/api/book/'+bid+'/task/status?task_id='+encodeURIComponent(tid),undefined,function(d,s){
+   if(s!==200||!d){return}
+   if(d.status==='running'){_ivPollVerify(bid,tid,tries+1);return}
+   if(d.status==='error'){return}
+   var r=d.result;if(!r)return;
+   try{var parsed=typeof r==='string'?JSON.parse(r):r}catch(_){return}
+   var conf=parseFloat(parsed.broken_confidence||0);
+   if(!(conf>=0.6))return; // 静默通过
+   var sus=parsed.suspicious_chapter_ids||[];
+   if(!sus.length&&conf<0.8)return; // 没建议删的章节，且置信度不算极高，也静默
+   // 只在还停留在这本书时弹
+   if(bookId!==bid)return;
+   _ivOpen(parsed);
+  });
+ },2000);
+}
+function _ivOpen(data){
+ _ivData=data;
+ var conf=Math.round((data.broken_confidence||0)*100);
+ $('ivConfidence').textContent='问题置信度 '+conf+'%';
+ $('ivReasoning').textContent=data.reasoning||'AI 认为这本书的目录可能没有正确导入。';
+ var sm=data.summary||{};
+ $('ivStats').textContent='共 '+(sm.total_chapters||0)+' 章 · 总 '+(sm.total_chars||0)+' 字 · 短章节 '+(sm.short_chapters_count||0)+' · fallback 命名 '+(sm.fallback_titled_count||0);
+ var sus=(data.suspicious_chapter_ids||[]).slice();
+ var susSet={};sus.forEach(function(id){susSet[id]=true});
+ var rows=(allChapters||[]).slice().sort(function(a,b){return (chapterOrder.indexOf(a.id))-(chapterOrder.indexOf(b.id))});
+ var html='';
+ rows.forEach(function(ch){
+  var idx=chapterOrder.indexOf(ch.id);
+  var sug=!!susSet[ch.id];
+  var len=(ch.content||'').length;
+  html+='<label class="iv-row'+(sug?' suggested':'')+'">'
+   +'<input type="checkbox" data-id="'+esc(ch.id)+'" '+(sug?'checked':'')+'>'
+   +'<span class="iv-num">'+(idx>=0?(idx+1):'?')+'</span>'
+   +'<span class="iv-title">'+esc(ch.title||'未命名')+'</span>'
+   +'<span class="iv-meta">'+len+' 字</span>'
+   +'</label>';
+ });
+ $('ivList').innerHTML=html||'<div style="padding:20px;text-align:center;color:var(--t3);font-size:12px">没有章节</div>';
+ _ivUpdateBtn();
+ $('ivList').querySelectorAll('input[type=checkbox]').forEach(function(cb){
+  cb.addEventListener('change',_ivUpdateBtn);
+ });
+ openModal('importVerifyModal');
+}
+function _ivUpdateBtn(){
+ var n=$('ivList').querySelectorAll('input[type=checkbox]:checked').length;
+ var btn=$('ivConfirmBtn');
+ btn.textContent='删除选中 ('+n+')';
+ btn.disabled=(n===0);
+}
+function ivToggleAll(){
+ var boxes=$('ivList').querySelectorAll('input[type=checkbox]');
+ var anyUnchecked=Array.prototype.some.call(boxes,function(cb){return !cb.checked});
+ boxes.forEach(function(cb){cb.checked=anyUnchecked});
+ _ivUpdateBtn();
+}
+function ivDoDelete(){
+ var ids=Array.prototype.map.call($('ivList').querySelectorAll('input[type=checkbox]:checked'),function(cb){return cb.getAttribute('data-id')});
+ if(!ids.length)return;
+ var btn=$('ivConfirmBtn');btn.disabled=true;btn.textContent='删除中...';
+ var done=0,failed=0;
+ function next(){
+  if(done+failed>=ids.length){
+   closeModal('importVerifyModal');
+   loadChapters();
+   if(failed)toast('已删除 '+done+' 章，'+failed+' 章失败','error');
+   else toast('已删除 '+done+' 章','success');
+   return;
+  }
+  var id=ids[done+failed];
+  api('POST','/api/book/'+bookId+'/delete',{id:id},function(d,s){
+   if(s===200)done++;else failed++;
+   next();
+  });
+ }
+ next();
+}
+
+/* ---------- 目录管理 ---------- */
+var _cmDragId=null;
+function openChapterManager(){
+ if(!bookId)return;
+ renderChapterManager();
+ openModal('chapterManagerModal');
+}
+function _cmPreview(s){s=String(s||'').replace(/\s+/g,' ').trim();return s.length>120?s.slice(0,120):s}
+function renderChapterManager(){
+ var list=$('cmList'),cnt=$('cmCount');
+ if(!list)return;
+ var order=chapterOrder||[];
+ var byId={};(allChapters||[]).forEach(function(c){byId[c.id]=c});
+ var rows=order.map(function(id){return byId[id]}).filter(Boolean);
+ cnt.textContent='共 '+rows.length+' 章';
+ if(!rows.length){list.innerHTML='<div class="cm-empty">还没有章节</div>';return}
+ var html='';
+ rows.forEach(function(ch,i){
+  var prev=_cmPreview(ch.content);
+  var prevHtml=prev?esc(prev):'<span class="cm-preview empty">（空）</span>';
+  html+='<div class="cm-row" draggable="true" data-id="'+esc(ch.id)+'">'
+   +'<span class="cm-handle" title="拖动排序">⋮⋮</span>'
+   +'<span class="cm-num">'+(i+1)+'</span>'
+   +'<input class="cm-title" type="text" value="'+esc(ch.title||'')+'" data-id="'+esc(ch.id)+'" data-orig="'+esc(ch.title||'')+'" spellcheck="false">'
+   +(prev?'<span class="cm-preview">'+esc(prev)+'</span>':'<span class="cm-preview empty">（空）</span>')
+   +'<button class="cm-del" data-id="'+esc(ch.id)+'" title="删除（放入回收站）">删</button>'
+   +'</div>';
+ });
+ list.innerHTML=html;
+ _cmBindRows();
+}
+function _cmBindRows(){
+ var list=$('cmList');if(!list)return;
+ list.querySelectorAll('.cm-row').forEach(function(row){
+  row.addEventListener('dragstart',_cmDragStart);
+  row.addEventListener('dragend',_cmDragEnd);
+  row.addEventListener('dragover',_cmDragOver);
+  row.addEventListener('dragleave',_cmDragLeave);
+  row.addEventListener('drop',_cmDrop);
+ });
+ list.querySelectorAll('.cm-title').forEach(function(inp){
+  inp.addEventListener('blur',_cmRenameCommit);
+  inp.addEventListener('keydown',function(e){
+   if(e.key==='Enter'){e.preventDefault();inp.blur()}
+   else if(e.key==='Escape'){inp.value=inp.getAttribute('data-orig')||'';inp.blur()}
+  });
+  inp.addEventListener('mousedown',function(e){e.stopPropagation()});
+ });
+ list.querySelectorAll('.cm-del').forEach(function(btn){
+  btn.addEventListener('click',function(){_cmDelete(btn.getAttribute('data-id'))});
+ });
+}
+function _cmDragStart(e){
+ _cmDragId=this.getAttribute('data-id');
+ this.classList.add('dragging');
+ try{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',_cmDragId)}catch(_){}
+}
+function _cmDragEnd(){
+ this.classList.remove('dragging');
+ $('cmList').querySelectorAll('.cm-row').forEach(function(r){r.classList.remove('drag-over-top','drag-over-bottom')});
+ _cmDragId=null;
+}
+function _cmDragOver(e){
+ if(!_cmDragId||this.getAttribute('data-id')===_cmDragId)return;
+ e.preventDefault();
+ try{e.dataTransfer.dropEffect='move'}catch(_){}
+ var r=this.getBoundingClientRect();
+ var top=(e.clientY-r.top)<r.height/2;
+ this.classList.toggle('drag-over-top',top);
+ this.classList.toggle('drag-over-bottom',!top);
+}
+function _cmDragLeave(){this.classList.remove('drag-over-top','drag-over-bottom')}
+function _cmDrop(e){
+ e.preventDefault();
+ var targetId=this.getAttribute('data-id');
+ var dragId=_cmDragId;
+ var top=this.classList.contains('drag-over-top');
+ this.classList.remove('drag-over-top','drag-over-bottom');
+ if(!dragId||dragId===targetId)return;
+ var order=(chapterOrder||[]).slice();
+ var from=order.indexOf(dragId);
+ if(from<0)return;
+ order.splice(from,1);
+ var to=order.indexOf(targetId);
+ if(to<0){order.push(dragId)}
+ else{order.splice(top?to:to+1,0,dragId)}
+ chapterOrder=order;
+ renderChapterManager();
+ api('POST','/api/book/'+bookId+'/reorder',{order:order},function(d,s){
+  if(s!==200){toast('排序保存失败','error');loadChapters();return}
+  renderChapterList();
+ });
+}
+function _cmRenameCommit(){
+ var inp=this;
+ var id=inp.getAttribute('data-id');
+ var orig=inp.getAttribute('data-orig')||'';
+ var v=inp.value.trim();
+ if(v===orig)return;
+ if(!v){inp.value=orig;return}
+ api('POST','/api/book/'+bookId+'/rename',{id:id,title:v},function(d,s){
+  if(s!==200){toast('重命名失败','error');inp.value=orig;return}
+  inp.setAttribute('data-orig',v);
+  var ch=(allChapters||[]).find(function(c){return c.id===id});
+  if(ch)ch.title=v;
+  if(currentChapter&&currentChapter.id===id){currentChapter.title=v;$('chTitleInput').value=v}
+  renderChapterList();
+  updateBreadcrumb();
+ });
+}
+function _cmDelete(id){
+ if(!id)return;
+ api('POST','/api/book/'+bookId+'/delete',{id:id},function(d,s){
+  if(s!==200){toast('删除失败','error');return}
+  chapterOrder=(chapterOrder||[]).filter(function(x){return x!==id});
+  allChapters=(allChapters||[]).filter(function(c){return c.id!==id});
+  if(chapterId===id){
+   chapterId=null;currentChapter=null;
+   $('chTitleInput').value='';$('editorArea').value='';
+   $('wordCount').textContent='0';$('saveIndicator').className='save-indicator';
+   updateBreadcrumb();saveAppState();
+  }
+  renderChapterManager();
+  renderChapterList();
+ });
+}
 
 var providerPresets=[];
 var currentPresetIdx=0;
+var editorFontPresets=[];
+var _currentEditorFontPresetId='';
+var _editorFontSaveTimer=null;
+
+function _editorFontCssString(v){return String(v||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"')}
+function _editorFontUrl(v){return String(v||'').replace(/"/g,'%22').replace(/'/g,'%27')}
+function _getEditorFontPreset(id){return editorFontPresets.find(function(p){return p&&p.id===id})||null}
+
+function _normalizeEditorFontPresets(list){
+ if(!Array.isArray(list))return[];
+ return list.filter(function(p){return p&&p.id&&p.family&&p.url}).map(function(p){
+  return {id:String(p.id),name:String(p.name||'Custom Font'),file:String(p.file||''),family:String(p.family),url:String(p.url),format:String(p.format||'truetype')};
+ });
+}
+
+function renderEditorFontFaces(){
+ var style=$('editorFontFaces');
+ if(!style){
+  style=document.createElement('style');
+  style.id='editorFontFaces';
+  document.head.appendChild(style);
+ }
+ style.textContent=editorFontPresets.map(function(p){
+  var fmt=(p.format==='opentype')?'opentype':'truetype';
+  return '@font-face{font-family:"'+_editorFontCssString(p.family)+'";font-style:normal;font-weight:100 900;font-display:swap;src:url("'+_editorFontUrl(p.url)+'") format("'+fmt+'")}';
+ }).join('\n');
+}
+
+function renderEditorFontPresetList(){
+ var list=$('editorFontPresetList');
+ if(!list)return;
+ var html='<button class="font-preset-btn" type="button" data-font-id="" onclick="applyEditorFontPreset(\'\')"><span class="font-preset-name">系统默认</span></button>';
+ editorFontPresets.forEach(function(p){
+  html+='<button class="font-preset-btn" type="button" data-font-id="'+esc(p.id)+'" onclick="applyEditorFontPreset(\''+esc(p.id)+'\')"><span class="font-preset-name">'+esc(p.name||'Custom Font')+'</span><span class="font-remove" onclick="event.stopPropagation();deleteEditorFont(\''+esc(p.id)+'\')" title="删除">×</span></button>';
+ });
+ list.innerHTML=html;
+ list.querySelectorAll('.font-preset-btn').forEach(function(btn){
+  btn.classList.toggle('active',(btn.getAttribute('data-font-id')||'')===_currentEditorFontPresetId);
+ });
+ var hidden=$('sEditorFontPreset');if(hidden)hidden.value=_currentEditorFontPresetId;
+}
+
+function applyEditorFontPreset(id,persist){
+ id=id||'';
+ if(id&&!_getEditorFontPreset(id))id='';
+ _currentEditorFontPresetId=id;
+ settings.editor_font_preset_id=id;
+ var preset=_getEditorFontPreset(id);
+ var family=preset?('"'+_editorFontCssString(preset.family)+'", var(--font-sans)'):'var(--font-sans)';
+ document.documentElement.style.setProperty('--editor-font-family',family);
+ renderEditorFontPresetList();
+ if(persist!==false){
+  clearTimeout(_editorFontSaveTimer);
+  _editorFontSaveTimer=setTimeout(function(){
+   api('POST','/api/settings',{editor_font_preset_id:id,editor_font_presets:editorFontPresets},function(r,s){
+    if(s===200){settings=r;editorFontPresets=_normalizeEditorFontPresets(r.editor_font_presets||[]);_currentEditorFontPresetId=r.editor_font_preset_id||'';renderEditorFontFaces();applyEditorFontPreset(_currentEditorFontPresetId,false)}
+   });
+  },250);
+ }
+}
+
+function uploadEditorFont(file){
+ var input=$('editorFontFile');
+ if(!file){if(input)input.value='';return}
+ var ext=(file.name.split('.').pop()||'').toLowerCase();
+ if(ext!=='ttf'&&ext!=='otf'){toast('只支持 .ttf / .otf 字体','error');if(input)input.value='';return}
+ if(file.size>30*1024*1024){toast('字体文件超过 30MB','error');if(input)input.value='';return}
+ var reader=new FileReader();
+ reader.onload=function(){
+  api('POST','/api/editor-fonts',{filename:file.name,data:reader.result},function(r,s){
+   if(input)input.value='';
+   if(s===200&&r.settings){
+    settings=r.settings;
+    editorFontPresets=_normalizeEditorFontPresets(settings.editor_font_presets||[]);
+    _currentEditorFontPresetId=settings.editor_font_preset_id||'';
+    renderEditorFontFaces();
+    applyEditorFontPreset(_currentEditorFontPresetId,false);
+    toast('字体已添加','success');
+   }else{
+    toast((r&&r.error)||'字体上传失败','error');
+   }
+  });
+ };
+ reader.onerror=function(){if(input)input.value='';toast('字体读取失败','error')};
+ reader.readAsDataURL(file);
+}
+
+function deleteEditorFont(id){
+ if(!id)return;
+ api('POST','/api/editor-fonts/delete',{id:id},function(r,s){
+  if(s===200&&r.settings){
+   settings=r.settings;
+   editorFontPresets=_normalizeEditorFontPresets(settings.editor_font_presets||[]);
+   _currentEditorFontPresetId=settings.editor_font_preset_id||'';
+   renderEditorFontFaces();
+   applyEditorFontPreset(_currentEditorFontPresetId,false);
+   toast('字体已删除','success');
+  }else{
+   toast((r&&r.error)||'字体删除失败','error');
+  }
+ });
+}
 
 function loadSettings(){api('GET','/api/settings',undefined,function(d,s){if(s===200){settings=d;providerPresets=d.provider_presets||[];currentPresetIdx=d.active_provider_idx||0;applySettings();applyZoom(parseFloat(settings.ui_scale)||1.0)}})}
 
@@ -2782,6 +3211,12 @@ function applySettings(){
  var fs=parseInt(settings.content_font_size)||20;
  _currentFontSize=fs;
  document.documentElement.style.setProperty('--editor-font-size',fs+'px');
+ _currentEditorFontWeight=parseInt(settings.editor_font_weight)||400;
+ document.documentElement.style.setProperty('--editor-font-weight',String(_currentEditorFontWeight));
+ editorFontPresets=_normalizeEditorFontPresets(settings.editor_font_presets||[]);
+ _currentEditorFontPresetId=settings.editor_font_preset_id||'';
+ renderEditorFontFaces();
+ applyEditorFontPreset(_currentEditorFontPresetId,false);
  // 首次使用且跟随系统时，保存
  if(!settings.theme_mode){ settings.theme_mode=mode; saveSettings(); }
  // 检查主题色明暗，若主题色为暗色并且当前为深色模式，则提示切换浅色模式
@@ -2798,8 +3233,8 @@ function applySettings(){
  // 加载当前预设到表单
  loadPresetToForm(currentPresetIdx);
  renderProviderSlider();
- // 恢复浏览器控制设置
- var be=$('sBrowserEnabled');if(be)be.checked=!!settings.browser_enabled;
+ settings.ai_auto_comment=true;
+ settings.browser_enabled=true;
 }
 
 var _currentThemeAccent='#E8CC7A';
@@ -2904,16 +3339,17 @@ function openSettings(){
  loadPresetToForm(currentPresetIdx);
  refreshLocalLLMProgress();
  refreshContextEstimate();
- $('sTemp').value=settings.ai_temperature||0.7;
-  var ctxEl=$('sCtxLen');if(ctxEl)ctxEl.value=settings.model_context_length||0;
-  $('sAutoC').checked=(settings.ai_auto_comment!==false);
-  var idleEl=$('sIdle');if(idleEl)idleEl.value=settings.ai_idle_seconds||10;
   // zoom state is managed by _currentZoom, not re-read from settings
   $('sZoom').value=_currentZoom;
   applyZoom(_currentZoom);
   // font size state
   $('sFontSize').value=_currentFontSize;
   applyFontSize(_currentFontSize);
+  applyEditorFontWeight(_currentEditorFontWeight,null,false);
+  editorFontPresets=_normalizeEditorFontPresets(settings.editor_font_presets||[]);
+  _currentEditorFontPresetId=settings.editor_font_preset_id||'';
+  renderEditorFontFaces();
+  applyEditorFontPreset(_currentEditorFontPresetId,false);
   var scEl=$('sShortcut');if(scEl)scEl.value=settings.shortcut_focus_ai||'none';
   syncCSById('sShortcut');
   var spEl=$('sSearchProvider');if(spEl)spEl.value=settings.search_provider||'duckduckgo';
@@ -3276,6 +3712,8 @@ function toggleCustomJson(){
 
 var _currentFontSize=20;
 var _fontSizeSaveTimer=null;
+var _currentEditorFontWeight=400;
+var _fontWeightSaveTimer=null;
 function applyFontSize(fs,btn){
  if(isNaN(fs)||fs<10)fs=10;if(fs>40)fs=40;
  fs=Math.round(fs);
@@ -3293,8 +3731,31 @@ function applyFontSize(fs,btn){
  if(btn)btn.blur();
  clearTimeout(_fontSizeSaveTimer);
  _fontSizeSaveTimer=setTimeout(function(){
-  api('POST','/api/settings',{content_font_size:fs},function(r,s){if(s===200)settings=r});
+ api('POST','/api/settings',{content_font_size:fs},function(r,s){if(s===200)settings=r});
  },300);
+}
+
+function applyEditorFontWeight(weight,btn,persist){
+ weight=parseInt(weight)||400;
+ weight=Math.max(100,Math.min(900,Math.round(weight/100)*100));
+ _currentEditorFontWeight=weight;
+ settings.editor_font_weight=weight;
+ var hidden=$('sEditorFontWeight');if(hidden)hidden.value=weight;
+ document.documentElement.style.setProperty('--editor-font-weight',String(weight));
+ document.querySelectorAll('#fontWeightRow .zoom-btn').forEach(function(b){b.classList.remove('active')});
+ var best=null,bestDiff=Infinity;
+ document.querySelectorAll('#fontWeightRow .zoom-btn').forEach(function(b){
+  var fw=parseInt(b.getAttribute('data-fw'));
+  if(Math.abs(fw-weight)<bestDiff){bestDiff=Math.abs(fw-weight);best=b;}
+ });
+ if(best)best.classList.add('active');
+ if(btn)btn.blur();
+ if(persist!==false){
+  clearTimeout(_fontWeightSaveTimer);
+  _fontWeightSaveTimer=setTimeout(function(){
+   api('POST','/api/settings',{editor_font_weight:weight},function(r,s){if(s===200)settings=r});
+  },300);
+ }
 }
 
 var _currentZoom=1.0;
@@ -3306,9 +3767,9 @@ function applyZoom(z,btn){
  settings.ui_scale=z;
  $('sZoom').value=z;
  document.documentElement.style.zoom=z;
- document.querySelectorAll('.zoom-btn').forEach(function(b){b.classList.remove('active')});
+ document.querySelectorAll('#zoomRow .zoom-btn').forEach(function(b){b.classList.remove('active')});
  var best=null,bestDiff=Infinity;
- document.querySelectorAll('.zoom-btn').forEach(function(b){
+ document.querySelectorAll('#zoomRow .zoom-btn').forEach(function(b){
   var bz=parseFloat(b.getAttribute('data-z'));
   if(Math.abs(bz-z)<bestDiff){bestDiff=Math.abs(bz-z);best=b;}
  });
@@ -3321,7 +3782,7 @@ function applyZoom(z,btn){
  },300);
 }
 
-function switchSTab(btn,id){btn.parentElement.querySelectorAll('.tab-b').forEach(function(b){b.classList.remove('active')});btn.classList.add('active');btn.closest('.modal').querySelectorAll('[id^="st"]').forEach(function(t){t.style.display='none'});$(id).style.display='block';if(id==='stSessions')loadSessions()}
+function switchSTab(btn,id){btn.parentElement.querySelectorAll('.tab-b').forEach(function(b){b.classList.remove('active')});btn.classList.add('active');btn.closest('.modal').querySelectorAll('[id^="st"]').forEach(function(t){t.style.display='none'});$(id).style.display='block'}
 
 function saveSettings(){
  saveFormToPreset(currentPresetIdx);
@@ -3330,19 +3791,22 @@ function saveSettings(){
  var d={
  provider_presets:providerPresets,
  active_provider_idx:currentPresetIdx,
- ai_auto_comment:$('sAutoC').checked,
-  ai_idle_seconds:parseInt($('sIdle')?$('sIdle').value:'10')||10,
-  ai_temperature:parseFloat($('sTemp').value)||0.7,
-   model_context_length:parseInt($('sCtxLen')?$('sCtxLen').value:'0')||0,
+ ai_auto_comment:true,
+  ai_idle_seconds:parseInt(settings.ai_idle_seconds||'10')||10,
+  ai_temperature:null,
+   model_context_length:parseInt($('sPresetCtxLen')?$('sPresetCtxLen').value:'0')||0,
     shortcut_focus_ai:$('sShortcut')?$('sShortcut').value:'none',
-    search_provider:$('sSearchProvider')?$('sSearchProvider').value:'duckduckgo',
-    search_api_key:$('sSearchKey')?$('sSearchKey').value:'',
+    search_provider:$('sSearchProvider')?$('sSearchProvider').value:(settings.search_provider||'duckduckgo'),
+    search_api_key:$('sSearchKey')?$('sSearchKey').value:(settings.search_api_key||''),
     access_scope:newScope,
     keep_background:$('sKeepBackground')?$('sKeepBackground').checked:false,
     theme_accent:_currentThemeAccent,
     theme_mode:settings.theme_mode||'dark',
-    browser_enabled:$('sBrowserEnabled')?$('sBrowserEnabled').checked:false,
-    content_font_size:_currentFontSize
+    browser_enabled:true,
+    content_font_size:_currentFontSize,
+    editor_font_weight:_currentEditorFontWeight,
+    editor_font_preset_id:_currentEditorFontPresetId,
+    editor_font_presets:editorFontPresets
    };
   // 同时保存当前激活 preset 的字段到顶层，确保向后兼容
  var active=providerPresets[currentPresetIdx];
@@ -3438,6 +3902,12 @@ function initAllCS(){document.querySelectorAll('.cs-wrap').forEach(function(w){s
 
 function fetchModels(){var btn=$('fetchBtn');var prevModel=$('sModel').value;var url=$('sUrl').value;if(!url){toast('请先填写 API URL','warn');return}btn.innerHTML='<span class="sp"></span>获取中';btn.disabled=true;api('POST','/api/fetch-models',{base_url:url,api_key:$('sKey').value},function(d,s){btn.disabled=false;btn.textContent='获取';console.log('fetchModels response:',s,d);if(s===200&&d&&Array.isArray(d.models)){if(d.models.length>0){var opts='<option value="">选择模型</option>';d.models.forEach(function(m){var sel=m===prevModel?' selected':'';opts+='<option value="'+esc(m)+'"'+sel+'>'+esc(m)+'</option>';});$('sModel').innerHTML=opts;syncCSById('sModel');toast('获取到 '+d.models.length+' 个模型','success');}else{toast('未获取到模型，请检查 API URL','warn');}}else if(s===401){toast('请先登录','error');}else{toast('错误: '+(d&&d.error?d.error:'HTTP '+s),'error');}})}
 
+var _ctxEstimateTimer=null;
+function scheduleContextEstimate(){
+ clearTimeout(_ctxEstimateTimer);
+ _ctxEstimateTimer=setTimeout(refreshContextEstimate,300);
+}
+
 function refreshContextEstimate(){
  if(!bookId)return;
  var estEl=$('ctxEstimate');
@@ -3448,30 +3918,28 @@ function refreshContextEstimate(){
   if(s!==200||!d){if(estEl)estEl.textContent='-';return}
   var ctxVal=parseInt($('sPresetCtxLen')?$('sPresetCtxLen').value:'0')||0;
   if(!ctxVal)ctxVal=d.model_context||0;
-  var total=d.total_estimated||0;
+  var need=d.min_context_required||d.total_estimated||0;
   var ctxTok=d.context_tokens||0;
   var chTok=d.chapter_tokens||0;
-  var histTok=d.history_tokens||0;
-  var entCount=d.entity_count||0;
-
-  var info='';
-  if(entCount>0)info+='实体:'+entCount+' | ';
-  info+='上下文:'+formatSizeNum(ctxTok);
-  if(chTok>0)info+=' | 章节:'+formatSizeNum(chTok);
-  if(histTok>0)info+=' | 历史:'+formatSizeNum(histTok);
-  if(estEl)estEl.textContent=info;
-
-  if(warnEl&&ctxVal>0&&total>ctxVal){
+  var outTok=d.output_reserve_tokens||0;
+  var info='本书至少 '+formatSizeNum(need);
+  if(ctxVal>0)info+=' / 当前 '+formatSizeNum(ctxVal);
+  if(estEl){
+   estEl.textContent=info;
+   estEl.title='全书资料 '+formatSizeNum(ctxTok)+'，最长章节 '+formatSizeNum(chTok)+'，生成余量 '+formatSizeNum(outTok);
+  }
+  if(warnEl&&ctxVal>0&&need>ctxVal){
    warnEl.style.display='block';
-   warnEl.textContent='⚠ 预估 '+formatSizeNum(total)+'/'+formatSizeNum(ctxVal)+' 超限，将自动精简上下文';
+   warnEl.textContent='当前模型上下文偏小。建议至少 '+formatSizeNum(need)+'，已包含生成余量和安全垫。';
   }else if(warnEl){
    warnEl.style.display='none';
   }
  });
 }
 function formatSizeNum(n){
- if(n>=10000)return Math.round(n/10000)+'万';
- if(n>=1000)return Math.round(n/1000)+'k';
+ n=parseInt(n)||0;
+ if(n>=1000000)return Math.round(n/100000)/10+'M';
+ if(n>=1000)return Math.round(n/100)/10+'k';
  return n;
 }
 
@@ -3552,7 +4020,7 @@ function doImport(file){
  if(s===200&&d.imported){
  setImportProgress(100,'导入完成');
  $('impSt').textContent='已导入 '+d.imported+' 章';
- cachedBooks=null;if(d.book_id){currentBookTitle=d.title;openBook(d.book_id)}
+ cachedBooks=null;if(d.book_id){currentBookTitle=d.title;openBook(d.book_id);startImportVerify(d.book_id)}
  setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
  }else{
  setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'}
@@ -3897,8 +4365,8 @@ function toggleBottomPanel(){
 
 function _syncSidebarBottom(h){
  var ls=$('leftSidebar'),tr=$('sidebarTrigger');
- if(ls)ls.style.bottom=h+'px';
- if(tr)tr.style.bottom=h+'px';
+ if(ls)ls.style.bottom='0px';
+ if(tr)tr.style.bottom='0px';
 }
 
 function openBottomPanel(){
@@ -5440,6 +5908,7 @@ document.addEventListener('keydown',function(e){
   var match=false;
   if(sc==='capslock'&&e.key==='CapsLock')match=true;
   else if(sc==='alt'&&e.key==='Alt'&&!e.ctrlKey&&!e.shiftKey&&!e.metaKey)match=true;
+  else if(sc==='meta'&&e.key==='Meta'&&!e.ctrlKey&&!e.shiftKey&&!e.altKey)match=true;
   else if(sc==='minus'&&e.key==='-'&&!isInput)match=true;
   else if(sc==='backslash'&&e.key==='\\'&&!isInput)match=true;
   if(match){
@@ -5465,136 +5934,6 @@ document.addEventListener('keydown',function(e){
 
 checkAuth();
 
-// === 设备名称滑动条 ===
-var _literaryNames=[
-  '兰亭','湖心斋','三味书屋','听雨轩','墨香阁','竹里馆',
-  '半山亭','云深处','枕流居','望月楼','一瓢堂','归去来',
-  '静心斋','朝花舍','夕拾轩','卧云阁','清风堂','流觞亭',
-  '漱玉斋','浣花居','松风阁','桃花庵','醉翁亭','雪堂',
-  '沧浪亭','拙政园','留园','寄畅园','退思园','耦园',
-  '碧落居','太虚庐','忘机堂','落梅轩','烟雨楼','无何有',
-  '镜花台','水月阁','藏舟斋','浮生记','冷香亭','九歌堂'
-];
-
-function _detectDevice(){
-  var ua=navigator.userAgent||'';
-  try{if(window.electronAPI)return'桌面端'}catch(e){}
-  if(/iPhone|iPad|iPod/.test(ua))return/iPhone/.test(ua)?'iPhone':(/iPad/.test(ua)?'iPad':'iOS');
-  if(/Android/.test(ua))return/Mobi/.test(ua)?'安卓手机':'安卓平板';
-  if(/Edg\//.test(ua))return'Edge';
-  if(/Firefox\//.test(ua))return'Firefox';
-  if(/Safari/.test(ua)&&!/Chrome/.test(ua))return'Safari';
-  if(/Chrome/.test(ua))return'Chrome';
-  if(/Mac/.test(navigator.platform||''))return'Mac';
-  if(/Win/.test(navigator.platform||''))return'Win';
-  if(/Linux/.test(navigator.platform||''))return'Linux';
-  return'未知';
-}
-
-function generateDeviceName(){
-  var pick=_literaryNames[Math.floor(Math.random()*_literaryNames.length)];
-  var dev=_detectDevice();
-  var suffixes=['上','的','旁的','里的','边的','下的','间的'];
-  var suffix=suffixes[Math.floor(Math.random()*suffixes.length)];
-  return pick+suffix+dev;
-}
-
-function refreshDeviceName(){
-  var inp=document.getElementById('dnbInput');
-  if(inp)inp.value=generateDeviceName();
-}
-
-function confirmDeviceName(){
-  var inp=document.getElementById('dnbInput');
-  var name=inp?inp.value.trim():'';
-  if(!name)return;
-  api('POST','/api/auth/set-device-name',{device_name:name},function(d){
-    if(d&&d.ok){
-      var bar=document.getElementById('deviceNameBar');
-      if(bar)bar.classList.remove('show');
-      loadDeviceName();
-    }
-  });
-}
-
-function skipDeviceName(){
-  var bar=document.getElementById('deviceNameBar');
-  if(bar)bar.classList.remove('show');
-  // 本次会话不再提示
-  try{sessionStorage.setItem('lw_skip_device_name','1')}catch(e){}
-}
-
-function _needsDeviceName(){
-  // 本次会话已跳过的不再提示
-  try{if(sessionStorage.getItem('lw_skip_device_name')==='1'){loadDeviceName();return}}catch(e){}
-  api('GET','/api/sessions',undefined,function(d){
-    if(!d||!d.sessions)return;
-    var cur=d.sessions.find(function(s){return s.is_current});
-    if(!cur||!cur.is_current)return;
-    if(cur.device_name){loadDeviceName();return}
-    var inp=document.getElementById('dnbInput');
-    if(inp)inp.value=generateDeviceName();
-    var bar=document.getElementById('deviceNameBar');
-    if(bar)bar.classList.add('show');
-  });
-}
-
-// 加载当前设备名到 topbar
-function loadDeviceName(){
-  api('GET','/api/sessions',undefined,function(d){
-    if(d&&d.sessions){
-      var cur=d.sessions.find(function(s){return s.is_current});
-      var el=document.getElementById('topbarDevice');
-      if(el&&cur&&cur.device_name){
-        el.textContent=cur.device_name;
-        el.style.display='inline';
-      }
-    }
-  });
-}
-
-// 加载会话列表（设置-设备 Tab）
-function loadSessions(){
-  api('GET','/api/sessions',undefined,function(d){
-    var list=$('sessionsList');
-    if(!list)return;
-    if(!d||!d.sessions||!d.sessions.length){
-      list.innerHTML='<p style="font-size:12px;color:var(--t3);text-align:center;padding:20px">无活跃会话</p>';
-      return;
-    }
-    var html='';
-    d.sessions.forEach(function(s){
-      var dt=new Date(s.created*1000);
-      var timeStr=dt.toLocaleDateString()+' '+dt.toLocaleTimeString();
-      var name=s.device_name||'未命名设备';
-      var isCurrent=s.is_current;
-      html+='<div class="session-item" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--surface2);border-radius:var(--r2);border:1px solid '+(isCurrent?'var(--accent-a20)':'var(--border)')+'">';
-      html+='<div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;color:var(--t1)">'+esc(name)+(isCurrent?' <span style="font-size:10px;color:var(--accent);font-weight:400">当前</span>':'')+'</div><div style="font-size:11px;color:var(--t3);margin-top:2px">'+timeStr+'</div></div>';
-      if(!isCurrent){
-        html+='<button onclick="revokeSession(\''+esc(s.token_prefix)+'\')" style="background:none;border:1px solid var(--border);color:var(--t3);font-size:11px;padding:4px 10px;border-radius:var(--r1);cursor:pointer" onmouseover="this.style.color=\'var(--danger)\';this.style.borderColor=\'var(--danger)\'" onmouseout="this.style.color=\'var(--t3)\';this.style.borderColor=\'var(--border)\'">退出</button>';
-      }
-      html+='</div>';
-    });
-    list.innerHTML=html;
-  });
-}
-
-function revokeSession(prefix){
-  if(!confirm('确认退出这个设备？'))return;
-  api('POST','/api/sessions/revoke',{token_prefix:prefix},function(d){
-    if(d&&d.ok)loadSessions();
-  });
-}
-
-function revokeAllSessions(){
-  if(!confirm('这将退出所有其他设备的登录，仅保留当前设备。确认？'))return;
-  api('POST','/api/sessions/revoke-all',{},function(d){
-    if(d&&d.ok)loadSessions();
-  });
-}
-
-// 页面加载后检查是否需要命名 + 加载设备名
-setTimeout(function(){_needsDeviceName()},600);
 </script>
 </body>
 </html>

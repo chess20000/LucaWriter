@@ -1,6 +1,7 @@
 import os
 import re
 import hashlib
+import threading
 import numpy as np
 from abc import ABC, abstractmethod
 
@@ -21,29 +22,33 @@ class LocalEmbedding(EmbeddingBackend):
         self._model = None
         self._fallback = None
         self.dim = 0
+        self._load_lock = threading.Lock()
 
     def _ensure_model(self):
         if self._model is not None or self._fallback is not None:
             return
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            self._fallback = HashEmbedding()
-            self.backend_id = self._fallback.backend_id
-            self.dim = self._fallback.dim
-            return
-        cache_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'usrdata', 'models'
-        )
-        os.makedirs(cache_dir, exist_ok=True)
-        try:
-            self._model = SentenceTransformer(self.model_name, cache_folder=cache_dir)
-            self.dim = self._model.get_sentence_embedding_dimension()
-        except Exception:
-            self._fallback = HashEmbedding()
-            self.backend_id = self._fallback.backend_id
-            self.dim = self._fallback.dim
+        with self._load_lock:
+            if self._model is not None or self._fallback is not None:
+                return
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError:
+                self._fallback = HashEmbedding()
+                self.backend_id = self._fallback.backend_id
+                self.dim = self._fallback.dim
+                return
+            cache_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'usrdata', 'models'
+            )
+            os.makedirs(cache_dir, exist_ok=True)
+            try:
+                self._model = SentenceTransformer(self.model_name, cache_folder=cache_dir)
+                self.dim = self._model.get_sentence_embedding_dimension()
+            except Exception:
+                self._fallback = HashEmbedding()
+                self.backend_id = self._fallback.backend_id
+                self.dim = self._fallback.dim
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         self._ensure_model()
@@ -124,14 +129,39 @@ class APIEmbedding(EmbeddingBackend):
         return vecs
 
 
+_BACKEND_CACHE = {}
+_BACKEND_CACHE_LOCK = threading.Lock()
+
+
 def get_embedding_backend(settings):
+    """进程级缓存：相同 backend 配置返回同一实例，避免每次重新加载模型/重建 HTTP 客户端。
+    本地嵌入模型（SentenceTransformer）首次加载约 1-2 秒，缓存后后续调用仅做向量化。"""
     choice = settings.get('embedding_backend', 'local')
     if choice == 'api':
-        return APIEmbedding(
-            base_url=settings.get('base_url', ''),
-            api_key=settings.get('api_key', ''),
-            model=settings.get('embedding_model', 'text-embedding-3-small'),
+        key = (
+            'api',
+            settings.get('base_url', ''),
+            settings.get('api_key', ''),
+            settings.get('embedding_model', 'text-embedding-3-small'),
         )
-    return LocalEmbedding(
-        model_name=settings.get('local_embedding_model', 'BAAI/bge-small-zh-v1.5'),
-    )
+    else:
+        key = ('local', settings.get('local_embedding_model', 'BAAI/bge-small-zh-v1.5'))
+
+    cached = _BACKEND_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    with _BACKEND_CACHE_LOCK:
+        cached = _BACKEND_CACHE.get(key)
+        if cached is not None:
+            return cached
+        if key[0] == 'api':
+            be = APIEmbedding(
+                base_url=settings.get('base_url', ''),
+                api_key=settings.get('api_key', ''),
+                model=key[3],
+            )
+        else:
+            be = LocalEmbedding(model_name=key[1])
+        _BACKEND_CACHE[key] = be
+        return be

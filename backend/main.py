@@ -123,11 +123,13 @@ PORT = 20000 if os.environ.get('DATA_DIR') else 10000
 BOOKS_DIR = os.path.join(DATA_DIR, 'books')
 LOG_DIR = os.path.join(DATA_DIR, 'logs')
 MESSAGES_DIR = os.path.join(DATA_DIR, 'messages')
+USER_FONTS_DIR = os.path.join(DATA_DIR, 'fonts')
 GLOBAL_CHAT_HISTORY_FILE = os.path.join(DATA_DIR, 'chat_history.json')
 SALT_FILE = os.path.join(DATA_DIR, 'salt')
 SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 SESSIONS_FILE = os.path.join(DATA_DIR, 'sessions.json')
+FONT_EXTS = {'.ttf': ('font/ttf', 'truetype'), '.otf': ('font/otf', 'opentype')}
 
 RESERVED_FILES = {'settings', 'users', 'messages', 'salt', 'outline', 'sessions', 'meta'}
 
@@ -142,7 +144,7 @@ DEFAULT_PROVIDER_PRESETS = [
 
 DEFAULT_SETTINGS = {
     'base_url': '', 'api_key': '', 'model': '', 'models': [],
-    'ai_frequency': 500, 'ai_max_tokens': 512, 'ai_temperature': 0.7,
+    'ai_frequency': 500, 'ai_max_tokens': 512, 'ai_temperature': None,
     'ai_auto_comment': True,
     'ai_system_prompt': '你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。温文尔雅，沉稳从容。惜字如金，只输出简练聊天文字，不加任何markdown标记。根据接入模型的不同，你的性格可能有细微差别，但核心身份不变。\n\n【绝对禁止】\n禁止展开描述自己的身份、角色、人设。被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话就够了，严禁展开。\n禁止自我评价："我很真诚""我是个XX的人"之类。你的品格应从言行中自然流露，不是说出来的。',
     'outline_enabled': True, 'outline_frequency': 2000,
@@ -154,11 +156,14 @@ DEFAULT_SETTINGS = {
     'search_provider': 'duckduckgo',
     'access_scope': '127.0.0.1',
     'keep_background': False,
-    'browser_enabled': False,
+    'browser_enabled': True,
     'theme_accent': '#E8CC7A',
     'theme_mode': 'dark',
     'ui_scale': 1.0,
     'content_font_size': 20,
+    'editor_font_weight': 400,
+    'editor_font_preset_id': '',
+    'editor_font_presets': [],
     'embedding_backend': 'local',
     'local_embedding_model': 'BAAI/bge-small-zh-v1.5',
     'embedding_model': 'text-embedding-3-small',
@@ -347,7 +352,7 @@ def _import_lucawrite_zip(raw, password=None):
 
 
 def ensure_dirs():
-    for d in [DATA_DIR, BOOKS_DIR, LOG_DIR, MESSAGES_DIR]:
+    for d in [DATA_DIR, BOOKS_DIR, LOG_DIR, MESSAGES_DIR, USER_FONTS_DIR]:
         os.makedirs(d, exist_ok=True)
 
 
@@ -622,11 +627,91 @@ def is_safe_url(url):
     except: return False
 
 
+def _clean_editor_font_id(value):
+    return re.sub(r'[^A-Za-z0-9_-]', '', str(value or ''))[:80]
+
+
+def _clean_editor_font_name(value):
+    name = os.path.splitext(os.path.basename(str(value or '')))[0].strip()
+    return (name or 'Custom Font')[:80]
+
+
+def _normalize_editor_font_presets(presets):
+    if not isinstance(presets, list):
+        return []
+    clean = []
+    seen = set()
+    fonts_root = os.path.normpath(USER_FONTS_DIR)
+    for p in presets:
+        if not isinstance(p, dict):
+            continue
+        fid = _clean_editor_font_id(p.get('id'))
+        if not fid or fid in seen:
+            continue
+        file_name = os.path.basename(str(p.get('file') or ''))
+        ext = os.path.splitext(file_name)[1].lower()
+        if ext not in FONT_EXTS:
+            continue
+        fp = os.path.normpath(os.path.join(USER_FONTS_DIR, file_name))
+        if not fp.startswith(fonts_root) or not os.path.isfile(fp):
+            continue
+        content_type, fmt = FONT_EXTS[ext]
+        family = 'LWUserFont_' + fid.replace('-', '_')
+        clean.append({
+            'id': fid,
+            'name': _clean_editor_font_name(p.get('name') or file_name),
+            'file': file_name,
+            'family': family,
+            'url': '/api/editor-fonts/' + quote(file_name),
+            'format': fmt,
+            'content_type': content_type,
+        })
+        seen.add(fid)
+    return clean
+
+
+def _looks_like_font(raw, ext):
+    if not raw or len(raw) < 12:
+        return False
+    sig = raw[:4]
+    if ext == '.otf':
+        return sig == b'OTTO'
+    if ext == '.ttf':
+        return sig in (b'\x00\x01\x00\x00', b'true', b'typ1')
+    return False
+
+
 def get_settings():
     s = load_json(SETTINGS_FILE)
     changed = False
     for k, v in DEFAULT_SETTINGS.items():
         if k not in s: s[k] = v; changed = True
+    if s.get('ai_auto_comment') is not True:
+        s['ai_auto_comment'] = True
+        changed = True
+    if s.get('browser_enabled') is not True:
+        s['browser_enabled'] = True
+        changed = True
+    if s.get('ai_temperature') is not None:
+        s['ai_temperature'] = None
+        changed = True
+    try:
+        fw = max(100, min(900, int(s.get('editor_font_weight') or 400)))
+    except Exception:
+        fw = 400
+    if fw != s.get('editor_font_weight'):
+        s['editor_font_weight'] = fw
+        changed = True
+    normalized_fonts = _normalize_editor_font_presets(s.get('editor_font_presets', []))
+    if normalized_fonts != s.get('editor_font_presets', []):
+        s['editor_font_presets'] = normalized_fonts
+        changed = True
+    selected_font = _clean_editor_font_id(s.get('editor_font_preset_id', ''))
+    if selected_font and not any(p.get('id') == selected_font for p in normalized_fonts):
+        selected_font = ''
+    if selected_font != s.get('editor_font_preset_id', ''):
+        s['editor_font_preset_id'] = selected_font
+        changed = True
     # 迁移：旧版本 max_tokens 默认 80，对长上下文+推理模型不够，自动提升
     if s.get('ai_max_tokens', 0) < 200:
         s['ai_max_tokens'] = 512; changed = True
@@ -1443,13 +1528,13 @@ def _guess_chapter_from_text(text):
         line = line.strip()
         if not line:
             continue
-        # 常见中文章节格式
-        if re.match(r'^第[一二三四五六七八九十百千零\d]+[章回节卷篇部集]', line):
+        # 常见中文章节格式（含轻小说/剧本：话/幕/折）
+        if re.match(r'^第[一二三四五六七八九十百千零\d]+[章回节卷篇部集话幕折辑]', line):
             return line[:100]
         # 序/引/楔/终/跋/后记/前言/序言/尾声/引子
         if re.match(r'^[序前引终楔跋][章曲言子]$', line):
             return line[:100]
-        if line in ('引子', '楔子', '尾声', '后记', '前言', '序言', '终章', '跋', '序章', '引言', '前传', '外传'):
+        if line in ('引子', '楔子', '尾声', '后记', '前言', '序言', '终章', '跋', '序章', '引言', '前传', '外传', '番外', '彩页', '插图'):
             return line[:100]
         # 括号编号章节：（一）xxx、（1）xxx
         m = re.match(r'^（[一二三四五六七八九十百千零\d]+）[\.、:：]?\s*(.+)', line)
@@ -1574,8 +1659,8 @@ def parse_epub_bytes(raw, filename):
                 except:
                     pass
 
-            # 按 spine 顺序读取章节
-            chapters = []
+            # ── 阶段 A: 按 spine 顺序收集所有 HTML 项的原始信息 ──
+            raw_items = []
             seen = set()
             for sid in spine_ids:
                 href = id_to_href.get(sid, '')
@@ -1589,29 +1674,131 @@ def parse_epub_bytes(raw, filename):
                     html = zf.read(full_name).decode('utf-8', errors='ignore')
                 except:
                     continue
-
                 text = _strip_tags(html)
-                if not text or len(text) < 30:
+                if not text:
                     continue
 
-                # 提取章节标题：NCX > HTML heading > 正文猜测 > 文件名
-                title = ''
-                if href in ncx_titles and ncx_titles[href]:
-                    title = ncx_titles[href]
-                if not title:
-                    title = _extract_html_heading(html)
-                if not title:
-                    title = _guess_chapter_from_text(text)
-                if not title:
-                    title = full_name.split('/')[-1].replace('.xhtml', '').replace('.html', '')[:50]
+                ncx_title = ncx_titles.get(href, '') or ''
+                heading_title = _extract_html_heading(html)
+                guessed_title = _guess_chapter_from_text(text)
+                file_title = full_name.split('/')[-1].replace('.xhtml', '').replace('.html', '')[:50]
 
-                # 跳过常见非内容页（如果NCX里有这些标题则保留）
-                skip_titles = {'封面', '目录', 'contents', 'cover', 'bookcover', 'title page', '版权页', '制作信息', '彩插'}
-                if title.lower() in skip_titles and not (href in ncx_titles and ncx_titles[href]):
-                    if len(text) < 500:
+                if ncx_title:
+                    title, src = ncx_title, 'ncx'
+                elif heading_title:
+                    title, src = heading_title, 'heading'
+                elif guessed_title:
+                    title, src = guessed_title, 'guess'
+                else:
+                    title, src = file_title, 'filename'
+
+                # 取正文首个非空行（去标题），最多 80 字，给 AI 校验用
+                first_line = ''
+                for ln in text.split('\n'):
+                    s = ln.strip()
+                    if s and s != title:
+                        first_line = s[:80]
+                        break
+
+                raw_items.append({
+                    'href': href,
+                    'source_file': full_name,
+                    'title': title,
+                    'title_source': src,
+                    'ncx_title': ncx_title,
+                    'heading_title': heading_title,
+                    'guessed_title': guessed_title,
+                    'file_title': file_title,
+                    'content': text,
+                    'char_count': len(text),
+                    'first_line': first_line,
+                })
+
+            # ── 阶段 B: 过滤元信息页 + 合并短标题页到下一章 ──
+            skip_titles_low = {
+                'cover', 'bookcover', 'title page', 'contents',
+                'landmarks', 'toc', 'navigation', 'nav',
+                'frontmatter', 'backmatter', 'copyright',
+            }
+            skip_titles_zh = {
+                '封面', '标题', '目录', '版权页', '版权信息', '版权', '制作信息',
+                '彩插', '彩页', '扉页', '奥付', '奥附',
+                '转载信息', 'table of contents',
+            }
+            # 章节标题模式：用于识别"短标题页"
+            CHAPTER_TITLE_RE = re.compile(r'^第[一二三四五六七八九十百千零\d]+[章回节卷篇部集话幕折辑]|^[序前引终楔跋][章曲言子]?$|^(序章|序幕|楔子|引子|尾声|后记|终章|前言|序言|引言|跋|番外|外传|前传|prologue|epilogue|epilog)\b', re.I)
+
+            def _looks_like_meta_page(item):
+                t_low = (item['title'] or '').strip().lower()
+                t = (item['title'] or '').strip()
+                if t_low in skip_titles_low or t in skip_titles_zh:
+                    return True
+                # NCX 命中且长度 >= 1000 字，认为是用户想保留的内容（如详细的版权说明）→ 不跳
+                if item['title_source'] == 'ncx' and item['char_count'] >= 1000:
+                    return False
+                # 文件名 fallback 的"Section00X 等"，且内容极短 + 仅有标题模式 → 后面交给合并逻辑处理
+                return False
+
+            def _looks_like_title_page(item):
+                """短到几乎只有标题的页：< 200 字 且 内容以章节模式开头"""
+                if item['char_count'] >= 200:
+                    return False
+                # 第一行匹配章节标题模式
+                for ln in item['content'].split('\n'):
+                    s = ln.strip()
+                    if not s:
                         continue
+                    return bool(CHAPTER_TITLE_RE.match(s))
+                return False
 
-                chapters.append({'title': title or f'章节{len(chapters)+1}', 'content': text})
+            chapters = []
+            pending_title_override = None  # 来自前一短标题页的标题
+            pending_meta_extra = None
+
+            for item in raw_items:
+                if _looks_like_meta_page(item):
+                    # 直接丢弃元信息页；不传染标题
+                    continue
+                if _looks_like_title_page(item):
+                    # 把这一页的标题带到下一章
+                    # 优先用 guessed_title（它从正文识别"第N话「xxx」"最准）或 heading_title
+                    carry_title = item['guessed_title'] or item['heading_title'] or item['ncx_title'] or item['title']
+                    pending_title_override = carry_title
+                    pending_meta_extra = {
+                        'merged_from_file': item['source_file'],
+                        'merged_from_title': item['title'],
+                    }
+                    continue
+
+                # 普通正文章节
+                final_title = item['title']
+                final_source = item['title_source']
+                merged = None
+                if pending_title_override:
+                    # 仅当当前章标题是 fallback（filename）时，才用前面带过来的标题
+                    if final_source == 'filename':
+                        final_title = pending_title_override
+                        final_source = 'merged_prev_title_page'
+                    merged = pending_meta_extra
+                    pending_title_override = None
+                    pending_meta_extra = None
+
+                chapters.append({
+                    'title': final_title or f'章节{len(chapters)+1}',
+                    'content': item['content'],
+                    '_import_meta': {
+                        'source_file': item['source_file'],
+                        'href': item['href'],
+                        'ncx_title': item['ncx_title'],
+                        'heading_title': item['heading_title'],
+                        'guessed_title': item['guessed_title'],
+                        'file_title': item['file_title'],
+                        'title_source': final_source,
+                        'char_count': item['char_count'],
+                        'first_line': item['first_line'],
+                        'merged': merged,
+                    },
+                })
 
             # 兜底：如果没按 spine 读到，遍历所有 html
             if not chapters:
@@ -1630,7 +1817,11 @@ def parse_epub_bytes(raw, filename):
                     title = _extract_html_heading(html) or _guess_chapter_from_text(text)
                     if not title:
                         title = name.split('/')[-1].replace('.xhtml', '').replace('.html', '')[:50]
-                    chapters.append({'title': title or f'章节{len(chapters)+1}', 'content': text})
+                    chapters.append({
+                        'title': title or f'章节{len(chapters)+1}',
+                        'content': text,
+                        '_import_meta': {'source_file': name, 'title_source': 'fallback_scan', 'char_count': len(text)},
+                    })
 
             if not chapters:
                 return None, book_title, '未能解析出有效章节', None
@@ -1811,13 +2002,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
         # 静态文件（图片、字体、CSS、JS 等）— 支持子目录，放在认证之前
-        _static_exts = ('.png','.svg','.ico','.jpg','.jpeg','.gif','.webp','.css','.js','.woff2')
+        _static_exts = ('.png','.svg','.ico','.jpg','.jpeg','.gif','.webp','.css','.js','.woff2','.ttf','.otf')
         if path.endswith(_static_exts):
             rel = path.lstrip('/')
             if '..' not in rel:
                 fp = os.path.join(FRONTEND_DIR, rel)
                 if os.path.isfile(fp) and os.path.normpath(fp).startswith(os.path.normpath(FRONTEND_DIR)):
-                    ext_map = {'.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.css':'text/css','.js':'application/javascript','.woff2':'font/woff2'}
+                    ext_map = {'.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.css':'text/css','.js':'application/javascript','.woff2':'font/woff2','.ttf':'font/ttf','.otf':'font/otf'}
                     ct = ext_map.get(os.path.splitext(fp)[1].lower(), 'application/octet-stream')
                     with open(fp, 'rb') as f:
                         body = f.read()
@@ -1886,6 +2077,29 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
+
+        if path == '/api/editor-fonts':
+            self.json_resp(200, {'fonts': get_settings().get('editor_font_presets', [])}); return
+
+        if path.startswith('/api/editor-fonts/'):
+            file_name = os.path.basename(unquote(path.split('/api/editor-fonts/', 1)[1]))
+            ext = os.path.splitext(file_name)[1].lower()
+            if ext not in FONT_EXTS:
+                self.json_resp(404, {'error': 'Not found'}); return
+            fp = os.path.normpath(os.path.join(USER_FONTS_DIR, file_name))
+            fonts_root = os.path.normpath(USER_FONTS_DIR)
+            if not fp.startswith(fonts_root) or not os.path.isfile(fp):
+                self.json_resp(404, {'error': 'Not found'}); return
+            with open(fp, 'rb') as f:
+                body = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', FONT_EXTS[ext][0])
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'public, max-age=31536000, immutable')
+            self.send_cors()
+            self.end_headers()
+            self.wfile.write(body)
+            return
 
         if path == '/api/sessions':
             sessions = load_json(SESSIONS_FILE, list)
@@ -2527,6 +2741,80 @@ class Handler(BaseHTTPRequestHandler):
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
 
+        if path == '/api/editor-fonts':
+            filename = str(data.get('filename') or '')
+            font_b64 = str(data.get('data') or '')
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in FONT_EXTS:
+                self.json_resp(400, {'error': '只支持 .ttf / .otf 字体'}); return
+            if not font_b64:
+                self.json_resp(400, {'error': '缺少字体文件'}); return
+            try:
+                if ',' in font_b64:
+                    font_b64 = font_b64.split(',', 1)[1]
+                raw = base64.b64decode(font_b64)
+            except Exception:
+                self.json_resp(400, {'error': '字体文件无效'}); return
+            if len(raw) > 30 * 1024 * 1024:
+                self.json_resp(400, {'error': '字体文件超过 30MB'}); return
+            if not _looks_like_font(raw, ext):
+                self.json_resp(400, {'error': '字体文件格式不匹配'}); return
+            fid = 'font_' + str(int(time.time() * 1000)) + '_' + secrets.token_hex(4)
+            file_name = fid + ext
+            fp = os.path.join(USER_FONTS_DIR, file_name)
+            with open(fp, 'wb') as f:
+                f.write(raw)
+            settings = get_settings()
+            presets = settings.get('editor_font_presets', [])
+            preset = {
+                'id': fid,
+                'name': _clean_editor_font_name(data.get('name') or filename),
+                'file': file_name,
+            }
+            presets.append(preset)
+            settings['editor_font_presets'] = _normalize_editor_font_presets(presets)
+            settings['editor_font_preset_id'] = fid
+            save_settings = json.loads(json.dumps(settings))
+            save_presets = list(save_settings.get('provider_presets', []))
+            for p in save_presets:
+                if p.get('api_key'):
+                    p['api_key'] = _encrypt_str(p['api_key'])
+            save_settings['provider_presets'] = save_presets
+            if save_settings.get('api_key'):
+                save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
+            if save_settings.get('search_api_key'):
+                save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
+            save_json(SETTINGS_FILE, save_settings)
+            self.json_resp(200, {'ok': True, 'font': preset, 'settings': get_settings()}); return
+
+        if path == '/api/editor-fonts/delete':
+            fid = _clean_editor_font_id(data.get('id'))
+            settings = get_settings()
+            presets = settings.get('editor_font_presets', [])
+            target = next((p for p in presets if p.get('id') == fid), None)
+            settings['editor_font_presets'] = [p for p in presets if p.get('id') != fid]
+            if settings.get('editor_font_preset_id') == fid:
+                settings['editor_font_preset_id'] = ''
+            if target:
+                file_name = os.path.basename(target.get('file') or '')
+                fp = os.path.normpath(os.path.join(USER_FONTS_DIR, file_name))
+                fonts_root = os.path.normpath(USER_FONTS_DIR)
+                if fp.startswith(fonts_root) and os.path.isfile(fp):
+                    try: os.remove(fp)
+                    except Exception: pass
+            save_settings = json.loads(json.dumps(settings))
+            save_presets = list(save_settings.get('provider_presets', []))
+            for p in save_presets:
+                if p.get('api_key'):
+                    p['api_key'] = _encrypt_str(p['api_key'])
+            save_settings['provider_presets'] = save_presets
+            if save_settings.get('api_key'):
+                save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
+            if save_settings.get('search_api_key'):
+                save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
+            save_json(SETTINGS_FILE, save_settings)
+            self.json_resp(200, {'ok': True, 'settings': get_settings()}); return
+
         if path == '/api/sessions/revoke':
             prefix = data.get('token_prefix', '')
             if not prefix:
@@ -2735,6 +3023,22 @@ class Handler(BaseHTTPRequestHandler):
             trash_dir = os.path.join(bd, 'trash')
             os.makedirs(ch_dir, exist_ok=True)
             os.makedirs(trash_dir, exist_ok=True)
+
+            if action == 'import-verify':
+                settings = get_settings()
+                prov = get_ai_providers()
+                if not settings.get('base_url'):
+                    p = (prov.get('providers', [{}])[0] if prov.get('providers') else {})
+                    if p: settings.update({'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')})
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '未配置API', 'skipped': True}); return
+                existing = bg_task_get_by_book_type(bid, 'import-verify')
+                if existing and existing.get('status') == 'running':
+                    self.json_resp(200, {'task_id': existing['id'], 'status': 'running'}); return
+                tid = bg_task_start('import-verify', bid, '导入校验')
+                threading.Thread(target=_do_import_verify_task,
+                                 args=(tid, bid, settings), daemon=True).start()
+                self.json_resp(200, {'task_id': tid, 'status': 'running'}); return
 
             if action == 'consistency-check':
                 cid = data.get('chapter_id') or data.get('id') or ''
@@ -3042,17 +3346,21 @@ class Handler(BaseHTTPRequestHandler):
             if action == 'delete' and data.get('id'):
                 cid = data['id']
                 if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
+                meta = get_book_meta(bid) or {}
+                order = meta.get('chapter_order', []) or []
+                orig_idx = order.index(cid) if cid in order else len(order)
                 cp = os.path.join(ch_dir, f"{cid}.json")
                 if os.path.exists(cp):
                     try:
                         with open(cp, 'r', encoding='utf-8') as f: ch = json.load(f)
                         ch['deleted'] = time.time()
+                        ch['original_idx'] = orig_idx
                         save_json(os.path.join(trash_dir, f"{cid}.json"), ch)
                         os.remove(cp)
                     except: pass
-                meta = get_book_meta(bid) or {}
-                if cid in meta.get('chapter_order', []):
-                    meta['chapter_order'].remove(cid)
+                if cid in order:
+                    order.remove(cid)
+                    meta['chapter_order'] = order
                 if meta.get('current_chapter_id') == cid:
                     meta['current_chapter_id'] = ''
                 save_json(os.path.join(bd, 'meta.json'), meta)
@@ -3064,16 +3372,41 @@ class Handler(BaseHTTPRequestHandler):
                 if os.path.exists(tp):
                     try:
                         with open(tp, 'r', encoding='utf-8') as f: ch = json.load(f)
+                        orig_idx = ch.get('original_idx')
                         ch['updated'] = time.time()
                         ch.pop('deleted', None)
+                        ch.pop('original_idx', None)
                         save_json(os.path.join(ch_dir, f"{cid}.json"), ch)
                         os.remove(tp)
                         meta = get_book_meta(bid) or {}
-                        if cid not in meta.get('chapter_order', []):
-                            meta.setdefault('chapter_order', []).append(cid)
+                        order = meta.get('chapter_order', []) or []
+                        if cid not in order:
+                            try:
+                                insert_at = int(orig_idx) if orig_idx is not None else len(order)
+                            except (TypeError, ValueError):
+                                insert_at = len(order)
+                            insert_at = max(0, min(insert_at, len(order)))
+                            order.insert(insert_at, cid)
+                            meta['chapter_order'] = order
                             save_json(os.path.join(bd, 'meta.json'), meta)
                     except: pass
                 self.json_resp(200, {'status': 'ok'}); return
+
+            if action == 'rename' and data.get('id'):
+                cid = data['id']
+                if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
+                new_title = (data.get('title') or '').strip()
+                cp = os.path.join(ch_dir, f"{cid}.json")
+                if not os.path.exists(cp):
+                    self.json_resp(404, {'error': '章节不存在'}); return
+                try:
+                    with open(cp, 'r', encoding='utf-8') as f: ch = json.load(f)
+                    ch['title'] = new_title
+                    ch['updated'] = time.time()
+                    save_json(cp, ch)
+                    self.json_resp(200, {'status': 'ok', 'title': new_title}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)[:200]}); return
 
             if action == 'export-lucawrite':
                 log_action('EXPORT_LUCAWRITE_REQUEST', f'book={bid}')
@@ -4404,6 +4737,8 @@ class Handler(BaseHTTPRequestHandler):
                         cid = 'ch_' + str(int(time.time() * 1000)) + str(imported)
                     content = ch.get('content', '')
                     ch_data = {'id': cid, 'title': ch.get('title', '未命名')[:200], 'content': content, 'updated': time.time()}
+                    if ch.get('_import_meta'):
+                        ch_data['_import_meta'] = ch['_import_meta']
                     save_json(os.path.join(ch_dir, f"{cid}.json"), ch_data)
                     order.append(cid)
                     imported += 1
@@ -4553,12 +4888,11 @@ class Handler(BaseHTTPRequestHandler):
             for k in DEFAULT_SETTINGS:
                 if k in data:
                     v = data[k]
-                    if k in ('ai_frequency', 'ai_max_tokens', 'outline_frequency', 'model_context_length', 'content_font_size'):
+                    if k in ('ai_frequency', 'ai_max_tokens', 'outline_frequency', 'model_context_length', 'content_font_size', 'editor_font_weight'):
                         try: v = int(v)
                         except: continue
                     elif k == 'ai_temperature':
-                        try: v = round(float(v), 2)
-                        except: continue
+                        v = None
                     elif k == 'ui_scale':
                         try: v = round(float(v), 2)
                         except: continue
@@ -4569,6 +4903,10 @@ class Handler(BaseHTTPRequestHandler):
                     elif k == 'active_provider_idx':
                         try: v = int(v)
                         except: continue
+                    elif k == 'editor_font_preset_id':
+                        v = _clean_editor_font_id(v)
+                    elif k == 'editor_font_presets':
+                        v = _normalize_editor_font_presets(v)
                     elif k == 'provider_presets':
                         if isinstance(v, list):
                             # 确保每个预设都有必要字段
@@ -4589,6 +4927,18 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             continue
                     settings[k] = v
+            settings['editor_font_presets'] = _normalize_editor_font_presets(settings.get('editor_font_presets', []))
+            selected_font = _clean_editor_font_id(settings.get('editor_font_preset_id', ''))
+            if selected_font and not any(p.get('id') == selected_font for p in settings['editor_font_presets']):
+                selected_font = ''
+            settings['editor_font_preset_id'] = selected_font
+            settings['ai_auto_comment'] = True
+            settings['browser_enabled'] = True
+            settings['ai_temperature'] = None
+            try:
+                settings['editor_font_weight'] = max(100, min(900, int(settings.get('editor_font_weight') or 400)))
+            except Exception:
+                settings['editor_font_weight'] = 400
             # 如果 provider_presets 被更新，同步顶层字段
             presets = settings.get('provider_presets', [])
             idx = settings.get('active_provider_idx', 0)
@@ -6581,17 +6931,9 @@ def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=Fals
     else:
         url = f'{base}/v1/chat/completions'
     headers = {'Content-Type': 'application/json'}
-    # 检测是否为 MiniMax
-    is_minimax = 'minimaxi' in base.lower()
     if key:
         headers['Authorization'] = f'Bearer {key}'
     body = {'model': model, 'messages': messages}
-    if is_minimax:
-        t = float(temperature) if temperature is not None else 0.7
-        body['temperature'] = max(0.01, min(1.0, t))
-    else:
-        if temperature is not None:
-            body['temperature'] = temperature
     if max_tokens is not None and max_tokens > 0:
         body['max_tokens'] = int(max_tokens)
     else:
@@ -7693,92 +8035,64 @@ def _ai_compress_source_for_context(source_text, target_chars, settings, config=
 def get_context_estimate(book_id, settings=None):
     if settings is None:
         settings = get_settings()
-    ctx_len = 0
-    presets = settings.get('provider_presets', [])
-    idx = settings.get('active_provider_idx', 0)
-    if 0 <= idx < len(presets):
-        ctx_len = presets[idx].get('context_length', 0) or settings.get('model_context_length', 0) or 0
-    source_text = get_source(book_id) or ''
-    raw_source_tokens = _estimate_tokens(source_text)
-
-    sd = _get_source_dir(book_id)
-    efiles = _list_entity_files(book_id)
-    entity_count = len(efiles)
-    has_entities = entity_count > 0
-    smart_ctx = ''
-    if has_entities:
-        budget = int(ctx_len * 0.5) if ctx_len > 0 else 40000
-        smart_ctx = get_smart_context(book_id, user_query='', budget_chars=budget, settings=settings)
-    smart_tokens = _estimate_tokens(smart_ctx) if smart_ctx else 0
-
+    ctx_len = int(_get_effective_context_length(settings) or 0)
     bd = get_book_dir(book_id)
     meta = load_json(os.path.join(bd, 'meta.json'), dict) if os.path.isdir(bd) else {}
-    cid = meta.get('current_chapter_id', '')
-    ch_content = ''
-    if cid:
-        cp = os.path.join(bd, 'chapters', f'{cid}.json')
-        if os.path.exists(cp):
-            ch_data = load_json(cp, dict)
-            ch_content = ch_data.get('content', '') or ''
-    ch_tokens = _estimate_tokens(ch_content)
-    sys_template = """你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
-
-当前时间：2025年01月01日 00:00
-
-【重要】你已经在系统里看到了用户当前正在写的章节正文，不需要让用户再发一遍、复制粘贴或上传任何稿子。你直接就能看到他写了什么。
-
-【说话方式】
-谨言慎行。温文尔雅，不卑不亢。惜字如金。
-不要列选项，不要反问，不要结构化分析。
-看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
-避免用"呗""啦"结尾，显得轻浮。
-
-【绝对禁止】
-严禁任何身份描述。
-
-这本小说大概是这样的：
-
-{source}
-
-此时，用户正在写最新的一章：
-
-【章节名】章节名
-【现有正文】
-
-"""
-    sys_tokens = _estimate_tokens(sys_template)
-    annotate_tool = """你还有一个"荧光笔"工具，可以在正文中为用户标注重点内容。
-- 添加标注格式：[ANNOTATE_ADD]{"chapter_id":"...","text":"...","note":"...","color":"yellow"}[/ANNOTATE_ADD]
-- 删除标注格式：[ANNOTATE_REMOVE]{"text":"..."}}[/ANNOTATE_REMOVE]
-- 可用颜色：yellow（默认）、green、pink、blue
-
-你还有一个"本章写完"工具（隐藏功能）...
-
-你还有一个"建议通读"工具...
-"""
-    tool_tokens = _estimate_tokens(annotate_tool)
-    active_source_tokens = smart_tokens if has_entities else raw_source_tokens
-    min_chat = sys_tokens + tool_tokens + active_source_tokens + ch_tokens + 500
-    msg_file = os.path.join(os.path.join(bd, 'messages') if os.path.isdir(bd) else '', '')
-    history_tokens = 0
-    import glob as _glob
-    for mf in _glob.glob(os.path.join(get_book_dir(book_id), 'messages', '*.json')):
-        try:
-            msgs = load_json(mf, list)
-            for m in msgs:
-                history_tokens += _estimate_tokens(str(m.get('text', '')))
-        except: pass
-    total_estimated = min_chat + history_tokens
+    chapter_dir = os.path.join(bd, 'chapters')
+    chapter_count = 0
+    max_chapter_tokens = 0
+    current_chapter_tokens = 0
+    current_cid = meta.get('current_chapter_id', '')
+    if os.path.isdir(chapter_dir):
+        for fn in os.listdir(chapter_dir):
+            if not fn.endswith('.json'):
+                continue
+            try:
+                ch = load_json(os.path.join(chapter_dir, fn), dict)
+                content = ch.get('content', '') or ''
+                tokens = _estimate_tokens(content)
+                chapter_count += 1
+                max_chapter_tokens = max(max_chapter_tokens, tokens)
+                if fn[:-5] == current_cid:
+                    current_chapter_tokens = tokens
+            except Exception:
+                continue
+    source_text = get_source(book_id) or ''
+    raw_source_tokens = _estimate_tokens(source_text)
+    try:
+        smart_ctx = get_smart_context(book_id, user_query='', settings=settings)
+    except Exception:
+        smart_ctx = ''
+    smart_tokens = _estimate_tokens(smart_ctx) if smart_ctx else 0
+    book_context_tokens = smart_tokens if smart_tokens > 0 else raw_source_tokens
+    entity_count = len(_list_entity_files(book_id))
+    system_prompt_tokens = 2200
+    tool_prompt_tokens = 1400
+    chapter_list_tokens = min(2500, max(200, chapter_count * 45))
+    recent_history_reserve = 2400
+    input_tokens = (
+        system_prompt_tokens + tool_prompt_tokens + book_context_tokens +
+        max_chapter_tokens + chapter_list_tokens + recent_history_reserve
+    )
+    output_reserve_tokens = max(4096, min(16384, int(input_tokens * 0.25)))
+    safety_margin_tokens = max(1200, int(input_tokens * 0.08))
+    min_required = input_tokens + output_reserve_tokens + safety_margin_tokens
     return {
         'model_context': ctx_len,
-        'context_tokens': active_source_tokens,
-        'chapter_tokens': ch_tokens,
-        'history_tokens': history_tokens,
-        'system_prompt_tokens': sys_tokens + tool_tokens,
-        'min_chat_required': min_chat,
-        'total_estimated': total_estimated,
-        'needs_compression': ctx_len > 0 and total_estimated > ctx_len,
+        'context_tokens': book_context_tokens,
+        'chapter_tokens': max_chapter_tokens,
+        'current_chapter_tokens': current_chapter_tokens,
+        'history_tokens': recent_history_reserve,
+        'system_prompt_tokens': system_prompt_tokens + tool_prompt_tokens,
+        'chapter_list_tokens': chapter_list_tokens,
+        'output_reserve_tokens': output_reserve_tokens,
+        'safety_margin_tokens': safety_margin_tokens,
+        'min_chat_required': min_required,
+        'min_context_required': min_required,
+        'total_estimated': min_required,
+        'needs_compression': ctx_len > 0 and min_required > ctx_len,
         'entity_count': entity_count,
+        'chapter_count': chapter_count,
     }
 
 def _ai_read_chapters_batch(settings, chapters, prev_context, config=None, on_token=None, should_stop_fn=None):
@@ -8081,6 +8395,137 @@ def _do_kb_reread_task(task_id, book_id, chapter_ids, correction, focus_texts, c
         bg_task_done(task_id, str(e))
 
 
+def _do_import_verify_task(task_id, book_id, cfg_settings):
+    """读全部章节元数据，让 AI 判断这本书目录是否像被正确导入。
+    AI 只看元数据（标题、字数、原始 NCX 标题、首行预览），不喂正文。
+    输出：{broken_confidence, reasoning, suspicious_chapter_ids[]}。"""
+    try:
+        set_conn_meta('import-verify', '导入校验', book_id)
+        bg_task_update(task_id, progress=5, stream_buffer='正在收集章节元数据...')
+        bd = get_book_dir(book_id)
+        ch_dir = os.path.join(bd, 'chapters')
+        meta = get_book_meta(book_id) or {}
+        order = meta.get('chapter_order', []) or []
+        chapters_meta = []
+        for i, cid in enumerate(order):
+            cp = os.path.join(ch_dir, f"{cid}.json")
+            if not os.path.exists(cp):
+                continue
+            try:
+                with open(cp, 'r', encoding='utf-8') as f:
+                    ch = json.load(f)
+            except Exception:
+                continue
+            imp = ch.get('_import_meta') or {}
+            content = ch.get('content', '') or ''
+            # 用首两行做预览
+            preview_lines = []
+            for ln in content.split('\n'):
+                s = ln.strip()
+                if s:
+                    preview_lines.append(s)
+                if len(preview_lines) >= 2:
+                    break
+            chapters_meta.append({
+                'id': cid,
+                'idx': i,
+                'title': ch.get('title', '')[:120],
+                'char_count': len(content),
+                'ncx_title': imp.get('ncx_title', '')[:120],
+                'title_source': imp.get('title_source', ''),
+                'first_line': (imp.get('first_line') or (' / '.join(preview_lines)))[:80],
+            })
+        if not chapters_meta:
+            bg_task_update(task_id, progress=100,
+                           result=json.dumps({'broken_confidence': 0.0, 'reasoning': '没有章节可校验', 'suspicious_chapter_ids': []}, ensure_ascii=False))
+            bg_task_done(task_id); return
+
+        total_chars = sum(c['char_count'] for c in chapters_meta)
+        short_count = sum(1 for c in chapters_meta if c['char_count'] < 200)
+        fallback_titled = sum(1 for c in chapters_meta if (c['title_source'] in ('filename', 'fallback_scan') or re.search(r'Section\d+|chapter\d+', c['title'] or '', re.I)))
+
+        summary = {
+            'book_title': meta.get('title', ''),
+            'total_chapters': len(chapters_meta),
+            'total_chars': total_chars,
+            'avg_chars_per_chapter': total_chars // max(1, len(chapters_meta)),
+            'short_chapters_count': short_count,
+            'fallback_titled_count': fallback_titled,
+        }
+        # 给 AI 只看元数据
+        ai_input = {'summary': summary, 'chapters': chapters_meta}
+
+        prompt = f"""你是图书馆员。下面是一本刚从 EPUB/TXT/PDF 导入的电子书的目录元数据（不含正文）。判断这本书是否看起来"被正确导入"。
+
+可能的"导入失败"信号：
+- 大量章节标题是 SectionXXX / chapterN / 数字文件名这种 fallback 命名
+- 字数分布两极分化（很多 50-200 字的"标题页/彩页"碎片混在正常正文章节之间）
+- 混入"封面/转载信息/Table of Contents/Landmarks/版权页/制作信息"等元信息页
+- 章节顺序明显错乱（同样模式编号但顺序跳跃）
+- 标题模式不统一（有些"第N话"，有些"SectionXXX"，看起来是部分识别失败）
+
+输入数据（JSON）：
+{json.dumps(ai_input, ensure_ascii=False)}
+
+只输出严格 JSON，不要代码块：
+{{
+  "broken_confidence": 0.0-1.0,
+  "reasoning": "一两句话简短说明判断依据，中文",
+  "suspicious_chapter_ids": ["你认为应该删除的章节 id 列表，可以为空"]
+}}
+
+注意：
+- broken_confidence: 0=看起来完全正常的目录, 1=非常可能没正确导入
+- suspicious_chapter_ids: 只列入你高置信度认为应该删除的章节（如明显的元信息页/扉页/碎片），不要列入你不确定的
+- 你不能改章节名，不能合并，不能调序，只能建议删除"""
+
+        bg_task_update(task_id, progress=30, stream_buffer='已收集 ' + str(len(chapters_meta)) + ' 章元数据，正在请求 AI...')
+        try:
+            raw, _, err = call_ai_full(cfg_settings, [
+                {'role': 'system', 'content': '你是严谨的图书馆员。只输出严格 JSON，不要任何额外文字。'},
+                {'role': 'user', 'content': prompt},
+            ], 1200, 0.2, timeout=120)
+        except Exception as e:
+            bg_task_done(task_id, f'AI 调用异常: {str(e)[:200]}'); return
+        if err:
+            bg_task_done(task_id, f'AI 调用失败: {err[:200]}'); return
+
+        bg_task_update(task_id, progress=85, stream_buffer='正在解析 AI 输出...')
+        text = (raw or '').strip()
+        text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.I)
+        text = re.sub(r'\s*```$', '', text)
+        m = re.search(r'\{.*\}', text, re.S)
+        if m:
+            text = m.group(0)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            bg_task_done(task_id, f'AI 输出 JSON 解析失败: {text[:200]}'); return
+
+        try:
+            conf = float(parsed.get('broken_confidence', 0))
+        except Exception:
+            conf = 0.0
+        conf = max(0.0, min(1.0, conf))
+        reasoning = str(parsed.get('reasoning', ''))[:500]
+        sus_ids = parsed.get('suspicious_chapter_ids') or []
+        if not isinstance(sus_ids, list):
+            sus_ids = []
+        valid_ids = {c['id'] for c in chapters_meta}
+        sus_ids = [s for s in sus_ids if isinstance(s, str) and s in valid_ids]
+
+        out = {
+            'broken_confidence': conf,
+            'reasoning': reasoning,
+            'suspicious_chapter_ids': sus_ids,
+            'summary': summary,
+        }
+        bg_task_update(task_id, progress=100, result=json.dumps(out, ensure_ascii=False))
+        bg_task_done(task_id)
+    except Exception as e:
+        bg_task_done(task_id, str(e)[:300])
+
+
 
 
 def _schedule_kb_after_write_jobs(book_id, cfg_settings, include_prediction=True):
@@ -8200,6 +8645,19 @@ def run():
     except Exception:
         pass
     _migrate_old_books()
+    # 后台预热本地嵌入模型，避免用户首次给 Luca 发消息时遭遇 1-2 秒冷启动加载延迟。
+    # 仅本地模型有"磁盘→RAM"加载开销；API 嵌入跳过以免浪费配额。
+    def _warmup_embedding_backend():
+        try:
+            from embeddings import get_embedding_backend, LocalEmbedding
+            backend = get_embedding_backend(get_settings())
+            if isinstance(backend, LocalEmbedding):
+                t0 = time.time()
+                backend.embed(['warmup'])
+                log_action('EMBEDDING_WARMUP', f'backend={backend.backend_id} elapsed={time.time()-t0:.2f}s')
+        except Exception as e:
+            log_action('EMBEDDING_WARMUP_ERR', str(e)[:200])
+    threading.Thread(target=_warmup_embedding_backend, name='embedding_warmup', daemon=True).start()
     server = ThreadingHTTPServer((bind_host, PORT), Handler)
     print(f'Server running on http://{bind_host}:{PORT}')
     server.serve_forever()
