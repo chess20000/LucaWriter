@@ -1,88 +1,83 @@
 # LucaWriter
 
-[Windows安装包下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/download/v0.8.0/LucaWriter-Setup-0.8.0.exe)
+[下载 Windows](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe) · [下载 macOS](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-mac-arm64.dmg)
 
 项目主页：[lucawriter.fun](https://lucawriter.fun/)
 
-LucaWriter是一个ai辅助的小说写作专用软件，为每个想要写小说的人设计。\
-LucaWriter的设计哲学是：艺术作品应该全部由人类完成。\
-ai可以读取，给出建议，但不应对作品本身有任何的写入操作。\
-基于这个哲学，本项目的ai功能将全部围绕“读”来展开。\
-新手刚开始萌生写小说的念头，稍微深入思考，可能就会碰到一个问题——吃书怎么办。\
-LucaWriter就是为了解决这个问题的。LucaWriter的终极目标是，充分利用未来长上下文模型的优势，让作者能够充分发挥天马行空的想象力，尽可能不需要在提出新设定的时候瞻前顾后，不需要思考何时更新大纲才不会打断创作心流的状态，只要大胆写就可以了。ai会在适时自动发消息警告作者吃书了，或者作者想不起来什么设定也可以立刻询问，最高效率地获得答案。\
-LucaWriter本身不会占用很多系统性能。你可以选择使用云端模型，也可以选择本地模型。本地模型的话，就会对电脑性能提出要求。推荐Qwen3.6 27B或35B A3B，显存不够，一些9B级别的模型也可以用。但太小的模型不具备实用价值，可能看不懂你写的段子和伏笔之类的。
-
 ## 快速开始
 
-### 本地直接运行
+### 本地运行
 
 ```bash
 pip install -r requirements.txt
 python backend/main.py
 ```
 
-然后打开浏览器访问 `http://localhost:20000`
+浏览器访问 `http://127.0.0.1:10000`
 
-> 需要 Python 3.11+（<https://www.python.org/downloads/）>
+> 需要 Python 3.11+（<https://www.python.org/downloads/>）
 
 ### Docker 运行
 
 ```bash
 docker build -t lucawriter .
-docker run -p 20000:20000 -v $(pwd)/usrdata:/app/usrdata lucawriter
+docker run -p 10000:10000 -v $(pwd)/usrdata:/app/usrdata lucawriter
 ```
+
+## 核心功能
+
+- **知识库** — AI 从正文中自动提取人物、地点、事件、规则，存入每本书独立的 SQLite 数据库，无需手动录入
+- **语义索引** — 正文和笔记分块向量化，支持语义搜索，意思相近就能搜到
+- **矛盾检测（吃书雷达）** — 写完章节自动扫描新内容与已有设定，发现前后矛盾时弹窗提醒，支持逐条深度核查
+- **摘要全书** — AI 逐章生成摘要，自动合并为全书摘要笔记 `source.md` 和故事大纲 `outline.md`
+- **本章写完** — 每章完成后生成单章摘要，增量更新到全书笔记，支持 AI 主动触发
+- **读者预言** — 基于全书笔记模拟资深读者写长评，预测剧情走向
+- **大纲面板** — 维护世界观、人物、时间线、关键事件，AI 可一键采纳或修改建议
+- **AI 对话** — 统一对话历史（一个 Luca，所有窗口共享），支持 128K 上下文和自动压缩
+- **标注系统** — AI 可在正文中添加荧光笔批注（黄/绿/粉/蓝）
+- **编辑器内搜索替换** — Ctrl+F 搜索，Ctrl+H 替换，F3 导航
+- **多书本管理** — 书架视图，支持系列、改书名、拖拽排序
+- **导入** — EPUB / TXT / MD / DOCX / PDF
+- **导出** — Markdown / TXT / ZIP / EPUB
 
 ## 数据存储
 
-所有用户数据（书本、账户、配置）都存放在项目目录下的 `usrdata/` 文件夹中。
+所有用户数据（书本、账户、配置）存放在 `usrdata/` 目录下。
 
 **初始化（清空所有数据）：**
-
 ```bash
 rm -rf usrdata/*
 ```
 
 **重置密码：**
-
-忘记密码时，删除 `users.json` 文件即可重置：
-
 ```bash
 # 停止服务器后执行
 rm usrdata/users.json
-rm usrdata/sessions.json  # 可选，清除登录会话
-
-# 重新启动服务器后，系统会进入首次使用状态，需要重新创建账户
-python backend/main.py
 ```
 
-> 注意：重置密码不会影响书籍数据，所有书本内容都安全保存在 `usrdata/books/` 目录中。这种设计是安全的，因为 LucaWriter 是本地单机应用，对数据文件的物理访问权限即代表最高权限。
-
-## 功能
-
-- **AI 实时写作建议** — 输入时自动触发
-- **AI 记忆大纲** — 自动更新全局记忆
-- **摘要全书** — AI 逐章生成章节摘要，自动合并 `source.md` 全书摘要笔记和 `outline.md` 大纲
-- **本章写完** — 单章完成后一键触发 AI 生成本章摘要，或让 AI 自动识别并调用
-- **读者预言模式** — 基于全书摘要笔记推测未来剧情
-- **时间线生成** — 梳理故事内时间线节点
-- **多书本管理 + 书架视图** — 支持改书名、导出、删除
-- **导入** — EPUB / TXT / MD / DOCX / PDF
-- **导出** — Markdown / TXT / ZIP / EPUB
-- **标注系统** — AI 可在正文中添加荧光笔批注
+重置密码不影响书籍数据。LucaWriter 是本地单机应用，对数据文件的物理访问即代表最高权限。
 
 ## 项目结构
 
 ```
 lucawriter/
 ├── backend/
-│   └── main.py           # 后端服务
+│   ├── main.py             # 后端服务
+│   ├── kb_storage.py       # 知识库存储（SQLite + ChromaDB）
+│   └── kb_pipeline.py      # 知识库 AI 流水线（提取/摘要/检测）
 ├── frontend/
-│   ├── index.html        # 桌面端编辑器
-│   └── login.html        # 登录页
-├── local_llm/            # 本地模型（可选，需自行放置 llama-server 和模型）
-├── usrdata/              # 用户数据（运行时自动生成）
-├── requirements.txt      # Python 依赖
-├── Dockerfile            # Docker 构建文件
-└── README.md             # 本文件
+│   ├── index.html          # 桌面端编辑器
+│   └── login.html          # 登录页
+├── electron/               # Electron 桌面壳
+│   ├── main.js             # 窗口管理
+│   └── package.json        # 打包配置
+├── landing/                # 项目主页（可静态托管）
+├── local_llm/              # 本地模型（可选，需自行放置 llama-server 和模型）
+├── usrdata/                # 用户数据（运行时自动生成）
+├── requirements.txt        # Python 依赖
+└── Dockerfile              # Docker 构建文件
 ```
 
+## 设计哲学
+
+LucaWriter 选择了一条和大多数 AI 写作工具不同的路——它不替你写。AI 的职责是帮创作者记住前文设定、标出时间线上的矛盾、提醒创作者某个角色已经太久没出场——但它不该代替创作者去感受故事。小说的灵魂在于作者的情感投入、个人表达和不可复制的创作直觉。你把故事写出来，Luca 帮你看着。
