@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="LucaWriter minimal logo">
   <rect width="256" height="256" rx="34" fill="#e8c46c"/>
-  <path d="M70 151V83l48 48h68v42h-46l-22-22H70z" fill="none" stroke="#050505" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"/>
+  <path fill="#050505" fill-rule="evenodd" d="
+    M64 51 112 99h72q4 0 4 4v87q0 4-4 4H62q-4 0-4-4V57q0-6 6-6Z
+    M93 106h88v75l-22-22H93Z"/>
 </svg>
