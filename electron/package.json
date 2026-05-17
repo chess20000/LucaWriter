@@ -1,12 +1,15 @@
 {
   "name": "lucawriter",
-  "version": "1.1.0",
+  "version": "1.1.2",
   "description": "LucaWriter - AI写作搭档",
   "main": "main.js",
   "author": "LucaWriter",
   "license": "Apache-2.0",
   "_releaseArtifactNameComment": "Keep installer artifact names versionless. Landing uses /releases/latest/download/LucaWriter-Setup.exe and LucaWriter-mac-${arch}.dmg fixed links, so do not add ${version} back to artifactName.",
   "scripts": {
+    "icons": "set LUCA_ICON_SCOPE=electron&& python make_icon.py",
+    "prebuild": "npm run icons",
+    "prebuild:dir": "npm run icons",
     "start": "electron .",
     "build": "electron-builder --win",
     "build:dir": "electron-builder --win --dir",
@@ -22,7 +25,7 @@
     "productName": "LucaWriter",
     "copyright": "Copyright © 2026 LucaWriter",
     "directories": {
-      "output": "../release/v1.1.1"
+      "output": "../release/v1.1.2"
     },
     "files": [
       "main.js",
@@ -86,6 +89,9 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "LucaWriter",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico",
       "installerLanguages": ["zh_CN"],
       "language": 2052,
       "include": "installer.nsh"

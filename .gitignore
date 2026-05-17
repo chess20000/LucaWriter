@@ -14,6 +14,7 @@ backend/data_builtin_test/
 backend/.msc
 electron/dist-backend/
 electron/dist-builtin/
+electron/dist-icon-check*/
 electron/build-temp/
 electron/.pyinstaller_cache/
 electron/node_modules/

@@ -37,6 +37,10 @@ function getFrontendPath() {
   return path.join(__dirname, '..', 'frontend');
 }
 
+function getWindowIconPath() {
+  return path.join(__dirname, process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+}
+
 function getBuiltinPath() {
   if (app.isPackaged) {
     return path.join(process.resourcesPath, 'builtin');
@@ -197,10 +201,16 @@ function waitForBackend(maxRetries, interval) {
 function createTray() {
   if (tray) return;
 
-  var iconPath = path.join(getFrontendPath(), 'tray-icon.png');
+  var iconPath = path.join(__dirname, 'tray-icon.png');
+  if (!fs.existsSync(iconPath)) {
+    iconPath = path.join(getFrontendPath(), 'tray-icon.png');
+  }
   var trayIcon;
   try {
     trayIcon = nativeImage.createFromPath(iconPath);
+    if (trayIcon.isEmpty()) {
+      trayIcon = nativeImage.createFromPath(path.join(__dirname, 'icon.ico'));
+    }
     if (trayIcon.isEmpty()) {
       trayIcon = nativeImage.createFromPath(path.join(getFrontendPath(), 'icon.ico'));
     }
@@ -284,7 +294,7 @@ function createWindow() {
     title: 'LucaWriter',
     backgroundColor: '#111111',
     frame: false,
-    icon: path.join(__dirname, 'icon.png'),
+    icon: getWindowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       devTools: false,
@@ -390,6 +400,7 @@ function ensureBrowserCtrlWindow() {
     skipTaskbar: true,
     title: 'LucaWriter 浏览器',
     backgroundColor: '#1a1a2e',
+    icon: getWindowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'browser-preload.js'),
       devTools: false,
