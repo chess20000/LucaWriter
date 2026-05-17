@@ -255,13 +255,26 @@ function destroyTray() {
   }
 }
 
+function isMainWindowZoomed() {
+  if (!mainWindow) return false;
+  return process.platform === 'darwin' ? mainWindow.isFullScreen() : mainWindow.isMaximized();
+}
+
+function notifyWindowZoomState() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('maximize-change', isMainWindowZoomed());
+  }
+}
+
 ipcMain.on('window-minimize', function() {
   if (mainWindow) mainWindow.minimize();
 });
 
 ipcMain.on('window-maximize', function() {
   if (mainWindow) {
-    if (mainWindow.isMaximized()) {
+    if (process.platform === 'darwin') {
+      mainWindow.setFullScreen(!mainWindow.isFullScreen());
+    } else if (mainWindow.isMaximized()) {
       mainWindow.unmaximize();
     } else {
       mainWindow.maximize();
@@ -281,7 +294,7 @@ ipcMain.on('window-close', function() {
 });
 
 ipcMain.handle('window-is-maximized', function() {
-  return mainWindow ? mainWindow.isMaximized() : false;
+  return isMainWindowZoomed();
 });
 
 function createWindow() {
@@ -308,12 +321,10 @@ function createWindow() {
   mainWindow.maximize();
   mainWindow.show();
 
-  mainWindow.on('maximize', function() {
-    mainWindow.webContents.send('maximize-change', true);
-  });
-  mainWindow.on('unmaximize', function() {
-    mainWindow.webContents.send('maximize-change', false);
-  });
+  mainWindow.on('maximize', notifyWindowZoomState);
+  mainWindow.on('unmaximize', notifyWindowZoomState);
+  mainWindow.on('enter-full-screen', notifyWindowZoomState);
+  mainWindow.on('leave-full-screen', notifyWindowZoomState);
 
   mainWindow.on('close', function(event) {
     if (!isQuitting && readKeepBackground() && (process.platform === 'win32' || process.platform === 'darwin')) {

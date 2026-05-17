@@ -145,8 +145,10 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
   box-shadow:var(--glass-shadow);
   color:var(--t-on-surface);
 }
-body.electron .topbar{-webkit-app-region:drag;padding-right:0}
-body.electron .topbar-location,body.electron .topbar-status,body.electron .topbar-actions,body.electron .task-queue-wrap,body.electron .topbar-btn,body.electron .topbar-back{margin-top:0;-webkit-app-region:no-drag}
+body.electron .topbar{-webkit-app-region:drag}
+body.electron.electron-platform-win32 .topbar{padding-right:138px}
+body.electron.electron-platform-darwin .topbar{padding-left:78px;padding-right:12px}
+body.electron .topbar-location,body.electron .topbar-status,body.electron .topbar-actions,body.electron .task-queue-wrap,body.electron .topbar-btn,body.electron .topbar-back,body.electron .win-controls{margin-top:0;-webkit-app-region:no-drag}
 /* device name bar - subtle slide-down */
 .device-name-bar{position:fixed;top:0;left:0;right:0;height:36px;background:var(--surface);border-bottom:1px solid var(--panel-border);display:flex;align-items:center;gap:6px;padding:0 14px;z-index:50;transform:translateY(-100%);transition:transform .35s cubic-bezier(.4,0,.2,1);box-shadow:0 4px 16px rgba(0,0,0,.1)}
 .device-name-bar.show{transform:translateY(0)}
@@ -160,11 +162,27 @@ body.electron .topbar-location,body.electron .topbar-status,body.electron .topba
 .dnb-close{background:none;border:none;color:var(--t3);font-size:12px;cursor:pointer;padding:2px 4px;border-radius:var(--r1);transition:all .15s;flex-shrink:0}
 .dnb-close:hover{color:var(--t2)}
 .win-controls{display:none;flex-shrink:0;-webkit-app-region:no-drag;margin-left:0}
-body.electron .win-controls{display:flex;align-items:stretch;height:44px}
-.win-controls button{background:none;border:none;color:var(--t2);width:46px;height:44px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;font-size:14px;padding:0}
-.win-controls button:hover{background:var(--surface3);color:var(--t1)}
-.win-controls .wc-close:hover{background:var(--danger);color:#fff}
-.win-controls svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.3;fill:none}
+body.electron .topbar>.win-controls{display:flex;position:absolute;top:0;height:38px;z-index:30}
+body.electron.electron-platform-win32 .topbar>.win-controls{right:0;align-items:stretch}
+body.electron.electron-platform-win32 .win-controls button{background:none;border:none;color:var(--t2);width:46px;height:38px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s,color .1s;font-size:14px;padding:0;border-radius:0}
+body.electron.electron-platform-win32 .win-controls button:hover{background:var(--surface3);color:var(--t1)}
+body.electron.electron-platform-win32 .win-controls .wc-close:hover{background:var(--danger);color:#fff}
+body.electron.electron-platform-win32 .win-controls svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.3;fill:none}
+body.electron.electron-platform-darwin .topbar>.win-controls{left:14px;align-items:center;gap:8px}
+body.electron.electron-platform-darwin .win-controls button{position:relative;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.18);padding:0;cursor:pointer;transition:filter .12s,box-shadow .12s}
+body.electron.electron-platform-darwin .win-controls button:hover{filter:brightness(.96);box-shadow:0 0 0 1px rgba(0,0,0,.08) inset}
+body.electron.electron-platform-darwin .win-controls svg{display:none}
+body.electron.electron-platform-darwin .win-controls .wc-close{background:#ff5f57}
+body.electron.electron-platform-darwin .win-controls .wc-min{background:#ffbd2e}
+body.electron.electron-platform-darwin .win-controls .wc-max{background:#28c840}
+body.electron.electron-platform-darwin .win-controls button::before,body.electron.electron-platform-darwin .win-controls button::after{content:"";position:absolute;left:50%;top:50%;width:7px;height:1.4px;background:rgba(55,35,34,.72);border-radius:2px;opacity:0;transform-origin:center;transition:opacity .1s}
+body.electron.electron-platform-darwin .win-controls:hover button::before,body.electron.electron-platform-darwin .win-controls:hover button::after{opacity:1}
+body.electron.electron-platform-darwin .win-controls .wc-close::before{transform:translate(-50%,-50%) rotate(45deg)}
+body.electron.electron-platform-darwin .win-controls .wc-close::after{transform:translate(-50%,-50%) rotate(-45deg)}
+body.electron.electron-platform-darwin .win-controls .wc-min::before{transform:translate(-50%,-50%)}
+body.electron.electron-platform-darwin .win-controls .wc-min::after{display:none}
+body.electron.electron-platform-darwin .win-controls .wc-max::before{width:6px;height:6px;background:transparent;border:1.4px solid rgba(31,73,38,.72);border-radius:1px;transform:translate(-50%,-50%) rotate(45deg)}
+body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none}
 
 /* Card / paper texture styles */
 .book-card.custom-card, .book-card {
@@ -1437,8 +1455,23 @@ function loadThemedIcon(){
     }
   });
 }
-if(window.electronAPI)document.body.classList.add('electron');
-if(window.electronAPI&&window.electronAPI.onMaximizeChange){function _updateMaxBtn(m){var b=document.getElementById('wcMax');if(!b)return;if(m){b.title='还原';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="2.5" y="0.5" width="7" height="7"/><rect x="0.5" y="2.5" width="7" height="7"/></svg>'}else{b.title='最大化';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>'}}window.electronAPI.onMaximizeChange(function(m){_updateMaxBtn(m)});window.electronAPI.isMaximized().then(function(m){_updateMaxBtn(m)});var _tb=document.querySelector('.topbar');if(_tb)_tb.addEventListener('dblclick',function(e){if(e.target.closest('.win-controls')||e.target.closest('button')||e.target.closest('input'))return;window.electronAPI.maximize()})}
+if(window.electronAPI){
+ document.body.classList.add('electron');
+ document.body.classList.add('electron-platform-'+(window.electronAPI.platform||'unknown'));
+}
+if(window.electronAPI&&window.electronAPI.onMaximizeChange){
+ var _isMac=window.electronAPI.platform==='darwin';
+ function _updateMaxBtn(m){
+  var b=document.getElementById('wcMax');if(!b)return;
+  if(_isMac){b.title=m?'Exit Full Screen':'Full Screen';return}
+  if(m){b.title='Restore';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="2.5" y="0.5" width="7" height="7"/><rect x="0.5" y="2.5" width="7" height="7"/></svg>'}
+  else{b.title='Maximize';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>'}
+ }
+ window.electronAPI.onMaximizeChange(function(m){_updateMaxBtn(m)});
+ window.electronAPI.isMaximized().then(function(m){_updateMaxBtn(m)});
+ var _tb=document.querySelector('.topbar');
+ if(_tb&&!_isMac)_tb.addEventListener('dblclick',function(e){if(e.target.closest('.win-controls')||e.target.closest('button')||e.target.closest('input'))return;window.electronAPI.maximize()});
+}
 var bookId=null,chapterId=null,settings={};
 var inTrash=false;
 var charCount=0;

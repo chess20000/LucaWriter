@@ -57,6 +57,17 @@ body.electron .login-titlebar{display:flex}
 .login-titlebar .win-controls button:hover{background:var(--surface3);color:var(--t1)}
 .login-titlebar .win-controls .wc-close:hover{background:var(--danger);color:#fff}
 .login-titlebar .win-controls svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.3;fill:none}
+body.electron-platform-darwin .login-titlebar{justify-content:flex-start;padding-left:14px;padding-right:14px}
+body.electron-platform-darwin .login-titlebar .win-controls{align-items:center;gap:8px}
+body.electron-platform-darwin .login-titlebar .win-controls button{position:relative;width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,.18);padding:0;font-size:0}
+body.electron-platform-darwin .login-titlebar .win-controls svg{display:none}
+body.electron-platform-darwin .login-titlebar .win-controls .wc-close{background:#ff5f57}
+body.electron-platform-darwin .login-titlebar .win-controls .wc-min{background:#ffbd2e}
+body.electron-platform-darwin .login-titlebar .win-controls .wc-max{background:#28c840}
+body.electron-platform-darwin .login-titlebar .win-controls button:hover{filter:brightness(.96)}
+body.electron-platform-darwin .login-titlebar .win-controls .wc-close:hover{background:#ff5f57}
+body.electron-platform-darwin .login-titlebar .win-controls .wc-min:hover{background:#ffbd2e}
+body.electron-platform-darwin .login-titlebar .win-controls .wc-max:hover{background:#28c840}
 
 .login-body{flex:1;display:flex;align-items:center;justify-content:center}
 .wrap{width:100%;max-width:380px;padding:20px}
@@ -204,8 +215,16 @@ function loadThemedIcon(){
     }
   });
 }
-if(window.electronAPI)document.body.classList.add('electron');
-if(window.electronAPI&&window.electronAPI.onMaximizeChange){function _updateMaxBtn(m){var b=document.getElementById('wcMax');if(!b)return;if(m){b.title='还原';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="2.5" y="0.5" width="7" height="7"/><rect x="0.5" y="2.5" width="7" height="7"/></svg>'}else{b.title='最大化';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>'}}window.electronAPI.onMaximizeChange(function(m){_updateMaxBtn(m)});window.electronAPI.isMaximized().then(function(m){_updateMaxBtn(m)});var _tb=document.querySelector('.login-titlebar');if(_tb)_tb.addEventListener('dblclick',function(e){if(e.target.closest('.win-controls')||e.target.closest('button')||e.target.closest('input'))return;window.electronAPI.maximize()})}
+if(window.electronAPI){
+ document.body.classList.add('electron');
+ document.body.classList.add('electron-platform-'+(window.electronAPI.platform||'unknown'));
+}
+if(window.electronAPI&&window.electronAPI.onMaximizeChange){
+ var _isMac=window.electronAPI.platform==='darwin';
+ function _updateMaxBtn(m){var b=document.getElementById('wcMax');if(!b)return;if(_isMac){b.title=m?'Exit Full Screen':'Full Screen';return}if(m){b.title='Restore';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="2.5" y="0.5" width="7" height="7"/><rect x="0.5" y="2.5" width="7" height="7"/></svg>'}else{b.title='Maximize';b.innerHTML='<svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg>'}}
+ window.electronAPI.onMaximizeChange(function(m){_updateMaxBtn(m)});window.electronAPI.isMaximized().then(function(m){_updateMaxBtn(m)});
+ var _tb=document.querySelector('.login-titlebar');if(_tb&&!_isMac)_tb.addEventListener('dblclick',function(e){if(e.target.closest('.win-controls')||e.target.closest('button')||e.target.closest('input'))return;window.electronAPI.maximize()});
+}
 loadThemedIcon();
 loadTheme();
 var isSetup=false;
