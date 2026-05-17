@@ -1,6 +1,6 @@
 # LucaWriter
 
-[下载 Windows](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe) · [下载 macOS](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-mac-arm64.dmg)
+[Windows下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe) · [macOS下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-mac-arm64.dmg)
 
 项目主页：[lucawriter.fun](https://lucawriter.fun/)
 
@@ -77,7 +77,3 @@ lucawriter/
 ├── requirements.txt        # Python 依赖
 └── Dockerfile              # Docker 构建文件
 ```
-
-## 设计哲学
-
-LucaWriter 选择了一条和大多数 AI 写作工具不同的路——它不替你写。AI 的职责是帮创作者记住前文设定、标出时间线上的矛盾、提醒创作者某个角色已经太久没出场——但它不该代替创作者去感受故事。小说的灵魂在于作者的情感投入、个人表达和不可复制的创作直觉。你把故事写出来，Luca 帮你看着。
