@@ -3,4 +3,5 @@
   <path fill="#050505" fill-rule="evenodd" d="
     M64 51 112 99h72q4 0 4 4v87q0 4-4 4H62q-4 0-4-4V57q0-6 6-6Z
     M93 106h88v75l-22-22H93Z"/>
+  <path d="M152 162V130q0-4 4-4t4 4v32q0 4-4 4t-4-4Z" fill="#050505"/>
 </svg>
