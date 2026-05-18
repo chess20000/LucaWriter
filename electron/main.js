@@ -1,5 +1,6 @@
 const { app, BrowserWindow, BrowserView, Menu, dialog, ipcMain, Tray, nativeImage } = require('electron');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -11,6 +12,7 @@ let browserTabs = {};       // { tabId: { view: BrowserView, title: str, url: st
 let browserActiveTab = null;
 let browserTabSeq = 0;
 const BROWSER_CTRL_PORT = 9224;
+let browserCtrlToken = '';
 let tray = null;
 let isKilling = false;
 let isQuitting = false;
@@ -78,13 +80,16 @@ function startBackend() {
   const dataDir = getUserDataPath();
   fs.mkdirSync(dataDir, { recursive: true });
 
+  browserCtrlToken = crypto.randomBytes(32).toString('hex');
+
   const env = Object.assign({}, process.env, {
     DATA_DIR: dataDir,
     FRONTEND_DIR: getFrontendPath(),
     BUILTIN_BOOKS_DIR: getBuiltinPath(),
     LOCAL_LLM_DIR: app.isPackaged ? path.join(process.resourcesPath, 'local_llm') : path.join(__dirname, '..', 'local_llm'),
     BROWSER_DEBUG_PORT: String(BROWSER_DEBUG_PORT),
-     BROWSER_CTRL_PORT: String(BROWSER_CTRL_PORT),
+    BROWSER_CTRL_PORT: String(BROWSER_CTRL_PORT),
+    BROWSER_CTRL_TOKEN: browserCtrlToken,
   });
 
   if (app.isPackaged) {
@@ -239,7 +244,7 @@ function updateTrayMenu() {
   var scopeLabel = scope === '0.0.0.0' ? '0.0.0.0（全部）' : '127.0.0.1（仅本机）';
 
   var contextMenu = Menu.buildFromTemplate([
-    { label: 'LucaWriter v1.0.0', enabled: false },
+    { label: 'LucaWriter', enabled: false },
     { label: '监听: ' + scopeLabel, enabled: false },
     { type: 'separator' },
     { label: '退出', click: function() { isQuitting = true; destroyTray(); app.quit(); }},
@@ -556,12 +561,14 @@ ipcMain.on('browser-switch-tab', function(e, tabId) {
 // 内部 HTTP 服务器：Python 后端通过此接口获取活跃标签的 CDP 信息
 function startBrowserCtrlServer() {
   http.createServer(function(req, res) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Content-Type', 'application/json');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(200); res.end(); return;
+    }
+
+    if (browserCtrlToken && req.headers['x-ctrl-token'] !== browserCtrlToken) {
+      res.writeHead(403); res.end(JSON.stringify({ ok: false, error: 'unauthorized' })); return;
     }
 
     var url = req.url;

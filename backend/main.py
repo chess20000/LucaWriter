@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import hashlib
+import hmac
 import zipfile
 import io
 import secrets
@@ -229,7 +230,7 @@ def _lw_decrypt(raw, password):
     ct = raw[off:]
     key = _lw_derive_key(password, salt)
     expected_hmac = hashlib.sha256(key + iv + ct).digest()[:16]
-    if hmac_val != expected_hmac:
+    if not hmac.compare_digest(hmac_val, expected_hmac):
         raise ValueError('密码错误或文件已损坏')
     if HAS_CRYPTO:
         cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
@@ -499,9 +500,10 @@ def check_rate_limit(key, max_requests, window_seconds):
             return False
         times.append(now)
         _rate_limit_store[key] = times
-        # Clean up old entries periodically
         if len(_rate_limit_store) > 10000:
-            _rate_limit_store.clear()
+            stale = [k for k, v in _rate_limit_store.items() if not v or now - v[-1] > 300]
+            for k in stale:
+                del _rate_limit_store[k]
         return True
 
 
@@ -574,20 +576,15 @@ def load_json(path, default=dict):
     return default()
 
 
-_meta_lock = threading.Lock()
+_json_write_lock = threading.Lock()
 
 def save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    # meta.json 用锁保护，避免多线程并发写导致损坏
-    if path.endswith('meta.json'):
-        with _meta_lock:
-            tmp = path + '.tmp'
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            os.replace(tmp, path)
-    else:
-        with open(path, 'w', encoding='utf-8') as f:
+    with _json_write_lock:
+        tmp = path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, path)
 
 
 def log_action(action, details=''):
@@ -1012,6 +1009,9 @@ def _make_series_cover_svg(title, book_count):
                     w_est += mid
                 else:
                     w_est += mid * 0.55
+            if w_est > MAX_W and len(ln) == 1 and ord(ln[0]) > 127:
+                ok = False
+                break
             wraps = max(1, int(w_est / MAX_W) + (1 if w_est % MAX_W > 0 else 0))
             total_h += wraps * mid * 1.25
         if not ok or total_h > MAX_H:
@@ -1227,7 +1227,7 @@ def validate_session(token):
     sessions = load_json(SESSIONS_FILE, list)
     now = time.time()
     for s in sessions:
-        if s.get('token') == token and s.get('expires', 0) > now:
+        if hmac.compare_digest(s.get('token', ''), token) and s.get('expires', 0) > now:
             # Sliding expiration: extend if more than halfway expired
             created = s.get('created', 0)
             if created > 0:
@@ -1445,11 +1445,32 @@ def _strip_tags(html):
             cleaned.append(line)
     return '\n\n'.join(cleaned)
 
+def _is_internal_url(url):
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if not host:
+            return True
+        if host.lower() in ('localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]'):
+            return True
+        try:
+            ip = ip_address(host)
+            if ip.is_loopback or ip.is_private or ip.is_reserved or ip.is_link_local:
+                return True
+        except ValueError:
+            pass
+        return False
+    except Exception:
+        return True
+
+
 def _fetch_url_content(url, max_chars=8000):
     """抓取网页并提取纯文本"""
     try:
         if not url.startswith(('http://', 'https://')):
             return 'URL格式不支持，只支持http/https'
+        if _is_internal_url(url):
+            return '不允许访问内网地址'
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'})
         with urllib.request.urlopen(req, timeout=15, context=_get_ssl_context()) as resp:
             raw = resp.read()
@@ -1928,11 +1949,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_cors(self):
         origin = self.headers.get('Origin', '')
-        if origin and self._is_local_origin(origin):
+        if not origin:
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            return
+        if self._is_local_origin(origin):
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Access-Control-Allow-Credentials', 'true')
         else:
-            self.send_header('Access-Control-Allow-Origin', '*')
+            host = self.headers.get('Host', '')
+            if host and origin.endswith('://' + host):
+                self.send_header('Access-Control-Allow-Origin', origin)
+                self.send_header('Access-Control-Allow-Credentials', 'true')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
@@ -1982,7 +2010,6 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _check_csrf(self):
-        # CSRF check only matters when server is exposed to network
         try:
             s = load_json(SETTINGS_FILE)
             scope = s.get('access_scope', '127.0.0.1')
@@ -1992,9 +2019,21 @@ class Handler(BaseHTTPRequestHandler):
             return True
         origin = self.headers.get('Origin', '')
         if not origin:
-            return True  # Non-browser clients don't send Origin
+            referer = self.headers.get('Referer', '')
+            if referer:
+                try:
+                    p = urlparse(referer)
+                    origin = f'{p.scheme}://{p.netloc}'
+                except Exception:
+                    pass
+        if not origin:
+            if self.headers.get('X-Luca-Client') == 'electron':
+                return True
+            return True
         host = self.headers.get('Host', '')
         if host and origin.endswith('://' + host):
+            return True
+        if self._is_local_origin(origin):
             return True
         self.json_resp(403, {'error': 'CSRF check failed'})
         return False
@@ -2747,7 +2786,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(429, {'error': '请求过于频繁，请稍后再试'}); return
             users = load_json(USERS_FILE)
             if u not in users:
-                self.json_resp(401, {'error': '用户名不存在'}); return
+                self.json_resp(401, {'error': '用户名或密码错误'}); return
             if _check_account_lockout(users, u):
                 remaining = int(users[u].get('locked_until', 0) - time.time())
                 self.json_resp(429, {'error': f'账户已锁定，{max(remaining, 0)} 秒后重试'}); return

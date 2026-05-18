@@ -105,6 +105,7 @@ def _find_chromium_path() -> Optional[str]:
 
 
 _ELECTRON_CTRL_PORT = int(os.environ.get('BROWSER_CTRL_PORT', '9224'))
+_ELECTRON_CTRL_TOKEN = os.environ.get('BROWSER_CTRL_TOKEN', '')
 _ELECTRON_TAB_ID = None  # 当前使用的 Electron 标签页 ID
 
 
@@ -118,6 +119,8 @@ def _find_electron_cdp_target() -> Optional[str]:
         # 创建新标签页
         ctrl_url = f'http://127.0.0.1:{_ELECTRON_CTRL_PORT}/tab/new'
         req = urllib.request.Request(ctrl_url)
+        if _ELECTRON_CTRL_TOKEN:
+            req.add_header('X-Ctrl-Token', _ELECTRON_CTRL_TOKEN)
         resp = urllib.request.urlopen(req, timeout=5)
         info = json.loads(resp.read().decode('utf-8'))
         if not info.get('ok'):
