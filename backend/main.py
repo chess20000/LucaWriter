@@ -2027,9 +2027,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
         if not origin:
-            if self.headers.get('X-Luca-Client') == 'electron':
-                return True
-            return True
+            return True  # non-browser clients (curl, Electron) don't send Origin
         host = self.headers.get('Host', '')
         if host and origin.endswith('://' + host):
             return True
