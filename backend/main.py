@@ -34,6 +34,8 @@ if not os.environ.get('SSL_CERT_FILE'):
 
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
+from chromadb.config import Settings as _ChromaSettings
+_CHROMA_SETTINGS = _ChromaSettings(anonymized_telemetry=False)
 import numpy as np
 
 import kb_pipeline
@@ -579,13 +581,25 @@ def load_json(path, default=dict):
 _json_write_lock = threading.Lock()
 
 def save_json(path, data):
+    """所有 JSON 写入走 tmp + os.replace 原子替换，断电/崩溃不会留下半写文件。
+    全局锁串行化所有写入；tmp 文件名加 pid/tid 后缀，避免崩溃进程残留与本进程内冲突。"""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with _json_write_lock:
-        tmp = path + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        os.replace(tmp, path)
+        tmp = f'{path}.tmp.{os.getpid()}.{threading.get_ident()}'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, path)
+        except Exception:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except Exception:
+                pass
+            raise
 
+
+_log_lock = threading.Lock()
 
 def log_action(action, details=''):
     try:
@@ -594,7 +608,8 @@ def log_action(action, details=''):
         ts = datetime.now().strftime('%H:%M:%S')
         line = f"[{ts}] {action}"
         if details: line += f" - {details}"
-        with open(log_file, 'a', encoding='utf-8') as f: f.write(line + "\n")
+        with _log_lock:
+            with open(log_file, 'a', encoding='utf-8') as f: f.write(line + "\n")
     except: pass
 
 
@@ -7121,8 +7136,13 @@ def _start_local_llm():
             '-np', '1',
             '--timeout', '300',
         ]
-        _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR, stdout=log_fp, stderr=subprocess.STDOUT,
-                                           creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        try:
+            _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR, stdout=log_fp, stderr=subprocess.STDOUT,
+                                               creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        finally:
+            # Popen 已经把 fd 传给子进程（Win 上是 DuplicateHandle），父端可以立刻关闭，避免反复启停泄漏句柄
+            try: log_fp.close()
+            except Exception: pass
         threading.Thread(target=_monitor_local_llm, args=(_LOCAL_LLM_PROC,), daemon=True).start()
         return True, ''
     except Exception as e:
@@ -7131,12 +7151,27 @@ def _start_local_llm():
 
 def _stop_local_llm():
     global _LOCAL_LLM_PROC
-    try:
-        subprocess.run(['taskkill', '/F', '/IM', 'llama-server.exe'],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-    except Exception:
-        pass
+    proc = _LOCAL_LLM_PROC
+    killed_via_handle = False
+    if proc is not None and proc.poll() is None:
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try: proc.wait(timeout=2)
+                except subprocess.TimeoutExpired: pass
+            killed_via_handle = True
+        except Exception:
+            pass
+    if not killed_via_handle:
+        try:
+            subprocess.run(['taskkill', '/F', '/IM', 'llama-server.exe'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+        except Exception:
+            pass
     with _LOCAL_LLM_LOCK:
         _LOCAL_LLM_PROC = None
         _LOCAL_LLM_STATE['status'] = 'idle'
@@ -7548,31 +7583,37 @@ def call_ai_with_tools(settings, messages, max_tokens, temperature, tools=None, 
     )
     if err:
         return None, None, None, err
-    
+
+    tid = threading.current_thread().ident
     try:
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
         resp = urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context())
-        data = json.loads(resp.read().decode('utf-8', errors='replace'))
-        
-        choice = data.get('choices', [{}])[0]
-        message = choice.get('message', {})
-        
-        content = message.get('content', '')
-        reasoning = message.get('reasoning_content', '')
-        
-        # 解析 tool_calls
-        tool_calls = []
-        raw_tool_calls = message.get('tool_calls', [])
-        for tc in raw_tool_calls:
-            if tc.get('type') == 'function':
-                func = tc.get('function', {})
-                tool_calls.append({
-                    'name': func.get('name', ''),
-                    'arguments': json.loads(func.get('arguments', '{}'))
-                })
-        
-        return content, tool_calls, reasoning, None
-        
+        register_ai_connection(tid, resp)
+        try:
+            data = json.loads(resp.read().decode('utf-8', errors='replace'))
+
+            choice = data.get('choices', [{}])[0]
+            message = choice.get('message', {})
+
+            content = message.get('content', '')
+            reasoning = message.get('reasoning_content', '')
+
+            tool_calls = []
+            raw_tool_calls = message.get('tool_calls', [])
+            for tc in raw_tool_calls:
+                if tc.get('type') == 'function':
+                    func = tc.get('function', {})
+                    tool_calls.append({
+                        'name': func.get('name', ''),
+                        'arguments': json.loads(func.get('arguments', '{}'))
+                    })
+
+            return content, tool_calls, reasoning, None
+        finally:
+            try: resp.close()
+            except: pass
+            unregister_ai_connection(tid)
+
     except urllib.error.HTTPError as e:
         status = e.code
         err_msg = str(e)
@@ -7901,26 +7942,37 @@ class _SimpleEmbedding(EmbeddingFunction):
 
 _chroma_clients = {}
 _chroma_collections = {}
+_chroma_clients_lock = threading.Lock()
+_chroma_collections_lock = threading.Lock()
 
 def _get_chroma_client(book_id):
-    key = book_id
-    if key not in _chroma_clients:
-        db_dir = os.path.join(get_book_dir(book_id), '.vector_db')
-        os.makedirs(db_dir, exist_ok=True)
-        _chroma_clients[key] = chromadb.PersistentClient(path=db_dir)
-    return _chroma_clients[key]
+    client = _chroma_clients.get(book_id)
+    if client is not None:
+        return client
+    with _chroma_clients_lock:
+        client = _chroma_clients.get(book_id)
+        if client is None:
+            db_dir = os.path.join(get_book_dir(book_id), '.vector_db')
+            os.makedirs(db_dir, exist_ok=True)
+            client = chromadb.PersistentClient(path=db_dir, settings=_CHROMA_SETTINGS)
+            _chroma_clients[book_id] = client
+        return client
 
 def _get_kb_collection(book_id):
-    if book_id in _chroma_collections:
-        return _chroma_collections[book_id]
+    col = _chroma_collections.get(book_id)
+    if col is not None:
+        return col
     client = _get_chroma_client(book_id)
-    col = client.get_or_create_collection(
-        name='knowledge_base',
-        embedding_function=_SimpleEmbedding(),
-        metadata={'hnsw:space': 'cosine'}
-    )
-    _chroma_collections[book_id] = col
-    return col
+    with _chroma_collections_lock:
+        col = _chroma_collections.get(book_id)
+        if col is None:
+            col = client.get_or_create_collection(
+                name='knowledge_base',
+                embedding_function=_SimpleEmbedding(),
+                metadata={'hnsw:space': 'cosine'}
+            )
+            _chroma_collections[book_id] = col
+        return col
 
 def _kb_clear(book_id):
     try:

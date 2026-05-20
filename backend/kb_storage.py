@@ -10,15 +10,22 @@ from contextlib import contextmanager
 
 _local_storage = threading.local()
 _db_locks = {}
+_db_locks_meta = threading.Lock()
 
 def get_kb_path(book_id):
     from main import get_book_dir
     return os.path.join(get_book_dir(book_id), 'kb.db')
 
 def _get_lock(book_id):
-    if book_id not in _db_locks:
-        _db_locks[book_id] = threading.RLock()
-    return _db_locks[book_id]
+    lock = _db_locks.get(book_id)
+    if lock is not None:
+        return lock
+    with _db_locks_meta:
+        lock = _db_locks.get(book_id)
+        if lock is None:
+            lock = threading.RLock()
+            _db_locks[book_id] = lock
+        return lock
 
 @contextmanager
 def db_transaction(book_id):
@@ -892,18 +899,27 @@ def count_embedding_chunks(book_id):
 
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
+from chromadb.config import Settings as _ChromaSettings
 import numpy as np
 
 _chroma_clients = {}
+_chroma_clients_lock = threading.Lock()
 _CHROMA_KB_COLLECTION = 'luca_kb'
+_CHROMA_SETTINGS = _ChromaSettings(anonymized_telemetry=False)
 
 def _get_chroma_client(book_id):
+    client = _chroma_clients.get(book_id)
+    if client is not None:
+        return client
     from main import get_book_dir
     persist_dir = os.path.join(get_book_dir(book_id), '.vector_db')
-    if book_id not in _chroma_clients:
-        os.makedirs(persist_dir, exist_ok=True)
-        _chroma_clients[book_id] = chromadb.PersistentClient(path=persist_dir)
-    return _chroma_clients[book_id]
+    with _chroma_clients_lock:
+        client = _chroma_clients.get(book_id)
+        if client is None:
+            os.makedirs(persist_dir, exist_ok=True)
+            client = chromadb.PersistentClient(path=persist_dir, settings=_CHROMA_SETTINGS)
+            _chroma_clients[book_id] = client
+        return client
 
 def _get_chroma_collection(book_id, embedding_function):
     client = _get_chroma_client(book_id)

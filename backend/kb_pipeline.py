@@ -554,6 +554,11 @@ def render_markdown_views(book_id):
 
 def incremental_embed(book_id, settings, sources=None):
     try:
+        m = _main()
+        m['set_conn_meta']('embedding', '建立向量索引', book_id)
+    except Exception:
+        pass
+    try:
         backend = get_embedding_backend(settings)
     except ImportError as e:
         rt_log(book_id, f'嵌入后端不可用: {e}')

@@ -115,10 +115,22 @@ class APIEmbedding(EmbeddingBackend):
             headers['Authorization'] = f'Bearer {self.api_key}'
         req = urllib.request.Request(url, data=body, headers=headers)
         try:
-            from main import _get_ssl_context
+            from main import _get_ssl_context, register_ai_connection, unregister_ai_connection
+        except Exception:
+            _get_ssl_context = lambda: None
+            register_ai_connection = lambda *a, **kw: None
+            unregister_ai_connection = lambda *a, **kw: None
+        tid = threading.get_ident()
+        try:
             ctx = _get_ssl_context()
-            with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+            resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+            register_ai_connection(tid, resp)
+            try:
                 result = json.loads(resp.read().decode('utf-8'))
+            finally:
+                try: resp.close()
+                except Exception: pass
+                unregister_ai_connection(tid)
         except Exception as e:
             raise RuntimeError(f'API 嵌入调用失败: {e}')
         data = result.get('data', [])
