@@ -2084,18 +2084,21 @@ class Handler(BaseHTTPRequestHandler):
         # 动态主题图标生成
         if path == '/icon.png' or path == '/icon.ico':
             if HAS_ICON_GENERATOR:
-                settings = get_settings()
-                theme_accent = settings.get('theme_accent', '#E8CC7A')
-                icon_bytes = icon_generator.get_icon_bytes(theme_accent)
-                if icon_bytes:
-                    ct = 'image/png' if path.endswith('.png') else 'image/x-icon'
-                    self.send_response(200)
-                    self.send_header('Content-Type', ct)
-                    self.send_header('Content-Length', str(len(icon_bytes)))
-                    self.send_header('Cache-Control', 'no-cache')
-                    self.end_headers()
-                    self.wfile.write(icon_bytes)
-                    return
+                try:
+                    settings = get_settings()
+                    theme_accent = settings.get('theme_accent', '#E8CC7A')
+                    icon_bytes = icon_generator.get_icon_bytes(theme_accent)
+                    if icon_bytes:
+                        ct = 'image/png' if path.endswith('.png') else 'image/x-icon'
+                        self.send_response(200)
+                        self.send_header('Content-Type', ct)
+                        self.send_header('Content-Length', str(len(icon_bytes)))
+                        self.send_header('Cache-Control', 'no-cache')
+                        self.end_headers()
+                        self.wfile.write(icon_bytes)
+                        return
+                except Exception:
+                    pass
             # 回退到静态文件
             fp = os.path.join(FRONTEND_DIR, os.path.basename(path))
             if os.path.isfile(fp):
