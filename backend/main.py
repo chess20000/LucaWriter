@@ -2244,6 +2244,34 @@ class Handler(BaseHTTPRequestHandler):
             ordered.extend(ch_map.values())
             self.json_resp(200, {'chapters': ordered, 'chapter_order': [c['id'] for c in ordered], 'current_chapter_id': meta.get('current_chapter_id', '')}); return
 
+        # 图片资源访问：/api/book/<bid>/asset/<filename>
+        if path.startswith('/api/book/') and '/asset/' in path:
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            fn = unquote(parts[5]) if len(parts) > 5 else ''
+            if not is_valid_id(bid):
+                self.json_resp(400, {'error': 'Invalid book ID'}); return
+            if not re.match(r'^[a-f0-9]{8,32}\.(png|jpg|jpeg|gif|webp|svg|bmp)$', fn):
+                self.json_resp(400, {'error': 'Invalid filename'}); return
+            fp = os.path.join(get_book_dir(bid), 'assets', fn)
+            if not os.path.isfile(fp):
+                self.json_resp(404, {'error': '资源不存在'}); return
+            ct_map = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+                      '.gif': 'image/gif', '.webp': 'image/webp',
+                      '.svg': 'image/svg+xml', '.bmp': 'image/bmp'}
+            ct = ct_map.get(os.path.splitext(fn)[1].lower(), 'application/octet-stream')
+            try:
+                with open(fp, 'rb') as f: body = f.read()
+            except Exception:
+                self.json_resp(500, {'error': '读取失败'}); return
+            self.send_response(200)
+            self.send_header('Content-Type', ct)
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'public, max-age=86400')
+            self.send_cors(); self.end_headers()
+            self.wfile.write(body)
+            return
+
         if path.startswith('/api/book/') and '/chapter/' in path:
             parts = path.split('/')
             bid = parts[3] if len(parts) > 3 else ''
@@ -3398,6 +3426,45 @@ class Handler(BaseHTTPRequestHandler):
                 meta['updated'] = time.time()
                 save_json(os.path.join(bd, 'meta.json'), meta)
                 self.json_resp(200, {'status': 'ok', 'chapter': ch}); return
+
+            # 图片资源上传：data 为 dataURL 字符串
+            if action == 'asset':
+                data_url = data.get('data', '')
+                filename = data.get('filename', 'image.png')
+                if not isinstance(data_url, str) or not data_url.startswith('data:'):
+                    self.json_resp(400, {'error': '无效的图片数据'}); return
+                try:
+                    header, b64 = data_url.split(',', 1)
+                except ValueError:
+                    self.json_resp(400, {'error': '数据格式错误'}); return
+                mime = ''
+                if ':' in header and ';' in header:
+                    mime = header.split(';')[0].split(':', 1)[1].strip().lower()
+                ext_map = {'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg',
+                           'image/gif': '.gif', 'image/webp': '.webp',
+                           'image/svg+xml': '.svg', 'image/bmp': '.bmp'}
+                ext = ext_map.get(mime)
+                if not ext:
+                    guess = os.path.splitext(filename)[1].lower()
+                    if guess in ('.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'):
+                        ext = guess
+                if not ext:
+                    self.json_resp(400, {'error': '不支持的图片格式'}); return
+                try:
+                    raw = base64.b64decode(b64, validate=False)
+                except Exception:
+                    self.json_resp(400, {'error': 'base64 解码失败'}); return
+                if len(raw) > 20 * 1024 * 1024:
+                    self.json_resp(413, {'error': '图片过大（最大 20MB）'}); return
+                sha = hashlib.sha256(raw).hexdigest()[:16]
+                assets_dir = os.path.join(bd, 'assets')
+                os.makedirs(assets_dir, exist_ok=True)
+                fn = sha + ext
+                fp = os.path.join(assets_dir, fn)
+                if not os.path.isfile(fp):
+                    with open(fp, 'wb') as f: f.write(raw)
+                self.json_resp(200, {'path': 'assets/' + fn, 'filename': fn,
+                                     'url': f'/api/book/{bid}/asset/{fn}', 'size': len(raw)}); return
 
             if action == 'set-current-chapter' and data.get('id'):
                 cid = data['id']
