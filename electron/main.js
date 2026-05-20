@@ -19,9 +19,11 @@ let isQuitting = false;
 const PORT = 20000;
 const BROWSER_DEBUG_PORT = 9223;
 
-// 为浏览器控制功能启用 CDP 调试端口
+// CDP 调试端口仅给后端 Python（browser_agent）使用。
+// 之前用 '*' 允许任何 Origin → 嵌入页面里的恶意脚本可直接 ws://127.0.0.1:9223 接管整个 Electron。
+// 改为只接受本机源；programmatic 客户端不带 Origin，Chromium 默认放行。
 app.commandLine.appendSwitch('remote-debugging-port', String(BROWSER_DEBUG_PORT));
-app.commandLine.appendSwitch('remote-allow-origins', '*');
+app.commandLine.appendSwitch('remote-allow-origins', 'http://localhost,http://127.0.0.1');
 
 function getUserDataPath() {
   return path.join(app.getPath('userData'), 'data');
