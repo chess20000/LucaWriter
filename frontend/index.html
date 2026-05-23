@@ -447,6 +447,8 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .ai-active-dots{display:none;align-items:center;gap:3px;height:auto;padding:0;background:transparent;border:none;border-radius:0;color:var(--t2);font-size:11px;white-space:nowrap}
 .ai-active-dots.show{display:inline-flex}
 .ai-active-label{margin-right:2px}
+.ai-active-dots.speed{font-family:var(--font-mono);font-weight:700;color:var(--accent);letter-spacing:0}
+.ai-speed-text{line-height:1}
 .ai-active-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent-a70),0 0 12px var(--accent-a40);animation:aiDotBreathe 2s ease-in-out infinite}
 .ai-active-dot:nth-child(2){animation-delay:.3s}
 .ai-active-dot:nth-child(3){animation-delay:.6s}
@@ -1220,19 +1222,20 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  <div class="local-llm-progress-bar" id="localProgressBar"></div>
  </div>
  <div class="local-llm-progress-text" id="localProgressText"></div>
- <div id="downloadSection" style="margin-top:10px;display:none">
- <div style="font-size:12px;color:var(--t3);margin-bottom:8px">未检测到本地模型，可一键下载：</div>
- <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
- <button class="topbar-btn" onclick="downloadModel('gemma-4-e2b')" id="btnDlGemma">下载 Gemma 4 E2B (1.5GB)</button>
- <button class="topbar-btn" onclick="downloadModel('qwen3.5-9b')" id="btnDlQwen">下载 Qwen 3.5 9B (6GB)</button>
+ <div id="hwCheckSection" style="margin:10px 0;font-size:11px;color:var(--t3);display:none">
+ <div id="hwInfo"></div>
+ <div id="hwReason" style="margin-top:3px"></div>
+ <div id="hwNotes" style="margin-top:3px;color:var(--warn)"></div>
+ <div id="hwAction" style="margin-top:8px"></div>
  </div>
- <div class="local-llm-progress" id="dlProgressWrap" style="margin-top:10px;display:none">
+ <div id="downloadSection" style="margin-top:10px;display:none">
+ <div class="local-llm-progress" id="dlProgressWrap" style="display:none">
  <div class="local-llm-progress-bar" id="dlProgressBar"></div>
  </div>
  <div class="local-llm-progress-text" id="dlProgressText"></div>
  <button class="topbar-btn" id="btnDlCancel" onclick="cancelDownload()" style="margin:8px auto 0;display:none">取消下载</button>
  </div>
- <button class="topbar-btn" id="localToggleBtn" onclick="toggleLocalLLM()" style="margin:0 auto;display:block">切换本地模型</button>
+ <button class="topbar-btn" id="localToggleBtn" onclick="toggleLocalLLM()" style="margin:0 auto;display:none">切换本地模型</button>
  </div>
  <div class="provider-slider" id="providerSlider">
  <div class="provider-block active" data-idx="0" onclick="switchProviderPreset(0)"><span class="pb-dot"></span><span class="pb-name">LMStudio</span></div>
@@ -1526,6 +1529,8 @@ document.addEventListener('pointerdown',function(e){
 /* === AI 活跃连接指示 === */
 var _aiActivityES=null;
 var _activeAICount=0;
+var _localLLMSpeed={active:false,phase:'idle',speed:0};
+var _localLLMSpeedTimer=null;
 
 function _startAIActivity(){
  if(_aiActivityES)return;
@@ -1533,6 +1538,7 @@ function _startAIActivity(){
  _aiActivityES.onmessage=function(e){
   var d=JSON.parse(e.data);
   _activeAICount=d.count||0;
+  _syncLocalLLMSpeedPoll();
   _renderAIDots();
  };
  _aiActivityES.onerror=function(){
@@ -1543,6 +1549,26 @@ function _startAIActivity(){
 }
 function _stopAIActivity(){
  if(_aiActivityES){_aiActivityES.close();_aiActivityES=null;}
+ if(_localLLMSpeedTimer){clearInterval(_localLLMSpeedTimer);_localLLMSpeedTimer=null;}
+}
+function _syncLocalLLMSpeedPoll(){
+ if(_activeAICount>0){
+  if(!_localLLMSpeedTimer){
+   _pollLocalLLMSpeed();
+   _localLLMSpeedTimer=setInterval(_pollLocalLLMSpeed,700);
+  }
+ }else{
+  if(_localLLMSpeedTimer){clearInterval(_localLLMSpeedTimer);_localLLMSpeedTimer=null;}
+  _localLLMSpeed={active:false,phase:'idle',speed:0};
+ }
+}
+function _pollLocalLLMSpeed(){
+ api('GET','/api/local-llm/speed',undefined,function(d,s){
+  if(s===200&&d){
+   _localLLMSpeed=d;
+   _renderAIDots();
+  }
+ });
 }
 function _renderAIDots(){
  var el=$('aiActiveDots');
@@ -1551,15 +1577,25 @@ function _renderAIDots(){
  if(n===0){
   el.innerHTML='';
   el.classList.remove('show');
+  el.classList.remove('speed');
   el.removeAttribute('title');
   _updateTopbarStatusVisibility();
   return;
  }
- var html='<span class="ai-active-label">Luca</span>';
- for(var i=0;i<n;i++)html+='<div class="ai-active-dot"></div>';
- el.innerHTML=html;
- el.classList.add('show');
- el.title='Luca 正在处理 '+_activeAICount+' 个任务';
+ if(_localLLMSpeed&&_localLLMSpeed.active&&(_localLLMSpeed.phase==='prefill'||_localLLMSpeed.phase==='gen')){
+  var phase=_localLLMSpeed.phase==='prefill'?'prefill':'gen';
+  var sp=Number(_localLLMSpeed.speed||0);
+  el.innerHTML='<span class="ai-speed-text">'+phase+(sp>0?' '+Math.round(sp)+' t/s':'')+'</span>';
+  el.classList.add('show');
+  el.classList.add('speed');
+  el.title='本地模型正在'+(phase==='prefill'?'处理提示词':'生成回复')+(sp>0?' · '+Math.round(sp)+' token/s':'');
+  _updateTopbarStatusVisibility();
+  return;
+ }
+ el.innerHTML='';
+ el.classList.remove('show');
+ el.classList.remove('speed');
+ el.removeAttribute('title');
  _updateTopbarStatusVisibility();
 }
 
@@ -1567,7 +1603,8 @@ function _updateTopbarStatusVisibility(){
  var st=$('topbarStatus');
  if(!st)return;
  var hasChapter=!!(bookId&&chapterId);
- var hasAI=_activeAICount>0;
+ var aiEl=$('aiActiveDots');
+ var hasAI=!!(aiEl&&aiEl.classList.contains('show'));
  st.classList.toggle('has-chapter',hasChapter);
  st.style.display=(hasChapter||hasAI)?'flex':'none';
  syncTopbarChapterAlign();
@@ -3394,17 +3431,12 @@ function openSettings(){
   _currentThemeAccent=settings.theme_accent||'#E8CC7A';
   var taEl=$('sThemeAccent');if(taEl)taEl.value=_currentThemeAccent;
   var prev=document.getElementById('themeColorPreview');if(prev)prev.style.background=_currentThemeAccent;
-  // 获取检测到的本地模型名并更新显示
+  // 获取检测到的本地模型名 + 硬件能力检测（决定推荐档位）
   api('GET','/api/local-llm/detected-model',undefined,function(d,s){
     var el=$('localDetectedModel');
-    var ds=$('downloadSection');
-    if(s===200&&d.model){
-      if(el)el.textContent=d.model;
-      if(ds)ds.style.display='none';
-    }else{
-      if(el)el.textContent='未检测到模型';
-      if(ds)ds.style.display='block';
-    }
+    var modelDetected=(s===200&&d.model);
+    if(el)el.textContent=modelDetected?d.model:'未检测到模型';
+    refreshHardwareCheck(modelDetected);
   });
   openModal('settingsModal')
  }
@@ -3468,7 +3500,13 @@ function refreshLocalLLMProgress(){
  if(!dot||!txt||!tbtn)return;
  if(!isLocalPreset()){
  dot.className='local-llm-dot';
- txt.textContent='未启用，内置llama.cpp只能使用cpu推理，速度较慢';
+ var s=window._localStrategy;
+ if(s&&s.binary){
+  var bl={cuda:'CUDA（NVIDIA 加速）',vulkan:'Vulkan（AMD 加速）',metal:'Metal（Apple Silicon 加速）',cpu:'纯 CPU 推理（速度较慢）'};
+  txt.textContent='未启用 · 推理后端: '+(bl[s.binary]||s.binary);
+ }else{
+  txt.textContent='未启用';
+ }
  tbtn.textContent='启动本地模型';
  tbtn.disabled=false;
  _showLocalProgress(false,0,'');
@@ -3538,8 +3576,68 @@ function _updateDlModal(pct,speed,status,currentBytes,totalBytes){
 }
 function _showDownloadProgress(show,pct,text){}
 
+function refreshHardwareCheck(modelDetected){
+ // 启动按钮只在已下载模型时显示——没模型点了也没用
+ var tbtn=$('localToggleBtn');
+ if(tbtn)tbtn.style.display=modelDetected?'block':'none';
+ api('GET','/api/local-llm/hardware-check',undefined,function(d,s){
+  if(s!==200)return;
+  var hw=d.hardware||{},strat=d.strategy||{};
+  var sec=$('hwCheckSection');if(!sec)return;
+  sec.style.display='block';
+  var hwLine;
+  if(hw.gpu_vendor==='apple'){
+   hwLine='Apple Silicon · '+hw.ram_gb+'GB 统一内存';
+  }else if(hw.gpu_vendor==='nvidia'||hw.gpu_vendor==='amd'){
+   hwLine=(hw.gpu_name||hw.gpu_vendor.toUpperCase())+' '+hw.vram_gb+'GB · '+hw.ram_gb+'GB 内存';
+  }else{
+   hwLine=hw.ram_gb+'GB 内存（无合格独显）';
+  }
+  $('hwInfo').textContent='硬件: '+hwLine;
+  $('hwReason').textContent=strat.reason||'';
+  $('hwNotes').textContent=(strat.notes||[]).join(' · ');
+  var act=$('hwAction');
+  if(strat.tier==='api'){
+   act.innerHTML='<button class="topbar-btn accent" onclick="openDeepSeekPlatform()">前往 DeepSeek 开放平台</button>'
+    +'<div style="font-size:11px;color:var(--t3);margin-top:4px">约 ¥10 写 30 万字 · 注册 → 充值 → 创建 Key 粘到下方设置</div>';
+  }else if(!modelDetected){
+   var labels={'qwen3.5-9b':'Qwen 3.5 9B Q4_K_M (~5.9GB)','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini (~13.5GB)'};
+   var label=labels[strat.model_key]||strat.model_key;
+   var html='<button class="topbar-btn accent" onclick="downloadModel(\''+strat.model_key+'\')">下载推荐模型: '+label+'</button>';
+   if(strat.tier==='B'&&strat.model_key!=='qwen3.5-9b'){
+    html+='<div style="margin-top:6px"><button class="topbar-btn" style="font-size:11px;padding:5px 10px" onclick="downloadModel(\'qwen3.5-9b\')">下载 Qwen 3.5 9B Q4_K_M (~5.9GB)</button></div>';
+   }
+   act.innerHTML=html;
+  }else{
+   // 已下载：识别 detect 到的文件属于哪个 Tier，跟硬件推荐对比
+   var detEl=$('localDetectedModel');
+   var detFile=detEl?detEl.textContent:'';
+   var detKey=null;
+   if(/Qwen3\.5-9B/i.test(detFile))detKey='qwen3.5-9b';
+   else if(/APEX|35B/i.test(detFile))detKey='qwen3.6-35b-apex-mini';
+   var prettyNames={'qwen3.5-9b':'Qwen 3.5 9B Q4_K_M','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini'};
+   var prettyTiers={'qwen3.5-9b':'Tier A (9B 档)','qwen3.6-35b-apex-mini':'Tier B (35B 档)'};
+   if(detKey && detKey===strat.model_key){
+    act.innerHTML='<span style="color:var(--t3);font-size:11px">当前模型: '+prettyNames[detKey]+' · '+prettyTiers[detKey]+'（与硬件推荐匹配）</span>';
+   }else if(detKey==='qwen3.5-9b' && strat.tier==='B'){
+    act.innerHTML='<div style="color:var(--t2);font-size:11px;margin-bottom:6px">当前: '+prettyNames[detKey]+'（Tier A 小号）· 您的硬件可跑更聪明的 35B</div>'
+     +'<button class="topbar-btn accent" onclick="downloadModel(\'qwen3.6-35b-apex-mini\')">升级到 '+prettyNames['qwen3.6-35b-apex-mini']+' (~13.5GB)</button>';
+   }else if(detKey==='qwen3.6-35b-apex-mini' && strat.tier==='A'){
+    act.innerHTML='<span style="color:var(--warn);font-size:11px">当前: '+prettyNames[detKey]+'（Tier B 大号）· 但您的硬件只推荐 9B，启动可能会 OOM</span>';
+   }else{
+    act.innerHTML='<span style="color:var(--t3);font-size:11px">当前模型: '+(prettyNames[detKey]||detFile)+'</span>';
+   }
+  }
+  window._localStrategy=strat;
+ });
+}
+
+function openDeepSeekPlatform(){
+ window.open('https://platform.deepseek.com/','_blank');
+}
+
 function downloadModel(preset){
- var names={'gemma-4-e2b':'Gemma 4 E2B (1.5GB)','qwen3.5-9b':'Qwen 3.5 9B (6GB)'};
+ var names={'gemma-4-e2b':'Gemma 4 E2B (1.5GB)','qwen3.5-9b':'Qwen 3.5 9B Q4_K_M (~5.9GB)','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini (~13.5GB)'};
  var name=names[preset]||preset;
  $('dlModalTitle').textContent='下载模型: '+name;
  _dlLogLines=[];
@@ -3623,6 +3721,8 @@ function _pollDownloadProgress(){
       if(el)el.textContent=d2.model;
       var ds=$('downloadSection');
       if(ds)ds.style.display='none';
+      // 模型刚下完，刷新硬件检测区把"下载推荐"换成"模型已就绪"，同时露出启动按钮
+      refreshHardwareCheck(true);
      }
     });
    }else if(status==='error'){
