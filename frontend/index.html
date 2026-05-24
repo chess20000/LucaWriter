@@ -834,16 +834,20 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .provider-block.active .pb-dot{background:var(--accent);box-shadow:0 0 6px var(--accent)}
 .provider-block .pb-name{font-size:11px;font-weight:600;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .provider-block.active .pb-name{color:var(--accent)}
-.local-llm-box{text-align:center;margin-bottom:16px;padding:14px;border:1px dashed var(--border);border-radius:var(--r2);background:var(--surface2)}
+.local-llm-box{position:relative;text-align:center;margin-bottom:16px;padding:14px;border:1px dashed var(--border);border-radius:var(--r2);background:var(--surface2)}
 .local-llm-title{font-size:14px;font-weight:700;margin-bottom:8px}
+.local-llm-info-btn{position:absolute;top:10px;right:10px;width:20px;height:20px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--t3);font-size:12px;font-weight:700;line-height:18px;text-align:center;cursor:pointer;padding:0}
+.local-llm-info-btn:hover,.local-llm-info-btn.active{border-color:var(--accent);color:var(--accent);background:var(--accent-a12)}
 .local-llm-row{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--t2)}
 .local-llm-dot{display:inline-block;width:10px;height:10px;border-radius:var(--r1);background:#888;transition:background .3s}
 .local-llm-dot.on{background:#4caf50;box-shadow:0 0 6px #4caf50}
 .local-llm-dot.off{background:#f44336;box-shadow:0 0 6px #f44336}
-.local-llm-model{font-size:11px;color:var(--t3);margin-bottom:10px}
+.local-llm-model{font-size:12px;color:var(--t2);margin-bottom:10px}
 .local-llm-progress{width:100%;height:8px;background:var(--surface3);border-radius:var(--r1);overflow:hidden;margin:10px 0;display:none}
 .local-llm-progress-bar{height:100%;background:var(--accent);width:0%;transition:width .3s}
 .local-llm-progress-text{font-size:11px;color:var(--t3);text-align:center;margin-top:4px}
+.local-llm-info-panel{display:none;margin:10px 0 0;padding:10px;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface);font-size:11px;color:var(--t3);line-height:1.55;text-align:left}
+.local-llm-info-panel.open{display:block}
 
 /* === Series & Cover === */
 .book-card-series{border-color:var(--border)}
@@ -1215,14 +1219,16 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 <div class="tab-row"><button class="tab-b active" onclick="switchSTab(this,'stAPI')">提供商</button><button class="tab-b" onclick="switchSTab(this,'stAppearance')"><span style="color:var(--accent);margin-right:3px">●</span> 外观</button><button class="tab-b" onclick="switchSTab(this,'stNetwork')">网络</button></div>
 <div id="stAPI">
  <div class="local-llm-box" id="localLLMBox">
- <div class="local-llm-title"> 内置模型</div>
+ <button class="local-llm-info-btn" id="localInfoBtn" type="button" onclick="toggleLocalLLMInfo()" title="本地模型详情">i</button>
+ <div class="local-llm-title">内置模型</div>
  <div class="local-llm-row"><span class="local-llm-dot" id="localStatusDot"></span><span id="localStatusText"></span></div>
- <div class="local-llm-model" id="localDetectedModel">自动检测中...</div>
+ <div class="local-llm-model" id="localDetectedModel" data-full-name="">模型名称：自动检测中...</div>
  <div class="local-llm-progress" id="localProgressWrap">
  <div class="local-llm-progress-bar" id="localProgressBar"></div>
  </div>
  <div class="local-llm-progress-text" id="localProgressText"></div>
- <div id="hwCheckSection" style="margin:10px 0;font-size:11px;color:var(--t3);display:none">
+ <div class="local-llm-info-panel" id="localLLMInfoPanel">
+ <div id="hwCheckSection" style="display:none">
  <div id="hwInfo"></div>
  <div id="hwReason" style="margin-top:3px"></div>
  <div id="hwNotes" style="margin-top:3px;color:var(--warn)"></div>
@@ -1234,6 +1240,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  </div>
  <div class="local-llm-progress-text" id="dlProgressText"></div>
  <button class="topbar-btn" id="btnDlCancel" onclick="cancelDownload()" style="margin:8px auto 0;display:none">取消下载</button>
+ </div>
  </div>
  <div style="display:flex;gap:8px;justify-content:center">
   <button class="topbar-btn" id="localToggleBtn" onclick="toggleLocalLLM()" style="display:none">启动本地模型</button>
@@ -3436,9 +3443,8 @@ function openSettings(){
   var prev=document.getElementById('themeColorPreview');if(prev)prev.style.background=_currentThemeAccent;
   // 获取检测到的本地模型名 + 硬件能力检测（决定推荐档位）
   api('GET','/api/local-llm/detected-model',undefined,function(d,s){
-    var el=$('localDetectedModel');
     var modelDetected=(s===200&&d.model);
-    if(el)el.textContent=modelDetected?d.model:'未检测到模型';
+    setLocalModelName(modelDetected?d.model:'');
     refreshHardwareCheck(modelDetected);
   });
   openModal('settingsModal')
@@ -3495,6 +3501,30 @@ function _refreshLocalLLMSelectedUI(){
  btn.classList.toggle('is-current',isCurrent);
  if(isCurrent){btn.textContent='已选择';btn.disabled=true;}
  else{btn.textContent='选择';btn.disabled=false;}
+}
+
+function toggleLocalLLMInfo(){
+ var panel=$('localLLMInfoPanel');
+ var btn=$('localInfoBtn');
+ if(!panel)return;
+ var open=!panel.classList.contains('open');
+ panel.classList.toggle('open',open);
+ if(btn)btn.classList.toggle('active',open);
+}
+
+function _localModelShortName(name){
+ name=(name||'').trim();
+ if(!name)return '未检测到模型';
+ if(/35B|APEX/i.test(name))return 'Qwen3.6-35B-A3B';
+ if(/Qwen3\.5-9B|9B/i.test(name))return 'Qwen3.5-9B';
+ return name;
+}
+
+function setLocalModelName(name){
+ var el=$('localDetectedModel');
+ if(!el)return;
+ el.setAttribute('data-full-name',name||'');
+ el.textContent='模型名称：'+_localModelShortName(name);
 }
 
 // 通用：把 idx 这个预设设为全局 active provider，并持久化
@@ -3563,10 +3593,9 @@ function refreshLocalLLMProgress(){
  dot.className='local-llm-dot';
  var s=window._localStrategy;
  if(s&&s.binary){
-  var bl={cuda:'CUDA（NVIDIA 加速）',vulkan:'Vulkan（AMD 加速）',metal:'Metal（Apple Silicon 加速）',cpu:'纯 CPU 推理（速度较慢）'};
-  txt.textContent='未启用 · 推理后端: '+(bl[s.binary]||s.binary);
+  txt.textContent='状态：未选择';
  }else{
-  txt.textContent='未启用';
+  txt.textContent='状态：未选择';
  }
  tbtn.textContent='启动本地模型';
  tbtn.disabled=false;
@@ -3581,8 +3610,8 @@ function refreshLocalLLMProgress(){
  var err=d.error||'';
  if(running||status==='ready'){
  dot.className='local-llm-dot on';
- txt.textContent='运行中';
- tbtn.textContent='停止本地模型';
+ txt.textContent='状态：运行中';
+ tbtn.textContent='关闭模型';
  tbtn.disabled=false;
  _showLocalProgress(false,100,'');
  if(status==='ready'&&_localLLMPollTimer){clearInterval(_localLLMPollTimer);_localLLMPollTimer=null;}
@@ -3591,13 +3620,13 @@ function refreshLocalLLMProgress(){
  }
  }else if(status==='starting'||status==='loading'){
  dot.className='local-llm-dot off';
- txt.textContent='...';
+ txt.textContent='状态：启动中';
  tbtn.textContent='...';
  tbtn.disabled=true;
  _showLocalProgress(true,prog,' '+prog+'%'+(err?' · '+err:''));
  }else if(status==='error'){
  dot.className='local-llm-dot off';
- txt.textContent='错误';
+ txt.textContent='状态：错误';
  tbtn.textContent='启动本地模型';
  tbtn.disabled=false;
  _showLocalProgress(false,0,'');
@@ -3605,7 +3634,7 @@ function refreshLocalLLMProgress(){
  toast('本地模型错误: '+(err||''),'error');
  }else{
  dot.className='local-llm-dot off';
- txt.textContent='已停止';
+ txt.textContent='状态：已关闭';
  tbtn.textContent='启动本地模型';
  tbtn.disabled=false;
  _showLocalProgress(false,0,'');
@@ -3672,7 +3701,7 @@ function refreshHardwareCheck(modelDetected){
   }else{
    // 已下载：识别 detect 到的文件属于哪个 Tier，跟硬件推荐对比
    var detEl=$('localDetectedModel');
-   var detFile=detEl?detEl.textContent:'';
+   var detFile=detEl?(detEl.getAttribute('data-full-name')||detEl.textContent):'';
    var detKey=null;
    if(/Qwen3\.5-9B/i.test(detFile))detKey='qwen3.5-9b';
    else if(/APEX|35B/i.test(detFile))detKey='qwen3.6-35b-apex-mini';
@@ -3778,8 +3807,7 @@ function _pollDownloadProgress(){
     toast('模型下载完成！','success');
     api('GET','/api/local-llm/detected-model',undefined,function(d2,s2){
      if(s2===200&&d2.model){
-      var el=$('localDetectedModel');
-      if(el)el.textContent=d2.model;
+      setLocalModelName(d2.model);
       var ds=$('downloadSection');
       if(ds)ds.style.display='none';
       // 模型刚下完，刷新硬件检测区把"下载推荐"换成"模型已就绪"，同时露出启动按钮
@@ -3843,7 +3871,7 @@ function toggleLocalLLM(){
  tbtn.disabled=false;
  window._localReadyToasted=false;
  refreshLocalLLMProgress();
- if(s===200&&d.ok){toast('本地模型已停止','success');}else{toast(d.error||'停止失败','error');}
+ if(s===200&&d.ok){toast('本地模型已关闭','success');}else{toast(d.error||'关闭失败','error');}
  });
  }
 }
