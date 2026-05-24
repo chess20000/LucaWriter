@@ -1,9 +1,35 @@
 import os
 import re
+import json
 import hashlib
 import threading
 import numpy as np
 from abc import ABC, abstractmethod
+
+
+def _pick_embedding_device():
+    """根据本地模型策略决定嵌入模型放 CPU 还是 GPU。
+    仅在 Tier A (9B) + CUDA + 显存 ≤8.5GB（9B 模型贴边塞 8GB 显卡的情况）强制 CPU，
+    把 ~300MB 显存让给 LLM（用户报告里 LLM 自己就吃掉 7.9/8GB）。
+    其它情况返回 None 让 SentenceTransformer 自己选（一般是 GPU 优先）。"""
+    try:
+        data_dir = os.environ.get('DATA_DIR') or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'usrdata'
+        )
+        strategy_file = os.path.join(data_dir, 'local_strategy.json')
+        if not os.path.exists(strategy_file):
+            return None
+        with open(strategy_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        hw = data.get('hardware') or {}
+        strat = data.get('strategy') or {}
+        if (strat.get('tier') == 'A'
+                and strat.get('binary') == 'cuda'
+                and float(hw.get('vram_gb') or 0) <= 8.5):
+            return 'cpu'
+    except Exception:
+        pass
+    return None
 
 
 class EmbeddingBackend(ABC):
@@ -43,7 +69,11 @@ class LocalEmbedding(EmbeddingBackend):
             )
             os.makedirs(cache_dir, exist_ok=True)
             try:
-                self._model = SentenceTransformer(self.model_name, cache_folder=cache_dir)
+                device = _pick_embedding_device()
+                kwargs = {'cache_folder': cache_dir}
+                if device:
+                    kwargs['device'] = device
+                self._model = SentenceTransformer(self.model_name, **kwargs)
                 self.dim = self._model.get_sentence_embedding_dimension()
             except Exception:
                 self._fallback = HashEmbedding()

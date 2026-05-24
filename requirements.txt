@@ -7,3 +7,4 @@ certifi
 cryptography
 chromadb
 numpy
+psutil

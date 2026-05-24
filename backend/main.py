@@ -2485,6 +2485,9 @@ class Handler(BaseHTTPRequestHandler):
             st['running'] = _local_llm_status()
             self.json_resp(200, st); return
 
+        if path == '/api/local-llm/speed':
+            self.json_resp(200, _local_llm_speed_snapshot()); return
+
         if path == '/api/local-llm/detected-model':
             detected = _detect_local_model()
             model_name = ''
@@ -2499,6 +2502,12 @@ class Handler(BaseHTTPRequestHandler):
             with _DOWNLOAD_LOCK:
                 st = dict(_DOWNLOAD_STATE)
             self.json_resp(200, st); return
+
+        if path == '/api/local-llm/hardware-check':
+            hw = _detect_hardware()
+            strategy = _apply_bundle_limit(_decide_local_strategy(hw))
+            _save_local_strategy(hw, strategy)
+            self.json_resp(200, {'hardware': hw, 'strategy': strategy}); return
 
 
         # 浏览器控制 API
@@ -6878,6 +6887,8 @@ os.makedirs(os.path.join(_LOCAL_LLM_DIR, 'models'), exist_ok=True)
 _LOCAL_LLM_LOCK = threading.Lock()
 _LOCAL_LLM_PROC = None
 _LOCAL_LLM_STATE = {'status': 'idle', 'progress': 0, 'error': '', 'updated': 0}
+_LOCAL_LLM_SPEED_LOCK = threading.Lock()
+_LOCAL_LLM_SPEED_STATE = {'task_key': '', 'phase': 'idle', 'n_decoded': 0, 'ts': 0.0, 'speed': 0.0, 'updated': 0.0}
 
 # ===== 模型下载管理 =====
 _DOWNLOAD_LOCK = threading.Lock()
@@ -6894,12 +6905,22 @@ _PRESET_MODELS = {
         'size_gb': 1.5,
         'desc': 'Google Gemma 4 E2B，1.5GB，128K上下文，适合入门'
     },
+    # Tier A：~7GB 总占用（5.87GB 权重 + 1GB KV + 0.5GB DeltaNet 状态）
+    # Q4_K_M = DS 部署报告里实测的版本，56 t/s gen / VRAM 7.9/8GB on 4070 Laptop
     'qwen3.5-9b': {
-        'name': 'Qwen 3.5 9B Instruct',
+        'name': 'Qwen 3.5 9B Instruct (Q4_K_M)',
         'repo': 'unsloth/Qwen3.5-9B-GGUF',
         'file': 'Qwen3.5-9B-Q4_K_M.gguf',
-        'size_gb': 6.0,
-        'desc': '阿里 Qwen3.5 9B，6GB，中文能力强'
+        'size_gb': 5.87,
+        'desc': '阿里 Qwen3.5 9B，混合 SSM 架构，原生支持 MTP，~7GB 内存即可流畅运行'
+    },
+    # Tier B：~19GB 总占用（13.3GB 权重 + 5GB KV @ 65k ctx）
+    'qwen3.6-35b-apex-mini': {
+        'name': 'Qwen 3.6 35B A3B APEX I-Mini',
+        'repo': 'mudler/Qwen3.6-35B-A3B-APEX-GGUF',
+        'file': 'Qwen3.6-35B-A3B-APEX-I-Mini.gguf',
+        'size_gb': 13.5,
+        'desc': 'MoE 35B 总参 / 3B 激活，APEX importance-aware 混合精度，~19GB 内存可跑'
     }
 }
 
@@ -7039,6 +7060,72 @@ def _local_llm_status():
     except Exception:
         return False
 
+def _reset_local_llm_speed_state():
+    with _LOCAL_LLM_SPEED_LOCK:
+        _LOCAL_LLM_SPEED_STATE.update({'task_key': '', 'phase': 'idle', 'n_decoded': 0, 'ts': 0.0, 'speed': 0.0, 'updated': time.time()})
+
+def _local_llm_speed_snapshot():
+    """Read llama.cpp /slots and estimate current local prefill/gen tokens per second."""
+    try:
+        req = urllib.request.Request('http://127.0.0.1:8080/slots', method='GET')
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode('utf-8', errors='replace'))
+    except Exception:
+        _reset_local_llm_speed_state()
+        return {'active': False, 'phase': 'idle', 'speed': 0, 'n_decoded': 0}
+
+    slots = data.get('slots') if isinstance(data, dict) else data
+    if not isinstance(slots, list):
+        slots = []
+    slot = None
+    for item in slots:
+        if isinstance(item, dict) and item.get('is_processing'):
+            slot = item
+            break
+    if not slot:
+        _reset_local_llm_speed_state()
+        return {'active': False, 'phase': 'idle', 'speed': 0, 'n_decoded': 0}
+
+    nt = slot.get('next_token') or {}
+    if isinstance(nt, list):
+        nt = nt[0] if nt and isinstance(nt[0], dict) else {}
+    if not isinstance(nt, dict):
+        nt = {}
+    try:
+        n_decoded = int(nt.get('n_decoded', slot.get('n_decoded', 0)) or 0)
+    except Exception:
+        n_decoded = 0
+
+    has_next = nt.get('has_next_token')
+    phase = 'gen' if bool(has_next) or n_decoded > 0 else 'prefill'
+    task_key = str(slot.get('id_task') if slot.get('id_task') is not None else slot.get('id', '0'))
+    now = time.time()
+    with _LOCAL_LLM_SPEED_LOCK:
+        prev_task = _LOCAL_LLM_SPEED_STATE.get('task_key', '')
+        prev_phase = _LOCAL_LLM_SPEED_STATE.get('phase', 'idle')
+        prev_n = int(_LOCAL_LLM_SPEED_STATE.get('n_decoded') or 0)
+        prev_ts = float(_LOCAL_LLM_SPEED_STATE.get('ts') or 0)
+        prev_speed = float(_LOCAL_LLM_SPEED_STATE.get('speed') or 0)
+        same_run = prev_task == task_key and prev_phase == phase and n_decoded >= prev_n and prev_ts > 0
+        speed = 0.0
+        if same_run:
+            dt = now - prev_ts
+            dn = n_decoded - prev_n
+            if dt >= 0.2 and dn > 0:
+                inst = dn / dt
+                speed = inst if prev_speed <= 0 else (prev_speed * 0.55 + inst * 0.45)
+            elif now - float(_LOCAL_LLM_SPEED_STATE.get('updated') or 0) < 1.5:
+                speed = prev_speed
+        _LOCAL_LLM_SPEED_STATE.update({
+            'task_key': task_key,
+            'phase': phase,
+            'n_decoded': n_decoded,
+            'ts': now,
+            'speed': speed,
+            'updated': now,
+        })
+    return {'active': True, 'phase': phase, 'speed': round(speed, 1), 'n_decoded': n_decoded}
+
 def _local_llm_set(status=None, progress=None, error=None):
     with _LOCAL_LLM_LOCK:
         if status is not None: _LOCAL_LLM_STATE['status'] = status
@@ -7127,15 +7214,8 @@ def _start_local_llm():
         # 清空旧日志
         open(log_path, 'w').close()
         log_fp = open(log_path, 'a', encoding='utf-8', errors='ignore')
-        cmd = [
-            exe,
-            '-m', _LOCAL_LLM_MODEL,
-            '--host', '127.0.0.1',
-            '--port', '8080',
-            '-c', '131072',
-            '-np', '1',
-            '--timeout', '300',
-        ]
+        strategy = _load_local_strategy()
+        cmd = [exe, '-m', _LOCAL_LLM_MODEL] + _build_llm_args(strategy)
         try:
             _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR, stdout=log_fp, stderr=subprocess.STDOUT,
                                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
@@ -7178,6 +7258,297 @@ def _stop_local_llm():
         _LOCAL_LLM_STATE['progress'] = 0
         _LOCAL_LLM_STATE['error'] = ''
     return True, ''
+
+# ===== 硬件检测与本地模型选型 =====
+# 决策树详见 LOCAL_MODEL_DESIGN.md。psutil.virtual_memory().total 比标称内存少 0.3-0.5GB
+# （BIOS / 显存保留），所以"32GB 起"门槛用 30，"16GB 起"用 15。
+_RAM_TIER_B = 30   # 标称 ≥32GB
+_RAM_TIER_A = 15   # 标称 ≥16GB
+_RAM_MAC_24 = 23   # 标称 ≥24GB（Mac 用于区分黄/绿）
+_VRAM_MIN   = 8    # 独显门槛
+
+# 当前安装包内置的 llama.cpp build 类型集合。其它后端的硬件即使理论上能跑，
+# 也会在 _decide_local_strategy 末尾降级到 API 兜底——避免启动失败的糟糕体验。
+# 后续补齐 Vulkan / Metal / CPU build 时把对应字符串加进来即可。
+_BUNDLED_BINARIES = {'cuda'}
+
+LOCAL_STRATEGY_FILE = os.path.join(DATA_DIR, 'local_strategy.json')
+
+def _detect_hardware():
+    """检测当前设备硬件能力。所有字段都有合理默认值，不会抛异常。"""
+    import platform
+    hw = {
+        'os': platform.system().lower(),
+        'arch': platform.machine().lower(),
+        'ram_gb': 0.0,
+        'gpu_vendor': 'none',
+        'gpu_name': '',
+        'vram_gb': 0.0,
+        'cpu_threads': os.cpu_count() or 4,
+        'is_apple_silicon': False,
+        'errors': []
+    }
+    if hw['os'] == 'darwin':
+        hw['os'] = 'macos'
+
+    try:
+        import psutil
+        hw['ram_gb'] = round(psutil.virtual_memory().total / (1024 ** 3), 1)
+    except ImportError:
+        hw['errors'].append('psutil 未安装')
+    except Exception as e:
+        hw['errors'].append(f'内存检测失败: {e}')
+
+    if hw['os'] == 'macos':
+        hw['is_apple_silicon'] = 'arm' in hw['arch'] or 'aarch' in hw['arch']
+        if hw['is_apple_silicon']:
+            hw['gpu_vendor'] = 'apple'
+            hw['vram_gb'] = hw['ram_gb']  # 统一内存
+        return hw
+
+    # NVIDIA：nvidia-smi 最准
+    try:
+        result = subprocess.run(
+            ['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
+            capture_output=True, text=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            best_vram = 0.0
+            best_name = ''
+            for line in result.stdout.strip().split('\n'):
+                parts = [p.strip() for p in line.split(',')]
+                if len(parts) >= 2:
+                    try:
+                        vram_gib = float(parts[1]) / 1024.0
+                        if vram_gib > best_vram:
+                            best_vram = vram_gib
+                            best_name = parts[0]
+                    except ValueError:
+                        continue
+            if best_vram > 0:
+                hw['gpu_vendor'] = 'nvidia'
+                hw['gpu_name'] = best_name
+                hw['vram_gb'] = round(best_vram, 1)
+    except FileNotFoundError:
+        pass
+    except subprocess.TimeoutExpired:
+        hw['errors'].append('nvidia-smi 超时')
+    except Exception as e:
+        hw['errors'].append(f'nvidia-smi 失败: {e}')
+
+    # Windows 注册表：覆盖 AMD 及 nvidia-smi 未安装的 NVIDIA。wmic AdapterRAM 在 ≥4GB 时
+    # 因 32-bit 字段被截断不可信，HardwareInformation.qwMemorySize 是 64-bit 准确值。
+    if hw['gpu_vendor'] == 'none' and hw['os'] == 'windows':
+        try:
+            import winreg
+            base = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+            )
+            best_vram = 0.0
+            best_name = ''
+            i = 0
+            while True:
+                try:
+                    subkey_name = winreg.EnumKey(base, i)
+                    i += 1
+                except OSError:
+                    break
+                if not subkey_name.isdigit():
+                    continue
+                try:
+                    sk = winreg.OpenKey(base, subkey_name)
+                    name = ''
+                    try:
+                        name = winreg.QueryValueEx(sk, 'DriverDesc')[0]
+                    except FileNotFoundError:
+                        pass
+                    vram_bytes = 0
+                    try:
+                        vram_bytes = winreg.QueryValueEx(sk, 'HardwareInformation.qwMemorySize')[0]
+                    except FileNotFoundError:
+                        try:
+                            raw = winreg.QueryValueEx(sk, 'HardwareInformation.MemorySize')[0]
+                            if isinstance(raw, int):
+                                vram_bytes = raw
+                            elif isinstance(raw, (bytes, bytearray)):
+                                vram_bytes = int.from_bytes(raw, 'little')
+                        except FileNotFoundError:
+                            pass
+                    winreg.CloseKey(sk)
+                    if isinstance(vram_bytes, int) and vram_bytes > 0:
+                        vram_gib = vram_bytes / (1024 ** 3)
+                        if vram_gib > best_vram:
+                            best_vram = vram_gib
+                            best_name = name
+                except OSError:
+                    continue
+            winreg.CloseKey(base)
+            if best_vram > 0:
+                n = best_name.upper()
+                if any(k in n for k in ('NVIDIA', 'GEFORCE', 'RTX', 'GTX', 'QUADRO', 'TESLA')):
+                    hw['gpu_vendor'] = 'nvidia'
+                elif any(k in n for k in ('AMD', 'RADEON')):
+                    hw['gpu_vendor'] = 'amd'
+                elif 'INTEL' in n:
+                    hw['gpu_vendor'] = 'intel'
+                hw['gpu_name'] = best_name
+                hw['vram_gb'] = round(best_vram, 1)
+        except ImportError:
+            pass
+        except Exception as e:
+            hw['errors'].append(f'GPU 注册表检测失败: {e}')
+
+    return hw
+
+
+def _decide_local_strategy(hw):
+    """按 LOCAL_MODEL_DESIGN.md 决策树将硬件信息映射到本地模型策略。"""
+    ram = float(hw.get('ram_gb') or 0)
+    vram = float(hw.get('vram_gb') or 0)
+    vendor = hw.get('gpu_vendor', 'none')
+    os_name = hw.get('os', '')
+    is_apple = bool(hw.get('is_apple_silicon'))
+
+    result = {
+        'tier': 'api',
+        'binary': None,
+        'model_key': None,
+        'offload_mode': None,
+        'verdict': 'red',
+        'reason': '',
+        'notes': [],
+        'cpu_threads': int(hw.get('cpu_threads') or 4),
+    }
+
+    if os_name == 'macos' and is_apple:
+        if ram >= _RAM_TIER_B:
+            result.update(tier='B', binary='metal', model_key='qwen3.6-35b-apex-mini',
+                          offload_mode='metal', verdict='green',
+                          reason=f'Apple Silicon · {ram:.0f}GB 统一内存')
+            return result
+        if ram >= _RAM_TIER_A:
+            result.update(tier='A', binary='metal', model_key='qwen3.5-9b',
+                          offload_mode='metal',
+                          verdict='green' if ram >= _RAM_MAC_24 else 'yellow',
+                          reason=f'Apple Silicon · {ram:.0f}GB 统一内存')
+            if ram < _RAM_MAC_24:
+                result['notes'].append('运行时建议关闭其他大型应用以获得更流畅体验')
+            return result
+        result['reason'] = f'Apple Silicon 仅 {ram:.0f}GB 统一内存，不足以本地运行'
+        return result
+
+    qualified_gpu = vram >= _VRAM_MIN and vendor in ('nvidia', 'amd')
+    binary_for_gpu = 'cuda' if vendor == 'nvidia' else ('vulkan' if vendor == 'amd' else None)
+
+    if qualified_gpu and ram >= _RAM_TIER_B:
+        result.update(tier='B', binary=binary_for_gpu, model_key='qwen3.6-35b-apex-mini',
+                      offload_mode='hybrid', verdict='green',
+                      reason=f'{vendor.upper()} {vram:.0f}GB 显存 + {ram:.0f}GB 内存')
+        return result
+
+    if qualified_gpu and ram < _RAM_TIER_B:
+        result.update(tier='A', binary=binary_for_gpu, model_key='qwen3.5-9b',
+                      offload_mode='full_gpu', verdict='green',
+                      reason=f'{vendor.upper()} {vram:.0f}GB 显存 · {ram:.0f}GB 内存')
+        return result
+
+    if not qualified_gpu and ram >= _RAM_TIER_B:
+        result.update(tier='B', binary='cpu', model_key='qwen3.6-35b-apex-mini',
+                      offload_mode='cpu', verdict='green',
+                      reason=f'无 ≥8GB 独显 · {ram:.0f}GB 内存（纯 CPU 推理）')
+        result['notes'].append('纯 CPU 推理速度受限，生成约每秒 5-10 字')
+        return result
+
+    if not qualified_gpu and ram >= _RAM_TIER_A:
+        result.update(tier='A', binary='cpu', model_key='qwen3.5-9b',
+                      offload_mode='cpu', verdict='yellow',
+                      reason=f'无 ≥8GB 独显 · {ram:.0f}GB 内存（纯 CPU 推理）')
+        result['notes'].append('您没有独立显卡，AI 生成约每秒 5-8 字，比云端慢但完全免费且离线')
+        result['notes'].append('运行时建议关闭其他大型应用')
+        return result
+
+    bits = []
+    if ram > 0: bits.append(f'{ram:.0f}GB 内存')
+    if vram > 0: bits.append(f'{vendor.upper()} {vram:.0f}GB 显存')
+    result['reason'] = '硬件不达标：' + ('，'.join(bits) if bits else '未识别')
+    return result
+
+
+def _apply_bundle_limit(strategy):
+    """若理论 binary 不在当前打包内，降级到 API 兜底——避免启动失败的糟糕体验。"""
+    b = strategy.get('binary')
+    if b and b not in _BUNDLED_BINARIES:
+        return {
+            'tier': 'api',
+            'binary': None,
+            'model_key': None,
+            'offload_mode': None,
+            'verdict': 'red',
+            'reason': f'本版本暂只为 NVIDIA 显卡提供本地模型支持，您的设备需要 {b.upper()} 后端',
+            'notes': ['后续版本将补齐 AMD / Apple Silicon / 纯 CPU 后端'],
+            'cpu_threads': strategy.get('cpu_threads', 4),
+        }
+    return strategy
+
+
+def _save_local_strategy(hw, strategy):
+    """把硬件 + 策略写入 LOCAL_STRATEGY_FILE 缓存。失败静默忽略。"""
+    try:
+        with open(LOCAL_STRATEGY_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'hardware': hw, 'strategy': strategy, 'detected_at': time.time()},
+                      f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _load_local_strategy():
+    """从缓存读策略，没有就重新检测并写入缓存。返回 strategy 字典。"""
+    if os.path.exists(LOCAL_STRATEGY_FILE):
+        try:
+            with open(LOCAL_STRATEGY_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if data.get('strategy'):
+                return data['strategy']
+        except Exception:
+            pass
+    hw = _detect_hardware()
+    strategy = _apply_bundle_limit(_decide_local_strategy(hw))
+    _save_local_strategy(hw, strategy)
+    return strategy
+
+
+def _build_llm_args(strategy):
+    """根据策略构建 llama-server 命令行参数（不含 exe 和模型路径）。
+    LOCAL_MODEL_DESIGN.md "启动参数" 一节的实现。"""
+    s = strategy or {}
+    cpu_t = int(s.get('cpu_threads') or 4)
+    args = [
+        '--host', '127.0.0.1',
+        '--port', '8080',
+        '-c', '65536',
+        '-fa', 'auto',
+        '-ctk', 'q8_0',
+        '-ctv', 'q8_0',
+        '-np', '1',
+        '-t', str(min(cpu_t, 8)),
+        '--timeout', '300',
+    ]
+    mode = s.get('offload_mode')
+    if mode in ('full_gpu', 'metal'):
+        args.extend(['-ngl', '99'])
+    elif mode == 'hybrid':
+        # MoE expert 张量钉在 CPU，非 expert + KV cache 上 GPU
+        args.extend(['-ngl', '99', '-ot', r'blk\.\d+\.ffn_.*_exps=CPU'])
+    elif mode == 'cpu':
+        args.extend(['-ngl', '0'])
+    # MTP 投机解码：仅 Tier A (Qwen3.5-9B) + CUDA 启用——用户在 RTX 4070 Laptop 实测 56 t/s。
+    # Tier B (Qwen3.6-35B-A3B) 在消费级 GPU 实测净亏 3-12%，关掉。
+    if s.get('binary') == 'cuda' and s.get('tier') == 'A':
+        args.extend(['--spec-type', 'draft-mtp', '--spec-draft-n-max', '1'])
+    return args
+
 
 def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=False, tools=None, tool_choice=None):
     """构建 OpenAI 兼容 API 请求"""
@@ -7236,11 +7607,13 @@ def call_ai_stream(settings, messages, max_tokens, temperature, timeout=300, on_
     _in_think = False
     _think_opened = False
     _think_closed = False
+    resp = None
     try:
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
         print(f'[call_ai_stream] URL: {url}')
         safe_headers = {k: (v[:15] + '...' if k == 'Authorization' else v) for k, v in headers.items()}
         print(f'[call_ai_stream] Headers: {safe_headers}')
+        register_ai_connection(tid, None)
         resp = urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context())
         register_ai_connection(tid, resp)
         for raw_line in resp:
@@ -7478,8 +7851,12 @@ def call_ai_full(settings, messages, max_tokens, temperature, timeout=120):
     url, headers, body_bytes, method, resp_parse, err = _prepare_ai_request(settings, messages, max_tokens, temperature, stream=False)
     if err: return None, None, err
     tid = threading.current_thread().ident
+    registered = False
+    resp = None
     try:
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+        register_ai_connection(tid, None)
+        registered = True
         resp = urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context())
         register_ai_connection(tid, resp)
         try:
@@ -7547,7 +7924,10 @@ def call_ai_full(settings, messages, max_tokens, temperature, timeout=120):
             try: resp.close()
             except: pass
             unregister_ai_connection(tid)
+            registered = False
     except Exception as e:
+        if registered:
+            unregister_ai_connection(tid)
         err_msg = str(e)
         status = getattr(e, 'code', 0)
         if hasattr(e, 'read'):
@@ -7585,8 +7965,12 @@ def call_ai_with_tools(settings, messages, max_tokens, temperature, tools=None, 
         return None, None, None, err
 
     tid = threading.current_thread().ident
+    registered = False
+    resp = None
     try:
         req = urllib.request.Request(url, data=body_bytes, headers=headers, method=method)
+        register_ai_connection(tid, None)
+        registered = True
         resp = urllib.request.urlopen(req, timeout=timeout, context=_get_ssl_context())
         register_ai_connection(tid, resp)
         try:
@@ -7613,8 +7997,11 @@ def call_ai_with_tools(settings, messages, max_tokens, temperature, tools=None, 
             try: resp.close()
             except: pass
             unregister_ai_connection(tid)
+            registered = False
 
     except urllib.error.HTTPError as e:
+        if registered:
+            unregister_ai_connection(tid)
         status = e.code
         err_msg = str(e)
         try:
@@ -7627,6 +8014,8 @@ def call_ai_with_tools(settings, messages, max_tokens, temperature, tools=None, 
         log_action('AI_ERROR', f'status={status} url={url} err={err_msg}')
         return None, None, None, f'API错误({status}): {err_msg}'
     except Exception as e:
+        if registered:
+            unregister_ai_connection(tid)
         return None, None, None, str(e)
 
 
@@ -8932,6 +9321,12 @@ def run():
     except Exception:
         pass
     _migrate_old_books()
+    # 提前生成硬件策略缓存。embeddings.py 会读它决定嵌入模型放 CPU 还是 GPU，
+    # 必须在 _warmup_embedding_backend 触发首次加载之前就位。
+    try:
+        _load_local_strategy()
+    except Exception as e:
+        log_action('STRATEGY_PREWARM_ERR', str(e)[:200])
     # 后台预热本地嵌入模型，避免用户首次给 Luca 发消息时遭遇 1-2 秒冷启动加载延迟。
     # 仅本地模型有"磁盘→RAM"加载开销；API 嵌入跳过以免浪费配额。
     def _warmup_embedding_backend():
