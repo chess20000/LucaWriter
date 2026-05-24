@@ -3662,11 +3662,11 @@ function refreshHardwareCheck(modelDetected){
    act.innerHTML='<button class="topbar-btn accent" onclick="openDeepSeekPlatform()">前往 DeepSeek 开放平台</button>'
     +'<div style="font-size:11px;color:var(--t3);margin-top:4px">约 ¥10 写 30 万字 · 注册 → 充值 → 创建 Key 粘到下方设置</div>';
   }else if(!modelDetected){
-   var labels={'qwen3.5-9b':'Qwen 3.5 9B Q4_K_M (~5.9GB)','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini (~13.5GB)'};
+   var labels={'qwen3.5-9b':'Qwen 3.5 9B DSV4 Flash MTP Q4_K_M (~5.8GB)','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini (~13.5GB)'};
    var label=labels[strat.model_key]||strat.model_key;
    var html='<button class="topbar-btn accent" onclick="downloadModel(\''+strat.model_key+'\')">下载推荐模型: '+label+'</button>';
    if(strat.tier==='B'&&strat.model_key!=='qwen3.5-9b'){
-    html+='<div style="margin-top:6px"><button class="topbar-btn" style="font-size:11px;padding:5px 10px" onclick="downloadModel(\'qwen3.5-9b\')">下载 Qwen 3.5 9B Q4_K_M (~5.9GB)</button></div>';
+    html+='<div style="margin-top:6px"><button class="topbar-btn" style="font-size:11px;padding:5px 10px" onclick="downloadModel(\'qwen3.5-9b\')">下载 Qwen 3.5 9B DSV4 Flash MTP Q4_K_M (~5.8GB)</button></div>';
    }
    act.innerHTML=html;
   }else{
@@ -3676,7 +3676,7 @@ function refreshHardwareCheck(modelDetected){
    var detKey=null;
    if(/Qwen3\.5-9B/i.test(detFile))detKey='qwen3.5-9b';
    else if(/APEX|35B/i.test(detFile))detKey='qwen3.6-35b-apex-mini';
-   var prettyNames={'qwen3.5-9b':'Qwen 3.5 9B Q4_K_M','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini'};
+   var prettyNames={'qwen3.5-9b':'Qwen 3.5 9B DSV4 Flash MTP Q4_K_M','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini'};
    var prettyTiers={'qwen3.5-9b':'Tier A (9B 档)','qwen3.6-35b-apex-mini':'Tier B (35B 档)'};
    if(detKey && detKey===strat.model_key){
     act.innerHTML='<span style="color:var(--t3);font-size:11px">当前模型: '+prettyNames[detKey]+' · '+prettyTiers[detKey]+'（与硬件推荐匹配）</span>';
@@ -3698,7 +3698,7 @@ function openDeepSeekPlatform(){
 }
 
 function downloadModel(preset){
- var names={'gemma-4-e2b':'Gemma 4 E2B (1.5GB)','qwen3.5-9b':'Qwen 3.5 9B Q4_K_M (~5.9GB)','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini (~13.5GB)'};
+ var names={'gemma-4-e2b':'Gemma 4 E2B (1.5GB)','qwen3.5-9b':'Qwen 3.5 9B DSV4 Flash MTP Q4_K_M (~5.8GB)','qwen3.6-35b-apex-mini':'Qwen 3.6 35B APEX I-Mini (~13.5GB)'};
  var name=names[preset]||preset;
  $('dlModalTitle').textContent='下载模型: '+name;
  _dlLogLines=[];

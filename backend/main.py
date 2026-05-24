@@ -7020,14 +7020,13 @@ _PRESET_MODELS = {
         'size_gb': 1.5,
         'desc': 'Google Gemma 4 E2B，1.5GB，128K上下文，适合入门'
     },
-    # Tier A：~7GB 总占用（5.87GB 权重 + 1GB KV + 0.5GB DeltaNet 状态）
-    # Q4_K_M = DS 部署报告里实测的版本，56 t/s gen / VRAM 7.9/8GB on 4070 Laptop
+    # Tier A：~7GB 总占用（5.78GB 权重 + 1GB KV + 0.5GB DeltaNet 状态）
     'qwen3.5-9b': {
-        'name': 'Qwen 3.5 9B Instruct (Q4_K_M)',
-        'repo': 'unsloth/Qwen3.5-9B-GGUF',
-        'file': 'Qwen3.5-9B-Q4_K_M.gguf',
-        'size_gb': 5.87,
-        'desc': '阿里 Qwen3.5 9B，混合 SSM 架构，原生支持 MTP，~7GB 内存即可流畅运行'
+        'name': 'Qwen 3.5 9B DeepSeek V4 Flash MTP (Q4_K_M)',
+        'repo': 'Jackrong/Qwen3.5-9B-DeepSeek-V4-Flash-MTP-GGUF',
+        'file': 'Qwen3.5-9B-DeepSeek-V4-Flash-MTP-Q4_K_M.gguf',
+        'size_gb': 5.78,
+        'desc': 'Qwen3.5 9B 的 DeepSeek V4 Flash 蒸馏版，内置 MTP，~7GB 内存即可流畅运行'
     },
     # Tier B：~19GB 总占用（13.3GB 权重 + 5GB KV @ 65k ctx）
     'qwen3.6-35b-apex-mini': {
