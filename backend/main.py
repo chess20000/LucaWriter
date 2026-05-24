@@ -13,6 +13,7 @@ import shutil
 import base64
 import xml.etree.ElementTree as ET
 import subprocess
+import socket
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote, unquote
 import urllib.request
@@ -136,13 +137,82 @@ FONT_EXTS = {'.ttf': ('font/ttf', 'truetype'), '.otf': ('font/otf', 'opentype')}
 
 RESERVED_FILES = {'settings', 'users', 'messages', 'salt', 'outline', 'sessions', 'meta'}
 
+_LOCAL_LLM_PORT_FILE = os.path.join(DATA_DIR, 'local_llm_port')
+_LOCAL_LLM_PORT_CACHE = None
+_LOCAL_LLM_PORT_MIN = 20000
+_LOCAL_LLM_PORT_MAX = 65000
+
+def _is_local_llm_preset(p):
+    name = (p.get('name') or '').lower() if isinstance(p, dict) else ''
+    return 'llama.cpp' in name
+
+def _local_llm_port_available(port):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', int(port)))
+        return True
+    except Exception:
+        return False
+
+def _get_local_llm_port():
+    """返回稳定的随机端口；首次生成后持久化到 usrdata/local_llm_port。"""
+    global _LOCAL_LLM_PORT_CACHE
+    if _LOCAL_LLM_PORT_CACHE:
+        return _LOCAL_LLM_PORT_CACHE
+    if os.path.exists(_LOCAL_LLM_PORT_FILE):
+        try:
+            with open(_LOCAL_LLM_PORT_FILE, 'r', encoding='utf-8') as f:
+                p = int(f.read().strip())
+            if _LOCAL_LLM_PORT_MIN <= p <= _LOCAL_LLM_PORT_MAX:
+                _LOCAL_LLM_PORT_CACHE = p
+                return p
+        except Exception:
+            pass
+    span = _LOCAL_LLM_PORT_MAX - _LOCAL_LLM_PORT_MIN + 1
+    port = None
+    for _ in range(80):
+        candidate = _LOCAL_LLM_PORT_MIN + secrets.randbelow(span)
+        if candidate != PORT and _local_llm_port_available(candidate):
+            port = candidate
+            break
+    if port is None:
+        port = _LOCAL_LLM_PORT_MIN + secrets.randbelow(span)
+    try:
+        with open(_LOCAL_LLM_PORT_FILE, 'w', encoding='utf-8') as f:
+            f.write(str(port))
+    except Exception:
+        pass
+    _LOCAL_LLM_PORT_CACHE = port
+    return port
+
+def _local_llm_base_url(port=None):
+    return f"http://127.0.0.1:{int(port or _get_local_llm_port())}/v1"
+
+def _normalize_local_llm_preset(p, port=None):
+    if not isinstance(p, dict) or not _is_local_llm_preset(p):
+        return False
+    expected = _local_llm_base_url(port)
+    changed = False
+    fields = {
+        'base_url': expected,
+        'api_key': '',
+        'use_custom_json': False,
+        'custom_json': '',
+        'context_length': 65536,
+    }
+    for k, v in fields.items():
+        if p.get(k) != v:
+            p[k] = v
+            changed = True
+    return changed
+
 DEFAULT_PROVIDER_PRESETS = [
     {'name': 'LMStudio', 'base_url': 'http://localhost:1234/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
     {'name': 'DeepSeek', 'base_url': 'https://api.deepseek.com', 'api_key': '', 'model': 'deepseek-chat', 'use_custom_json': False, 'custom_json': ''},
     {'name': 'MiniMax', 'base_url': 'https://api.minimaxi.com/v1', 'api_key': '', 'model': 'MiniMax-M2.5', 'use_custom_json': False, 'custom_json': ''},
     {'name': '预设4', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
     {'name': '预设5', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
-    {'name': '本地 Llama.cpp', 'base_url': 'http://127.0.0.1:8080/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
+    {'name': '本地 Llama.cpp', 'base_url': _local_llm_base_url(), 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': '', 'context_length': 65536},
 ]
 
 DEFAULT_SETTINGS = {
@@ -806,7 +876,7 @@ def get_settings():
         old_url = s.get('base_url', '')
         old_key = s.get('api_key', '')
         old_model = s.get('model', '')
-        presets = list(DEFAULT_PROVIDER_PRESETS)
+        presets = [dict(p) for p in DEFAULT_PROVIDER_PRESETS]
         if old_url or old_key or old_model:
             presets[0]['base_url'] = old_url or presets[0]['base_url']
             presets[0]['api_key'] = old_key
@@ -828,13 +898,15 @@ def get_settings():
         # 迁移：确保本地 Llama.cpp 预设存在
         has_local = any('llama.cpp' in (p.get('name') or '').lower() for p in presets)
         if not has_local:
-            presets.append({'name': '本地 Llama.cpp', 'base_url': 'http://127.0.0.1:8080/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''})
+            presets.append({'name': '本地 Llama.cpp', 'base_url': _local_llm_base_url(), 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': '', 'context_length': 65536})
             changed = True
     # 自动同步本地 Llama.cpp 预设的 model 为检测到的第一个 gguf
     detected_model_path = _detect_local_model()
     detected_model_name = os.path.splitext(os.path.basename(detected_model_path))[0] if detected_model_path else ''
     for p in presets:
-        if 'llama.cpp' in (p.get('name') or '').lower():
+        if _is_local_llm_preset(p):
+            if _normalize_local_llm_preset(p):
+                changed = True
             if detected_model_name and p.get('model') != detected_model_name:
                 p['model'] = detected_model_name
                 changed = True
@@ -878,6 +950,42 @@ def get_settings():
         s['api_key'] = active.get('api_key', '')
         s['model'] = active.get('model', '')
     return s
+
+
+def _save_settings_with_encrypted_keys(settings):
+    save_settings = json.loads(json.dumps(settings))
+    save_presets = list(save_settings.get('provider_presets', []))
+    for p in save_presets:
+        if p.get('api_key'):
+            p['api_key'] = _encrypt_str(p['api_key'])
+    save_settings['provider_presets'] = save_presets
+    if save_settings.get('api_key'):
+        save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
+    if save_settings.get('search_api_key'):
+        save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
+    save_json(SETTINGS_FILE, save_settings)
+
+
+def _activate_local_llm_provider():
+    settings = get_settings()
+    presets = settings.get('provider_presets') or []
+    local_idx = -1
+    for i, p in enumerate(presets):
+        if _is_local_llm_preset(p):
+            _normalize_local_llm_preset(p)
+            local_idx = i
+            break
+    if local_idx < 0:
+        presets.append({'name': '本地 Llama.cpp', 'base_url': _local_llm_base_url(), 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': '', 'context_length': 65536})
+        local_idx = len(presets) - 1
+    settings['provider_presets'] = presets
+    settings['active_provider_idx'] = local_idx
+    active = presets[local_idx]
+    settings['base_url'] = active.get('base_url', '')
+    settings['api_key'] = ''
+    settings['model'] = active.get('model', '')
+    _save_settings_with_encrypted_keys(settings)
+    return settings
 
 
 def _make_cover_svg(title):
@@ -5112,7 +5220,7 @@ class Handler(BaseHTTPRequestHandler):
                             for p in v:
                                 if not isinstance(p, dict):
                                     continue
-                                clean_presets.append({
+                                clean_p = {
                                     'name': str(p.get('name', '')),
                                     'base_url': str(p.get('base_url', '')),
                                     'api_key': str(p.get('api_key', '')),
@@ -5120,11 +5228,15 @@ class Handler(BaseHTTPRequestHandler):
                                     'context_length': int(p.get('context_length', 0)) if p.get('context_length') else 0,
                                     'use_custom_json': bool(p.get('use_custom_json', False)),
                                     'custom_json': str(p.get('custom_json', '')),
-                                })
+                                }
+                                _normalize_local_llm_preset(clean_p)
+                                clean_presets.append(clean_p)
                             v = clean_presets
                         else:
                             continue
                     settings[k] = v
+            for p in settings.get('provider_presets', []):
+                _normalize_local_llm_preset(p)
             settings['editor_font_presets'] = _normalize_editor_font_presets(settings.get('editor_font_presets', []))
             selected_font = _clean_editor_font_id(settings.get('editor_font_preset_id', ''))
             if selected_font and not any(p.get('id') == selected_font for p in settings['editor_font_presets']):
@@ -5182,8 +5294,11 @@ class Handler(BaseHTTPRequestHandler):
             self.json_resp(200, settings); return
 
         if path == '/api/local-llm/start':
+            settings = _activate_local_llm_provider()
             ok, err = _start_local_llm()
-            self.json_resp(200, {'ok': ok, 'error': err}); return
+            if ok:
+                settings = get_settings()
+            self.json_resp(200, {'ok': ok, 'error': err, 'settings': settings}); return
 
         if path == '/api/local-llm/stop':
             ok, err = _stop_local_llm()
@@ -7052,9 +7167,33 @@ def _detect_local_model():
 
 _LOCAL_LLM_MODEL = _detect_local_model() or os.path.join(_LOCAL_LLM_DIR, 'models', 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf')
 
+def _sync_local_provider_url(port):
+    """把"本地 Llama.cpp" provider preset 的 base_url 同步到真实端口。
+    用户首次进设置面板看到的 URL 会跟当前实际端口一致。"""
+    try:
+        s = load_json(SETTINGS_FILE) or {}
+        presets = s.get('provider_presets') or []
+        changed = False
+        for p in presets:
+            if _is_local_llm_preset(p) and _normalize_local_llm_preset(p, port):
+                changed = True
+        if changed:
+            try:
+                idx = int(s.get('active_provider_idx', 0) or 0)
+            except Exception:
+                idx = 0
+            if 0 <= idx < len(presets) and _is_local_llm_preset(presets[idx]):
+                s['base_url'] = presets[idx].get('base_url', '')
+                s['api_key'] = ''
+                s['model'] = presets[idx].get('model', '')
+            s['provider_presets'] = presets
+            save_json(SETTINGS_FILE, s)
+    except Exception:
+        pass
+
 def _local_llm_status():
     try:
-        req = urllib.request.Request('http://127.0.0.1:8080/v1/models', method='GET')
+        req = urllib.request.Request(f'http://127.0.0.1:{_get_local_llm_port()}/v1/models', method='GET')
         with urllib.request.urlopen(req, timeout=3) as resp:
             return resp.status == 200
     except Exception:
@@ -7067,7 +7206,7 @@ def _reset_local_llm_speed_state():
 def _local_llm_speed_snapshot():
     """Read llama.cpp /slots and estimate current local prefill/gen tokens per second."""
     try:
-        req = urllib.request.Request('http://127.0.0.1:8080/slots', method='GET')
+        req = urllib.request.Request(f'http://127.0.0.1:{_get_local_llm_port()}/slots', method='GET')
         with urllib.request.urlopen(req, timeout=1.5) as resp:
             data = json.loads(resp.read().decode('utf-8', errors='replace'))
     except Exception:
@@ -7148,7 +7287,15 @@ def _parse_log_progress(line):
         return 80
     if 'all slots are idle' in l or 'http server listening' in l or 'init: http server started' in l:
         return 100
-    if 'error' in l or 'fail' in l or 'cannot' in l:
+    # 原来用 'error' / 'fail' / 'cannot' 太宽，会被 W 级警告误触发——例如 TurboQuant+ 的
+    # "W common_fit_params: failed to fit params to free device memory" 是 -fit auto 跟显式
+    # ngl 99 冲突的提示，并非致命。改成只匹配明确致命模式。
+    if (' E ' in line[:24]
+            or 'fatal' in l
+            or 'panic' in l
+            or 'error loading model' in l
+            or 'failed to allocate' in l
+            or 'gguf is invalid' in l):
         return -1
     return None
 
@@ -7215,6 +7362,8 @@ def _start_local_llm():
         open(log_path, 'w').close()
         log_fp = open(log_path, 'a', encoding='utf-8', errors='ignore')
         strategy = _load_local_strategy()
+        # 同步 provider preset 的 base_url 到真实端口（避免 settings 里显示旧端口）
+        _sync_local_provider_url(_get_local_llm_port())
         cmd = [exe, '-m', _LOCAL_LLM_MODEL] + _build_llm_args(strategy)
         try:
             _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR, stdout=log_fp, stderr=subprocess.STDOUT,
@@ -7526,11 +7675,13 @@ def _build_llm_args(strategy):
     cpu_t = int(s.get('cpu_threads') or 4)
     args = [
         '--host', '127.0.0.1',
-        '--port', '8080',
+        '--port', str(_get_local_llm_port()),
         '-c', '65536',
         '-fa', 'auto',
+        # K cache 保持 q8_0（TurboQuant+ README 警告: "never lead with a turbo K"）
         '-ctk', 'q8_0',
-        '-ctv', 'q8_0',
+        # V cache 用 turbo3：约 4.6× 压缩 @ <1.5% PPL 损失，比 q8_0 省 ~75% V 显存
+        '-ctv', 'turbo3',
         '-np', '1',
         '-t', str(min(cpu_t, 8)),
         '--timeout', '300',
@@ -9311,6 +9462,19 @@ def _migrate_old_books():
             save_json(meta_path, meta)
             log_action('MIGRATE_OLD_BOOK', f'{bid}: 旧数据备份完毕，标记 needs_rebuild')
 
+
+class _QuietThreadingHTTPServer(ThreadingHTTPServer):
+    """覆盖 handle_error：客户端断连（页面刷新 / SSE 关闭 / keepalive 超时）静默吞掉，
+    其它异常按原 stderr+traceback 行为照旧。Windows 上这些 errno 出现得特别勤。"""
+    _IGNORED_EXC = (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError)
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if isinstance(exc, self._IGNORED_EXC):
+            return
+        super().handle_error(request, client_address)
+
+
 def run():
     bind_host = '127.0.0.1'
     try:
@@ -9340,7 +9504,7 @@ def run():
         except Exception as e:
             log_action('EMBEDDING_WARMUP_ERR', str(e)[:200])
     threading.Thread(target=_warmup_embedding_backend, name='embedding_warmup', daemon=True).start()
-    server = ThreadingHTTPServer((bind_host, PORT), Handler)
+    server = _QuietThreadingHTTPServer((bind_host, PORT), Handler)
     print(f'Server running on http://{bind_host}:{PORT}')
     server.serve_forever()
 

@@ -1235,7 +1235,10 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  <div class="local-llm-progress-text" id="dlProgressText"></div>
  <button class="topbar-btn" id="btnDlCancel" onclick="cancelDownload()" style="margin:8px auto 0;display:none">取消下载</button>
  </div>
- <button class="topbar-btn" id="localToggleBtn" onclick="toggleLocalLLM()" style="margin:0 auto;display:none">切换本地模型</button>
+ <div style="display:flex;gap:8px;justify-content:center">
+  <button class="topbar-btn" id="localToggleBtn" onclick="toggleLocalLLM()" style="display:none">启动本地模型</button>
+  <button class="topbar-btn" id="localSelectBtn" onclick="useLocalLLM()" style="display:block">选择</button>
+ </div>
  </div>
  <div class="provider-slider" id="providerSlider">
  <div class="provider-block active" data-idx="0" onclick="switchProviderPreset(0)"><span class="pb-dot"></span><span class="pb-name">LMStudio</span></div>
@@ -3400,7 +3403,7 @@ function openSettings(){
   {name:'MiniMax',base_url:'https://api.minimaxi.com/v1',api_key:'',model:'MiniMax-M2.5',context_length:0,use_custom_json:false,custom_json:''},
        {name:'预设4',base_url:'',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''},
   {name:'5',base_url:'',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''},
-  {name:' Llama.cpp',base_url:'http://127.0.0.1:8080/v1',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''}
+  {name:'本地 Llama.cpp',base_url:'',api_key:'',model:'',context_length:65536,use_custom_json:false,custom_json:''}
   ];
  }
  currentPresetIdx=settings.active_provider_idx||0;
@@ -3468,11 +3471,69 @@ function renderProviderSlider(){
       if(nameEl)nameEl.textContent=p.name||('预设'+(i+1));
  }
  });
+ _refreshLocalLLMSelectedUI();
+}
+
+// 找到本地 Llama.cpp 预设的 idx，找不到返回 -1
+function _findLocalLLMIdx(){
+ for(var i=0;i<providerPresets.length;i++){
+  var n=(providerPresets[i]&&providerPresets[i].name)||'';
+  if(n.toLowerCase().indexOf('llama.cpp')>=0)return i;
+ }
+ return -1;
+}
+
+// 刷新本地模型框的"当前/作为当前模型"指示
+function _refreshLocalLLMSelectedUI(){
+ var box=$('localLLMBox');
+ var btn=$('localSelectBtn');
+ if(!box||!btn)return;
+ var localIdx=_findLocalLLMIdx();
+ var activeIdx=(settings&&typeof settings.active_provider_idx==='number')?settings.active_provider_idx:-1;
+ var isCurrent=(localIdx>=0&&activeIdx===localIdx);
+ box.classList.toggle('is-current',isCurrent);
+ btn.classList.toggle('is-current',isCurrent);
+ if(isCurrent){btn.textContent='已选择';btn.disabled=true;}
+ else{btn.textContent='选择';btn.disabled=false;}
+}
+
+// 通用：把 idx 这个预设设为全局 active provider，并持久化
+function useProvider(idx,done,opts){
+ opts=opts||{};
+ if(idx<0||idx>=providerPresets.length)return;
+ // 保存当前正在编辑的预设字段（避免丢失用户输入）
+ try{saveFormToPreset(currentPresetIdx);}catch(e){}
+ currentPresetIdx=idx;
+ var payload={active_provider_idx:idx, provider_presets:providerPresets};
+ api('POST','/api/settings',payload,function(r,s){
+  if(s===200){
+   settings=r;
+   providerPresets=r.provider_presets||providerPresets;
+   currentPresetIdx=r.active_provider_idx||0;
+   applySettings();
+   renderProviderSlider();
+   loadPresetToForm(currentPresetIdx);
+   refreshLocalLLMProgress();
+   var name=(providerPresets[idx]&&providerPresets[idx].name)||'该提供商';
+   if(!opts.silent)toast('已切换到 '+name,'success');
+   if(done)done(true,r);
+  }else{
+   toast((r&&r.error)||'切换失败','error');
+   if(done)done(false,r);
+  }
+ });
+}
+
+// 选择本地模型作为当前提供商
+function useLocalLLM(){
+ var idx=_findLocalLLMIdx();
+ if(idx<0){toast('未找到本地 Llama.cpp 预设','error');return;}
+ useProvider(idx);
 }
 
 function isLocalPreset(){
  var p=providerPresets[currentPresetIdx];
- return p && p.name && p.name.indexOf(' Llama.cpp')>=0;
+ return !!(p && p.name && p.name.toLowerCase().indexOf('llama.cpp')>=0);
 }
 
 function _showLocalProgress(show, pct, text){
@@ -3738,6 +3799,27 @@ function _pollDownloadProgress(){
  },800);
 }
 
+function _startLocalLLMRequest(tbtn){
+ api('POST','/api/local-llm/start',{},function(d,s){
+ if(s===200&&d.ok){
+ if(d.settings){
+  settings=d.settings;
+  providerPresets=d.settings.provider_presets||providerPresets;
+  if(typeof d.settings.active_provider_idx==='number')currentPresetIdx=d.settings.active_provider_idx;
+  applySettings();
+  renderProviderSlider();
+  loadPresetToForm(currentPresetIdx);
+ }
+ _pollLocalLLMProgress();
+ }else{
+ tbtn.disabled=false;
+ window._localReadyToasted=false;
+ refreshLocalLLMProgress();
+ toast((d&&d.error)||'启动失败','error');
+ }
+ });
+}
+
 function toggleLocalLLM(){
  var tbtn=$('localToggleBtn');
  if(!tbtn||tbtn.disabled)return;
@@ -3745,30 +3827,16 @@ function toggleLocalLLM(){
  if(starting){
  tbtn.disabled=true;
  window._localReadyToasted=false;
- // 
- if(!isLocalPreset()){
- saveFormToPreset(currentPresetIdx);
- // 
- var localIdx=-1;
- for(var i=0;i<providerPresets.length;i++){
- if(providerPresets[i].name&&providerPresets[i].name.indexOf(' Llama.cpp')>=0){localIdx=i;break;}
- }
- if(localIdx>=0){
- currentPresetIdx=localIdx;
- renderProviderSlider();
- loadPresetToForm(currentPresetIdx);
- }
- }
- api('POST','/api/local-llm/start',{},function(d,s){
- if(s===200&&d.ok){
- _pollLocalLLMProgress();
+ var localIdx=_findLocalLLMIdx();
+ var activeIdx=(settings&&typeof settings.active_provider_idx==='number')?settings.active_provider_idx:-1;
+ if(localIdx>=0&&activeIdx!==localIdx){
+  useProvider(localIdx,function(ok){
+   if(ok){_startLocalLLMRequest(tbtn);}
+   else{tbtn.disabled=false;refreshLocalLLMProgress();}
+  },{silent:true});
  }else{
- tbtn.disabled=false;
- window._localReadyToasted=false;
- refreshLocalLLMProgress();
- if(s===200&&d.ok){toast('本地模型已停止','success');}else{toast(d.error||'停止失败','error');}
+  _startLocalLLMRequest(tbtn);
  }
- });
  }else{
  tbtn.disabled=true;
  api('POST','/api/local-llm/stop',{},function(d,s){
@@ -3781,21 +3849,19 @@ function toggleLocalLLM(){
 }
 
 function switchProviderPreset(idx){
- if(idx===currentPresetIdx)return;
- //
- saveFormToPreset(currentPresetIdx);
- currentPresetIdx=idx;
- renderProviderSlider();
- loadPresetToForm(currentPresetIdx);
- refreshLocalLLMProgress();
+ if(idx===currentPresetIdx && settings && settings.active_provider_idx===idx)return;
+ // 点击块 = 直接切换 provider（持久化 + 通知所有 UI 重算 is-current 高亮）
+ useProvider(idx);
 }
 
  function loadPresetToForm(idx){
   var p=providerPresets[idx];
   if(!p)return;
   if(isLocalPreset()){
-  p.base_url='http://127.0.0.1:8080/v1';
-  $('sUrl').value='http://127.0.0.1:8080/v1';
+  // URL 由后端 _sync_local_provider_url 在 _start_local_llm 时自动写入，前端只读
+  $('sUrl').value=p.base_url||'http://127.0.0.1:?/v1';
+  $('sUrl').readOnly=true;
+  $('sUrl').title='本地模型 URL 由后端按随机端口自动管理，不可手动改';
   $('sKey').value='';
   $('sModel').innerHTML='<option value="">本地模型自动检测</option>';
   syncCSById('sModel');
@@ -3803,6 +3869,8 @@ function switchProviderPreset(idx){
   $('sCustomJson').value='';
   toggleCustomJson();
   }else{
+  $('sUrl').readOnly=false;
+  $('sUrl').title='';
   $('sUrl').value=p.base_url||'';
   $('sKey').value=p.api_key||'';
   if(p.model){
@@ -3823,7 +3891,7 @@ function saveFormToPreset(idx){
   var p=providerPresets[idx];
   if(!p)return;
   if(isLocalPreset()){
-  p.base_url='http://127.0.0.1:8080/v1';
+  p.base_url=$('sUrl').value||p.base_url||'';
   p.api_key='';
   p.use_custom_json=false;
   p.custom_json='';
