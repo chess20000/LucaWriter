@@ -677,8 +677,8 @@ def _read_chapter_subagent(settings, chapter_title, chapter_content, fallback_te
 请输出结构化 JSON，不要代码块：
 {{
   "summary": "200-400 字的事实摘要，只包含原文明确陈述的信息",
-  "entities": [{"name": "出现的人物/实体名", "type": "人物/物品/地点/势力/概念", "facts": ["原文明确提到的事实"]}],
-  "events": [{"description": "章节中发生的具体事件"}],
+  "entities": [{{"name": "出现的人物/实体名", "type": "人物/物品/地点/势力/概念", "facts": ["原文明确提到的事实"]}}],
+  "events": [{{"description": "章节中发生的具体事件"}}],
   "key_points": ["关键事实点（每条约 10-20 字）"]
 }}"""
     msgs = [
