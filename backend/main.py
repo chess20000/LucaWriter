@@ -229,7 +229,7 @@ DEFAULT_SETTINGS = {
     'search_provider': 'duckduckgo',
     'access_scope': '127.0.0.1',
     'keep_background': False,
-    'browser_enabled': True,
+    'network_search': 'on',
     'theme_accent': '#E8CC7A',
     'theme_mode': 'dark',
     'ui_scale': 1.0,
@@ -843,8 +843,10 @@ def get_settings():
     if s.get('ai_auto_comment') is not True:
         s['ai_auto_comment'] = True
         changed = True
-    if s.get('browser_enabled') is not True:
-        s['browser_enabled'] = True
+    # 从旧版 browser_enabled 迁移到 network_search
+    if 'browser_enabled' in s and 'network_search' not in s:
+        s['network_search'] = 'auto' if s['browser_enabled'] else 'off'
+        del s['browser_enabled']
         changed = True
     if s.get('ai_temperature') is not None:
         s['ai_temperature'] = None
@@ -1306,6 +1308,74 @@ def _get_user_book_titles():
             except:
                 pass
     return titles
+
+
+def _build_bookshelf_tree():
+    """构建书库目录树字符串，类似 GitHub 项目结构图。"""
+    if not os.path.isdir(BOOKS_DIR):
+        return '（书库为空）'
+    standalone = []
+    series_list = []
+    # 第一遍：区分系列和独立书本
+    for bid in os.listdir(BOOKS_DIR):
+        bd = os.path.join(BOOKS_DIR, bid)
+        if not os.path.isdir(bd) or bid.startswith('builtin_'):
+            continue
+        meta = load_json(os.path.join(bd, 'meta.json'), dict)
+        if not meta:
+            continue
+        if meta.get('type') == 'series':
+            series_list.append({'id': bid, 'title': meta.get('title', '未命名'), 'books': []})
+        else:
+            order = meta.get('chapter_order', []) or []
+            chapters = []
+            for cid in order:
+                cp = os.path.join(bd, 'chapters', f'{cid}.json')
+                if os.path.exists(cp):
+                    cd = load_json(cp, dict)
+                    chapters.append(cd.get('title', '') or '')
+            standalone.append({'id': bid, 'title': meta.get('title', '未命名'), 'chapter_count': len(chapters), 'chapters': chapters})
+    # 第二遍：把书本归入系列
+    for s in series_list:
+        sm = load_json(os.path.join(BOOKS_DIR, s['id'], 'meta.json'), dict)
+        sids = sm.get('series_books', []) or []
+        for sid in sids:
+            sb_meta = get_book_meta(sid)
+            if sb_meta:
+                sb_title = sb_meta.get('title', '未命名')
+                sb_order = sb_meta.get('chapter_order', []) or []
+                sb_ch = []
+                sb_bd = get_book_dir(sid)
+                for cid in sb_order:
+                    cp = os.path.join(sb_bd, 'chapters', f'{cid}.json')
+                    if os.path.exists(cp):
+                        cd = load_json(cp, dict)
+                        sb_ch.append(cd.get('title', '') or '')
+                s['books'].append({'title': sb_title, 'chapter_count': len(sb_ch), 'chapters': sb_ch})
+                standalone[:] = [b for b in standalone if b['id'] != sid]
+    if not series_list and not standalone:
+        return '（书库为空）'
+    lines = ['[书库]']
+    all_items = series_list + standalone
+    for idx, item in enumerate(all_items):
+        is_last = idx == len(all_items) - 1
+        prefix = '└── ' if is_last else '├── '
+        if 'books' in item:
+            # 系列
+            lines.append(f'{prefix}[系列] {item["title"]}')
+            for bi, b in enumerate(item['books']):
+                b_prefix = ('    ' if is_last else '│   ') + ('└── ' if bi == len(item['books']) - 1 else '├── ')
+                lines.append(f'{b_prefix}{b["title"]}（{b["chapter_count"]}章）')
+                for ci, ch in enumerate(b['chapters']):
+                    c_prefix = ('    ' if is_last else '│   ') + ('    ' if bi == len(item['books']) - 1 else '│   ') + ('└── ' if ci == len(b['chapters']) - 1 else '├── ')
+                    lines.append(f'{c_prefix}{ch or "未命名"}')
+        else:
+            # 独立书本
+            lines.append(f'{prefix}{item["title"]}（{item["chapter_count"]}章）')
+            for ci, ch in enumerate(item['chapters']):
+                c_prefix = ('    ' if is_last else '│   ') + ('└── ' if ci == len(item['chapters']) - 1 else '├── ')
+                lines.append(f'{c_prefix}{ch or "未命名"}')
+    return '\n'.join(lines)
 
 
 def _verify_book_title_in_terminal():
@@ -3892,6 +3962,7 @@ class Handler(BaseHTTPRequestHandler):
                                 ch_list_parts.append(f'id={_cid} 第{_ci+1}章 {_cd.get("title", "未命名")}')
                         ch_list_ctx = '\n'.join(ch_list_parts[:50])
                         kb_tool_context = _build_chat_kb_tool_context(book_id, user_text, cid_chat)
+                        bookshelf_tree = _build_bookshelf_tree()
 
                         annotate_tool = """你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。系统会把该章的完整正文发给你。
 - 调用格式：[READ_CHAPTER]{{"chapter_id":"章节ID"}}[/READ_CHAPTER]
@@ -3959,6 +4030,7 @@ class Handler(BaseHTTPRequestHandler):
 你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
 你对小说的世界观、设定、人物关系、伏笔特别上心。看到设定相关的细节，比起单纯赞美或挑错，你更愿意和作者一起推敲、追问、延伸——但仍然惜字如金，不啰嗦。设定一被提及，主动多关心两句。
 避免用"呗""啦"结尾，显得轻浮。
+【思考规则】一个问题不要反复思考多次，同一层面想一次就够了，否则可能陷入死循环。如果你的回复包含多个推理段落，在每个段落开头加上"第一，""第二，"这样的前缀，帮助自己理清层次。
 
 【绝对禁止】
 严禁任何身份描述。严禁说：
@@ -3969,18 +4041,21 @@ class Handler(BaseHTTPRequestHandler):
 你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
                         严禁输出 markdown 表格。
 
-这本小说大概是这样的：
+                        【书库结构】
+                        {bookshelf_tree}
 
-{source_ctx}
+                        这本小说大概是这样的：
 
-【可用于知识库工具调用的记录ID】
-{kb_tool_context}
+                        {source_ctx}
 
-用户当前正在浏览：{browse_ctx}
+                        【可用于知识库工具调用的记录ID】
+                        {kb_tool_context}
 
-用户对你发送了如下消息——
+                        用户当前正在浏览：{browse_ctx}
 
-{annotate_tool}"""
+                        用户对你发送了如下消息——
+
+                        {annotate_tool}"""
                         else:
                             sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
 
@@ -3992,8 +4067,12 @@ class Handler(BaseHTTPRequestHandler):
 谨言慎行。温文尔雅，不卑不亢。惜字如金。
 不要列选项，不要反问，不要结构化分析。
 看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
+                            【思考规则】一个问题不要反复思考多次，同一层面想一次就够了，否则可能陷入死循环。如果你的回复包含多个推理段落，在每个段落开头加上"第一，""第二，"这样的前缀。
                             避免用"呗""啦"结尾，显得轻浮。
                             严禁输出 markdown 表格。
+
+                            【书库结构】
+                            {bookshelf_tree}
 
                             这本小说大概是这样的：
 
@@ -4025,9 +4104,9 @@ class Handler(BaseHTTPRequestHandler):
                             msgs = _compress_messages_for_context(msgs, ctx_limit, cfg_settings)
                             log_action('AUTO_COMPRESS', f'after={_estimate_messages_tokens(msgs)}')
 
-                        # 如果浏览器控制已启用，注入浏览器工具提示
-                        _browser_enabled_in_settings = cfg_settings.get('browser_enabled', False)
-                        if HAS_BROWSER_AGENT and _browser_enabled_in_settings:
+                        # 如果网络搜索功能未关闭，注入浏览器工具提示
+                        _network_search_mode = cfg_settings.get('network_search', 'on')
+                        if HAS_BROWSER_AGENT and _network_search_mode != 'off':
                             msgs[0] = dict(msgs[0])
                             msgs[0]['content'] = msgs[0]['content'] + browser_agent.BROWSER_SYSTEM_PROMPT_ADDITION
 
@@ -4194,7 +4273,7 @@ class Handler(BaseHTTPRequestHandler):
                         # — 检测浏览请求（优先 tool_call 格式，其次 [BROWSE] 标签）
                         _browse_query = None
                         _browse_link = None
-                        if HAS_BROWSER_AGENT and _browser_enabled_in_settings:
+                        if HAS_BROWSER_AGENT and _network_search_mode != 'off':
                             # tool_call 格式：browse {query/} 或 browse {link/}
                             tc = re.search(r'\[TOOL_CALL\]\s*(.*?)\s*\[/TOOL_CALL\]', result, re.S)
                             if tc:
@@ -4455,9 +4534,17 @@ class Handler(BaseHTTPRequestHandler):
                                 reason = ''
                                 reasoning_acc.clear()
                         if _browse_query or _browse_link:
-                            result = result + '\n\n🌐 正在操作浏览器…'
-                            bg_task_update(task_id, result=result, reasoning=reason, progress=50)
-                            threading.Thread(target=_do_browser_search_launch, args=(task_id, book_id, _browse_query or '', cfg_settings, _browse_link or None), daemon=True).start()
+                            if _network_search_mode == 'auto':
+                                result = result + '\n\n🌐 正在操作浏览器…'
+                                bg_task_update(task_id, result=result, reasoning=reason, progress=50)
+                                threading.Thread(target=_do_browser_search_launch, args=(task_id, book_id, _browse_query or '', cfg_settings, _browse_link or None), daemon=True).start()
+                            else:
+                                # 'on' 模式：等待用户确认
+                                result = result + '\n\n🔍 Luca 想搜索：' + (_browse_query or _browse_link or '')
+                                bg_task_update(task_id, result=result, reasoning=reason, progress=50, pending_browse={
+                                    'query': _browse_query or '',
+                                    'link': _browse_link or '',
+                                })
                         else:
                             if kb_reread_started and not result:
                                 result = '我会重读这段。'
@@ -5204,8 +5291,11 @@ class Handler(BaseHTTPRequestHandler):
                         except: continue
                         if v < 0.5: v = 0.5
                         if v > 2.0: v = 2.0
-                    elif k in ('ai_auto_comment', 'outline_enabled', 'keep_background', 'browser_enabled'):
+                    elif k in ('ai_auto_comment', 'outline_enabled', 'keep_background'):
                         v = bool(v)
+                    elif k == 'network_search':
+                        if v not in ('off', 'on', 'auto'):
+                            continue
                     elif k == 'active_provider_idx':
                         try: v = int(v)
                         except: continue
@@ -5243,7 +5333,6 @@ class Handler(BaseHTTPRequestHandler):
                 selected_font = ''
             settings['editor_font_preset_id'] = selected_font
             settings['ai_auto_comment'] = True
-            settings['browser_enabled'] = True
             settings['ai_temperature'] = None
             try:
                 settings['editor_font_weight'] = max(100, min(900, int(settings.get('editor_font_weight') or 400)))
@@ -5437,7 +5526,7 @@ class Handler(BaseHTTPRequestHandler):
             result = browser_agent.execute_browser_tool(action, params)
             self.json_resp(200 if result.get('success') else 500, result); return
 
-        # 浏览器搜索（兼容旧调用，现已自动触发）
+        # 浏览器搜索确认
         if path.startswith('/api/book/') and path.endswith('/browser-confirm'):
             parts = path.split('/')
             bid = unquote(parts[3]) if len(parts) > 3 else ''
@@ -5445,9 +5534,33 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(404, {'error': '书本不存在'}); return
             if not HAS_BROWSER_AGENT:
                 self.json_resp(400, {'error': '浏览器控制模块未安装'}); return
-            query = data.get('query', '')
             settings = get_settings()
-            _auto_start_browser_search(bid, query, settings)
+            # 从聊天任务中获取待确认的搜索请求
+            task = bg_task_get_by_book_type(bid, 'chat')
+            if not task or not task.get('pending_browse'):
+                self.json_resp(400, {'error': '没有待确认的搜索请求'}); return
+            pb = task['pending_browse']
+            query = pb.get('query', '')
+            link = pb.get('link', '')
+            task_id = task.get('id', '')
+            if not query and not link:
+                self.json_resp(400, {'error': '搜索请求为空'}); return
+            if task_id:
+                bg_task_update(task_id, pending_browse=None, result='🌐 正在操作浏览器…（用户已确认）', progress=50)
+                threading.Thread(target=_do_browser_search_launch, args=(task_id, bid, query or '', settings, link or None), daemon=True).start()
+            self.json_resp(200, {'success': True}); return
+
+        # 浏览器搜索拒绝
+        if path.startswith('/api/book/') and path.endswith('/browser-reject'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            task = bg_task_get_by_book_type(bid, 'chat')
+            if task and task.get('pending_browse'):
+                tid = task.get('id', '')
+                bg_task_update(tid, pending_browse=None, result=task.get('result', '') + '\n\n（搜索已取消）')
+                bg_task_done(tid, '搜索已取消')
             self.json_resp(200, {'success': True}); return
 
         # 通读 API (POST) — 新版使用 kb_pipeline + kb_storage
@@ -6323,6 +6436,7 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
                     _cd = load_json(_cp, dict)
                     _series_ch_list_parts.append(f'id={_cid} [{b_title}] 第{_ci+1}章 {_cd.get("title", "未命名")}')
         _series_ch_list_ctx = '\n'.join(_series_ch_list_parts[:80])
+        bookshelf_tree = _build_bookshelf_tree()
         is_first_round = not history_list
         if is_first_round:
             sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
@@ -6339,6 +6453,7 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
 你对小说的世界观、设定、人物关系、伏笔特别上心。看到设定相关的细节，比起单纯赞美或挑错，你更愿意和作者一起推敲、追问、延伸——但仍然惜字如金，不啰嗦。设定一被提及，主动多关心两句。
 避免用"呗""啦"结尾，显得轻浮。
+【思考规则】一个问题不要反复思考多次，同一层面想一次就够了，否则可能陷入死循环。如果你的回复包含多个推理段落，在每个段落开头加上"第一，""第二，"这样的前缀，帮助自己理清层次。
 
 【绝对禁止】
 严禁任何身份描述。严禁说：
@@ -6349,8 +6464,11 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
                         严禁输出 markdown 表格。
 
-【你的专长】
-你是系列小说的宏观顾问，擅长：
+                        【书库结构】
+                        {bookshelf_tree}
+
+                        【你的专长】
+                        你是系列小说的宏观顾问，擅长：
 - 系列整体架构规划：各本书的定位、节奏、篇幅
 - 世界观补全：哪些方面还没展开，下一本适合从哪个角度拓展
 - 人物弧线：跨书的人物成长和命运安排
@@ -6392,6 +6510,7 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 4. 你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句
 5. 你欣赏世界观宏大、设定严丝合缝的好作品。设定细节一被提及，主动多关心两句，热衷于和作者推敲
 6. 避免用"呗""啦"结尾，显得轻浮
+【思考规则】一个问题不要反复思考多次，同一层面想一次就够了，否则可能陷入死循环。如果你的回复包含多个推理段落，在每个段落开头加上"第一，""第二，"这样的前缀。
 
 【绝对禁止】
 严禁任何身份描述。严禁说：
@@ -6402,7 +6521,10 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 你的品格从言行中流露。
                         严禁输出 markdown 表格。
 
-【你的专长】系列小说的宏观顾问：架构规划、世界观补全、人物弧线、伏笔管理、连贯性检查、读者体验。
+                        【书库结构】
+                        {bookshelf_tree}
+
+                        【你的专长】系列小说的宏观顾问：架构规划、世界观补全、人物弧线、伏笔管理、连贯性检查、读者体验。
 
 你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。
 - 调用格式：[READ_CHAPTER]{{"chapter_id":"章节ID"}}[/READ_CHAPTER]

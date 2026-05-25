@@ -1190,6 +1190,16 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 <div class="prompt-bg" id="promptBg">
 <div class="prompt-box"><h3 id="promptTitle">输入</h3><input id="promptInput" placeholder=""><div class="prompt-btns"><button class="prompt-cancel" onclick="closePrompt()">取消</button><button class="prompt-ok" onclick="doPromptOk()">确定</button></div></div></div>
 
+<div class="modal-bg" id="noProviderModal">
+<div class="modal" style="text-align:center;max-width:360px">
+  <h2 style="margin-bottom:12px">未选择 AI 提供商</h2>
+  <p id="noProviderMsg" style="font-size:13px;color:var(--t2);margin-bottom:20px;line-height:1.7">当前未选择可用的 AI 提供商，无法与 Luca 对话。</p>
+  <div style="display:flex;flex-direction:column;gap:8px;align-items:center">
+    <button class="prompt-ok" onclick="closeModal('noProviderModal');_startBuiltinModelFlow()" style="width:100%;padding:10px 20px;font-size:14px">使用内置模型</button>
+    <button class="prompt-cancel" onclick="closeModal('noProviderModal')" style="width:auto;padding:6px 16px;font-size:12px">取消</button>
+  </div>
+</div></div>
+
 <div class="modal-bg" id="importVerifyModal">
 <div class="modal import-verify">
 <div class="iv-head"><h2>导入校验</h2><span class="iv-confidence" id="ivConfidence"></span></div>
@@ -1755,6 +1765,19 @@ function toast(msg,type,dur){var t=$('toast');t.textContent=msg;t.className='toa
 function showConfirm(title,msg,cb,danger){$('confirmTitle').textContent=title;$('confirmMsg').textContent=msg;$('confirmOkBtn').className='confirm-ok'+(danger?' danger':'');$('confirmOkBtn').style.display='';document.querySelector('#confirmBg .confirm-cancel').textContent='取消';_confirmCb=cb;$('confirmBg').classList.add('open')}
 function closeConfirm(){$('confirmBg').classList.remove('open');_confirmCb=null}
 function doConfirmOk(){var cb=_confirmCb;closeConfirm();if(cb)cb()}
+function _startBuiltinModelFlow(){
+ openSettings();
+ api('GET','/api/local-llm/hardware-check',undefined,function(d,s){
+  if(s!==200)return;
+  var strat=d.strategy||{};
+  if(strat.tier==='api'){
+   toast('当前硬件不适合运行本地模型，建议使用 API 提供商','warn');
+   return;
+  }
+  var key=strat.tier==='B'?'qwen3.5-9b':(strat.model_key||'qwen3.5-9b');
+  downloadModel(key);
+ });
+}
 function showPrompt(title,placeholder,defaultVal,cb){$('promptTitle').textContent=title;$('promptInput').placeholder=placeholder;$('promptInput').value=defaultVal||'';_confirmCb=cb;$('promptBg').classList.add('open');setTimeout(function(){$('promptInput').focus()},50)}
 function closePrompt(){$('promptBg').classList.remove('open');_confirmCb=null}
 function doPromptOk(){var cb=_confirmCb;var v=$('promptInput').value;closePrompt();if(cb)cb(v)}
@@ -2752,6 +2775,11 @@ function addAIMessage(text,type,reasoning){aiMessages.push({text:text,type:type,
 function sendAI(){
  var text=$('aiInput').value.trim();
  if(!text||!bookId)return;
+ var ap=providerPresets[currentPresetIdx];
+ if(!ap||!ap.base_url||!ap.base_url.trim()){
+  openModal('noProviderModal');
+  return;
+ }
  $('aiInput').value='';
  var sb=$('leftSidebar'),tr=$('sidebarTrigger');
  if(sb&&!sb.classList.contains('collapsed')){sb.classList.add('collapsed');if(tr)tr.classList.remove('expanded')}
