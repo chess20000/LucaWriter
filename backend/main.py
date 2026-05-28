@@ -134,6 +134,17 @@ SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
 USERS_FILE = os.path.join(DATA_DIR, 'users.json')
 SESSIONS_FILE = os.path.join(DATA_DIR, 'sessions.json')
 FONT_EXTS = {'.ttf': ('font/ttf', 'truetype'), '.otf': ('font/otf', 'opentype')}
+BUILTIN_EDITOR_FONT_IDS = {'builtin_serif', 'builtin_sans', 'builtin_mono'}
+_MB = 1024 * 1024
+ZIP_MAX_ENTRIES = 5000
+ZIP_MAX_TOTAL_BYTES = 500 * _MB
+ZIP_MAX_ENTRY_BYTES = 100 * _MB
+ZIP_READ_CHUNK = 256 * 1024
+DOCX_MAX_XML_BYTES = 40 * _MB
+EPUB_MAX_META_BYTES = 5 * _MB
+EPUB_MAX_HTML_BYTES = 12 * _MB
+EPUB_MAX_TEXT_TOTAL_BYTES = 120 * _MB
+EPUB_MAX_COVER_BYTES = 12 * _MB
 
 RESERVED_FILES = {'settings', 'users', 'messages', 'salt', 'outline', 'sessions', 'meta'}
 
@@ -234,7 +245,7 @@ DEFAULT_SETTINGS = {
     'theme_mode': 'dark',
     'ui_scale': 1.0,
     'content_font_size': 20,
-    'editor_font_weight': 400,
+    'editor_font_weight': 200,
     'editor_font_preset_id': '',
     'editor_font_presets': [],
     'embedding_backend': 'local',
@@ -374,7 +385,8 @@ def _import_lucawrite_zip(raw, password=None):
     except zipfile.BadZipFile:
         raise ValueError('无效的 .lucawrite 文件（无法解压）')
     try:
-        manifest_str = zf.read('manifest.json').decode('utf-8')
+        _validate_zip_archive(zf)
+        manifest_str = _zip_read_limited(zf, 'manifest.json', EPUB_MAX_META_BYTES).decode('utf-8')
         manifest = json.loads(manifest_str)
     except Exception:
         raise ValueError('无效的 .lucawrite 文件（缺少 manifest.json）')
@@ -383,6 +395,11 @@ def _import_lucawrite_zip(raw, password=None):
     bid = 'book_' + str(int(time.time() * 1000))
     bd = get_book_dir(bid)
     os.makedirs(bd, exist_ok=True)
+    # zip bomb 防护：单文件 100MB，总解压 500MB；逐 chunk 流式写避免一次性 RAM
+    _MAX_PER_ENTRY = 100 * 1024 * 1024
+    _MAX_TOTAL = 500 * 1024 * 1024
+    _CHUNK = 256 * 1024
+    total_written = 0
     for info in zf.infolist():
         if info.filename == 'manifest.json':
             continue
@@ -392,13 +409,29 @@ def _import_lucawrite_zip(raw, password=None):
         safe_name = info.filename.replace('\\', '/')
         if safe_name.startswith('/') or '..' in safe_name.split('/'):
             continue
+        if info.file_size > _MAX_PER_ENTRY:
+            log_action('LW_IMPORT_SKIP_BIG', f'{safe_name} size={info.file_size}')
+            continue
+        if total_written + info.file_size > _MAX_TOTAL:
+            raise ValueError(f'.lucawrite 解压超过 {_MAX_TOTAL // 1024 // 1024}MB 上限')
         fp = os.path.join(bd, safe_name)
         if not os.path.realpath(fp).startswith(os.path.realpath(bd)):
             continue
         os.makedirs(os.path.dirname(fp), exist_ok=True)
         try:
-            with open(fp, 'wb') as f:
-                f.write(zf.read(info.filename))
+            written_this = 0
+            with zf.open(info.filename) as src, open(fp, 'wb') as dst:
+                while True:
+                    chunk = src.read(_CHUNK)
+                    if not chunk: break
+                    written_this += len(chunk)
+                    if written_this > _MAX_PER_ENTRY:
+                        # 压缩比异常，提前中止
+                        raise ValueError(f'{safe_name} 解压超过单文件上限')
+                    dst.write(chunk)
+            total_written += written_this
+        except ValueError:
+            raise
         except Exception:
             continue
     meta = get_book_meta(bid) or {}
@@ -623,7 +656,7 @@ def verify_password(pw, stored):
         try:
             _, salt, expected = stored.split(':')
             dk = hashlib.pbkdf2_hmac('sha256', pw.encode('utf-8'), salt.encode(), PW_HASH_ITERS, dklen=32)
-            return dk.hex() == expected
+            return hmac.compare_digest(dk.hex(), expected)
         except Exception:
             return False
     # 兼容旧版 SHA-256 哈希
@@ -852,9 +885,9 @@ def get_settings():
         s['ai_temperature'] = None
         changed = True
     try:
-        fw = max(100, min(900, int(s.get('editor_font_weight') or 400)))
+        fw = max(100, min(900, int(s.get('editor_font_weight') or 200)))
     except Exception:
-        fw = 400
+        fw = 200
     if fw != s.get('editor_font_weight'):
         s['editor_font_weight'] = fw
         changed = True
@@ -863,7 +896,7 @@ def get_settings():
         s['editor_font_presets'] = normalized_fonts
         changed = True
     selected_font = _clean_editor_font_id(s.get('editor_font_preset_id', ''))
-    if selected_font and not any(p.get('id') == selected_font for p in normalized_fonts):
+    if selected_font and selected_font not in BUILTIN_EDITOR_FONT_IDS and not any(p.get('id') == selected_font for p in normalized_fonts):
         selected_font = ''
     if selected_font != s.get('editor_font_preset_id', ''):
         s['editor_font_preset_id'] = selected_font
@@ -1454,7 +1487,14 @@ def make_session(username, remember=False, device_name=''):
     return token
 
 
+_V0_MIGRATION_MARKER = os.path.join(DATA_DIR, '.migration_v0_done')
+
+
 def migrate_old_data():
+    # v0.x → v1.x 一次性迁移；marker 存在就跳过，避免重复扫描误吞 ai_providers.json / local_strategy.json
+    # 等运行时生成的 dict 文件，产生空"我的小说"幽灵书
+    if os.path.exists(_V0_MIGRATION_MARKER):
+        return
     old = []
     for f in glob.glob(os.path.join(DATA_DIR, '*.json')):
         fn = os.path.basename(f)
@@ -1462,10 +1502,18 @@ def migrate_old_data():
         if name.startswith('.') or name in RESERVED_FILES: continue
         try:
             with open(f, 'r', encoding='utf-8') as fp: ch = json.load(fp)
-            ch['_old_file'] = f
-            old.append(ch)
         except: continue
-    if not old: return
+        # 只接受形状像 v0.x 章节的 dict：必须同时有 id/title/content 三个字符串字段
+        if not isinstance(ch, dict): continue
+        if not (isinstance(ch.get('id'), str) and isinstance(ch.get('title'), str) and isinstance(ch.get('content'), str)):
+            continue
+        ch['_old_file'] = f
+        old.append(ch)
+    if not old:
+        try:
+            with open(_V0_MIGRATION_MARKER, 'w', encoding='utf-8') as mf: mf.write(str(time.time()))
+        except: pass
+        return
     bid = 'book_' + str(int(time.time()))
     bd = get_book_dir(bid)
     cd = os.path.join(bd, 'chapters')
@@ -1482,6 +1530,9 @@ def migrate_old_data():
             except: pass
     save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
     log_action('MIGRATE', f'{len(old)} chapters to {bid}')
+    try:
+        with open(_V0_MIGRATION_MARKER, 'w', encoding='utf-8') as mf: mf.write(str(time.time()))
+    except: pass
 
 
 migrate_old_data()
@@ -1541,6 +1592,18 @@ def parse_md(text, filename):
 
 
 def parse_docx_bytes(raw, filename):
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), 'r') as zf:
+            _validate_zip_archive(zf, max_total=120 * _MB, max_entry=60 * _MB)
+            info = zf.getinfo('word/document.xml')
+            if info.file_size > DOCX_MAX_XML_BYTES:
+                return None, f'DOCX 正文超过 {DOCX_MAX_XML_BYTES // _MB}MB 安全上限'
+    except zipfile.BadZipFile:
+        return None, 'DOCX 文件不是有效压缩包'
+    except KeyError:
+        return None, 'DOCX 缺少 word/document.xml'
+    except Exception as e:
+        return None, f'DOCX 安全检查失败: {str(e)[:80]}'
     if HAS_DOCX:
         try:
             doc = docx_mod.Document(io.BytesIO(raw))
@@ -1561,19 +1624,13 @@ def parse_docx_bytes(raw, filename):
             log_action('DOCX_PARSE_ERROR', str(e)[:200])
     try:
         with zipfile.ZipFile(io.BytesIO(raw), 'r') as zf:
-            # 只读前 20MB 的 document.xml，防止超大文件卡死
+            # 读取前先按解压后大小设限，防止 DOCX 压缩炸弹耗尽内存
             info = zf.getinfo('word/document.xml')
-            if info.file_size > 20 * 1024 * 1024:
-                # 流式读取，分段解析
-                xml_parts = []
-                with zf.open('word/document.xml') as xf:
-                    while len(''.join(xml_parts)) < 10 * 1024 * 1024:
-                        chunk = xf.read(64 * 1024).decode('utf-8', errors='ignore')
-                        if not chunk: break
-                        xml_parts.append(chunk)
-                xml = ''.join(xml_parts)
+            if info.file_size > DOCX_MAX_XML_BYTES:
+                # 超限文件不截断导入，直接提示用户拆分
+                return None, f'DOCX 正文超过 {DOCX_MAX_XML_BYTES // _MB}MB 安全上限'
             else:
-                xml = zf.read('word/document.xml').decode('utf-8', errors='ignore')
+                xml = _zip_read_limited(zf, 'word/document.xml', DOCX_MAX_XML_BYTES).decode('utf-8', errors='ignore')
         # 按段落提取文本，避免 ElementTree 对大 XML 的内存开销
         paras = []
         for m in re.finditer(r'<w:p\b[^>]*>(.*?)</w:p>', xml, re.S):
@@ -1655,6 +1712,37 @@ def _is_internal_url(url):
         return False
     except Exception:
         return True
+
+
+def _validate_zip_archive(zf, max_entries=ZIP_MAX_ENTRIES, max_total=ZIP_MAX_TOTAL_BYTES, max_entry=ZIP_MAX_ENTRY_BYTES):
+    infos = zf.infolist()
+    if len(infos) > max_entries:
+        raise ValueError(f'压缩包文件数量超过 {max_entries} 个')
+    total = 0
+    for info in infos:
+        if info.is_dir():
+            continue
+        if info.file_size > max_entry:
+            raise ValueError(f'压缩包内文件过大: {info.filename}')
+        total += info.file_size
+        if total > max_total:
+            raise ValueError(f'压缩包解压后超过 {max_total // _MB}MB 上限')
+
+
+def _zip_read_limited(zf, name, max_bytes):
+    info = zf.getinfo(name)
+    if info.file_size > max_bytes:
+        raise ValueError(f'压缩包内文件过大: {name}')
+    out = bytearray()
+    with zf.open(name) as src:
+        while True:
+            chunk = src.read(ZIP_READ_CHUNK)
+            if not chunk:
+                break
+            out.extend(chunk)
+            if len(out) > max_bytes:
+                raise ValueError(f'压缩包内文件解压超过限制: {name}')
+    return bytes(out)
 
 
 def _fetch_url_content(url, max_chars=8000):
@@ -1859,12 +1947,14 @@ def parse_epub_bytes(raw, filename):
     """解析EPUB，返回 (chapters, book_title, err, cover_bytes)"""
     try:
         with zipfile.ZipFile(io.BytesIO(raw), 'r') as zf:
+            _validate_zip_archive(zf)
+            text_bytes_read = 0
             namelist = zf.namelist()
             opf_name = next((n for n in namelist if n.endswith('.opf')), None)
             if not opf_name:
                 return None, '', 'EPUB中没有找到OPF文件', None
 
-            opf_raw = zf.read(opf_name)
+            opf_raw = _zip_read_limited(zf, opf_name, EPUB_MAX_META_BYTES)
             opf = opf_raw.decode('utf-8', errors='ignore')
 
             # 提取书名
@@ -1913,7 +2003,7 @@ def parse_epub_bytes(raw, filename):
                 cover_full = next((n for n in namelist if n.endswith('/' + cover_href) or n == cover_href), None)
                 if cover_full:
                     try:
-                        cover_bytes = zf.read(cover_full)
+                        cover_bytes = _zip_read_limited(zf, cover_full, EPUB_MAX_COVER_BYTES)
                     except:
                         cover_bytes = None
             # Fallback: look for any image item with "cover" in id or href
@@ -1925,7 +2015,7 @@ def parse_epub_bytes(raw, filename):
                         cfull = next((n for n in namelist if n.endswith('/' + chref) or n == chref), None)
                         if cfull:
                             try:
-                                raw_img = zf.read(cfull)
+                                raw_img = _zip_read_limited(zf, cfull, EPUB_MAX_COVER_BYTES)
                                 if raw_img[:3] in (b'\xff\xd8\xff', b'\x89PNG'):
                                     cover_bytes = raw_img
                                     break
@@ -1937,7 +2027,7 @@ def parse_epub_bytes(raw, filename):
             ncx_titles = {}
             if ncx_name:
                 try:
-                    ncx = zf.read(ncx_name).decode('utf-8', errors='ignore')
+                    ncx = _zip_read_limited(zf, ncx_name, EPUB_MAX_META_BYTES).decode('utf-8', errors='ignore')
                     for m in re.finditer(r'<navPoint[^>]*>.*?<text[^>]*>(.*?)</text>.*?<content[^>]+src=["\']([^"\']+)', ncx, re.S|re.I):
                         title_text = _TAG_RE.sub('', m.group(1)).strip()
                         src = m.group(2).split('#')[0]
@@ -1957,7 +2047,11 @@ def parse_epub_bytes(raw, filename):
                     continue
                 seen.add(full_name)
                 try:
-                    html = zf.read(full_name).decode('utf-8', errors='ignore')
+                    html_raw = _zip_read_limited(zf, full_name, EPUB_MAX_HTML_BYTES)
+                    text_bytes_read += len(html_raw)
+                    if text_bytes_read > EPUB_MAX_TEXT_TOTAL_BYTES:
+                        return None, book_title, f'EPUB 正文超过 {EPUB_MAX_TEXT_TOTAL_BYTES // _MB}MB 安全上限', None
+                    html = html_raw.decode('utf-8', errors='ignore')
                 except:
                     continue
                 text = _strip_tags(html)
@@ -2094,7 +2188,11 @@ def parse_epub_bytes(raw, filename):
                     if name in seen or name.startswith('META-INF/'):
                         continue
                     try:
-                        html = zf.read(name).decode('utf-8', errors='ignore')
+                        html_raw = _zip_read_limited(zf, name, EPUB_MAX_HTML_BYTES)
+                        text_bytes_read += len(html_raw)
+                        if text_bytes_read > EPUB_MAX_TEXT_TOTAL_BYTES:
+                            return None, book_title, f'EPUB 正文超过 {EPUB_MAX_TEXT_TOTAL_BYTES // _MB}MB 安全上限', None
+                        html = html_raw.decode('utf-8', errors='ignore')
                     except:
                         continue
                     text = _strip_tags(html)
@@ -2126,6 +2224,78 @@ IMPORT_PARSERS = {
     '.epub': parse_epub_bytes,
 }
 
+
+def _do_import_book_task(task_id, raw, filename, ext):
+    """后台线程跑解析+建书；前端轮询 /api/import-book-status?task_id=X 拿结果。
+    放后台是为了 Cloudflare Tunnel 这种代理：上传完成后 HTTP 响应不会再卡 100s 超时，解析也不会丢。"""
+    import_start = time.time()
+    try:
+        bg_task_update(task_id, progress=5, result=json.dumps({'phase': '解析中...'}))
+        parser = IMPORT_PARSERS[ext]
+        result = parser(raw, filename)
+        cover_data = None
+        if len(result) == 4:
+            chapters, book_title, err, cover_data = result
+        elif len(result) == 3:
+            chapters, book_title, err = result
+        else:
+            chapters, err = result
+            book_title = ''
+        if err:
+            log_action('IMPORT_BOOK_PARSE_ERR', f'{filename}: {err}')
+            bg_task_done(task_id, err); return
+        if not chapters:
+            bg_task_done(task_id, '未能解析出章节'); return
+        bg_task_update(task_id, progress=50, result=json.dumps({'phase': '写入章节中...', 'chapter_count': len(chapters)}))
+        bid = 'book_' + str(int(time.time() * 1000))
+        bd = get_book_dir(bid)
+        ch_dir = os.path.join(bd, 'chapters')
+        os.makedirs(ch_dir, exist_ok=True)
+        os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+        order = []
+        imported = 0
+        total = len(chapters)
+        for ch in chapters:
+            try:
+                cid = 'ch_' + re.sub(r'[^\w]', '_', ch.get('title', 'untitled')[:30]) + '_' + str(int(time.time() * 1000)) + str(imported)
+                if not is_valid_id(cid):
+                    cid = 'ch_' + str(int(time.time() * 1000)) + str(imported)
+                content = ch.get('content', '')
+                ch_data = {'id': cid, 'title': ch.get('title', '未命名')[:200], 'content': content, 'updated': time.time()}
+                if ch.get('_import_meta'):
+                    ch_data['_import_meta'] = ch['_import_meta']
+                save_json(os.path.join(ch_dir, f"{cid}.json"), ch_data)
+                order.append(cid)
+                imported += 1
+                if imported % 20 == 0:
+                    bg_task_update(task_id, progress=50 + int(40 * imported / max(total, 1)))
+            except Exception:
+                continue
+        title = book_title or filename
+        if not book_title:
+            for ext_test in ['.txt', '.md', '.docx', '.pdf', '.epub']:
+                if title.lower().endswith(ext_test):
+                    title = title[:-len(ext_test)]
+                    break
+        meta = {'id': bid, 'title': title, 'created': time.time(), 'updated': time.time(), 'chapter_order': order}
+        save_json(os.path.join(bd, 'meta.json'), meta)
+        if cover_data and isinstance(cover_data, bytes) and len(cover_data) > 100:
+            try:
+                with open(os.path.join(bd, 'cover'), 'wb') as f:
+                    f.write(cover_data)
+                log_action('EPUB_COVER_IMPORT', bid)
+            except Exception:
+                pass
+        save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+        elapsed = round(time.time() - import_start, 2)
+        log_action('IMPORT_BOOK', f'{bid}: {imported} chapters from {filename} in {elapsed}s')
+        bg_task_update(task_id, progress=100, result=json.dumps({'phase': 'done', 'book_id': bid, 'title': title, 'imported': imported}))
+        bg_task_done(task_id)
+    except Exception as e:
+        log_action('IMPORT_BOOK_TASK_ERR', f'{filename}: {str(e)[:200]}')
+        bg_task_done(task_id, f'解析失败: {str(e)[:100]}')
+
+
 _import_builtin_books()
 
 
@@ -2140,22 +2310,25 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return False
 
+    def _origin_matches_host(self, origin):
+        try:
+            parsed = urlparse(origin)
+            host = (self.headers.get('Host') or '').lower()
+            return parsed.scheme in ('http', 'https') and parsed.netloc.lower() == host
+        except Exception:
+            return False
+
     def send_cors(self):
         origin = self.headers.get('Origin', '')
         if not origin:
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Luca-Client')
             return
-        if self._is_local_origin(origin):
+        if self._origin_matches_host(origin):
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Access-Control-Allow-Credentials', 'true')
-        else:
-            host = self.headers.get('Host', '')
-            if host and origin.endswith('://' + host):
-                self.send_header('Access-Control-Allow-Origin', origin)
-                self.send_header('Access-Control-Allow-Credentials', 'true')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Luca-Client')
 
     def json_resp(self, code, data, extra_headers=None):
         try:
@@ -2186,7 +2359,7 @@ class Handler(BaseHTTPRequestHandler):
         except: return {}
 
     def is_authed(self):
-        if not has_users(): return True
+        if not has_users(): return False
         return validate_session(get_cookie_token(self.headers))
 
     def _check_access(self):
@@ -2208,8 +2381,6 @@ class Handler(BaseHTTPRequestHandler):
             scope = s.get('access_scope', '127.0.0.1')
         except Exception:
             scope = '127.0.0.1'
-        if scope == '127.0.0.1':
-            return True
         origin = self.headers.get('Origin', '')
         if not origin:
             referer = self.headers.get('Referer', '')
@@ -2220,11 +2391,14 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
         if not origin:
-            return True  # non-browser clients (curl, Electron) don't send Origin
-        host = self.headers.get('Host', '')
-        if host and origin.endswith('://' + host):
-            return True
-        if self._is_local_origin(origin):
+            # 浏览器跨域 POST 一律带 Origin（或至少 Referer）；两者都缺通常是非浏览器客户端。
+            # 但是把"没 Origin"当通行证太宽松——加一道客户端标识门，至少要求声明自己是受信客户端
+            # （Electron preload 注入 X-Luca-Client），否则拒绝。
+            if self.headers.get('X-Luca-Client', '').strip():
+                return True
+            self.json_resp(403, {'error': 'CSRF check failed: missing Origin/Referer'})
+            return False
+        if self._origin_matches_host(origin):
             return True
         self.json_resp(403, {'error': 'CSRF check failed'})
         return False
@@ -2263,6 +2437,15 @@ class Handler(BaseHTTPRequestHandler):
             path = '/readthrough'
 
         if path in ('/', '/index.html'):
+            # 未登录直接 302 到 /login，避免浏览器先渲染一瞬主界面壳再被 JS 跳走
+            # （壳本身不含用户数据，但能减少信息暴露面 + 改善体验）
+            if not self.is_authed():
+                self.send_response(302)
+                self.send_header('Location', '/login')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                return
             c = self.serve_file('index.html')
             if c: self.html_resp(c)
             else: self.json_resp(500, {'error': 'no index.html'})
@@ -2329,6 +2512,21 @@ class Handler(BaseHTTPRequestHandler):
             self.json_resp(200, {'has_users': has_users(), 'logged_in': self.is_authed()})
             return
 
+        if path == '/api/settings':
+            gs = get_settings()
+            if not self.is_authed():
+                # 登录页只用主题色 + 明暗模式，其他字段（provider URL / 自定义 JSON / access_scope 等）
+                # 都可能含用户配置或敏感信息，未登录一律剥掉
+                gs = {
+                    'theme_accent': gs.get('theme_accent', '#E8CC7A'),
+                    'theme_mode': gs.get('theme_mode', ''),
+                }
+            self.json_resp(200, gs); return
+
+        if not self.is_authed():
+            self.json_resp(401, {'error': '未登录'}); return
+
+        # 下面这些会暴露客户端 IP / AI 活动等元数据，必须先过认证
         if path == '/api/connected-clients':
             self.json_resp(200, {'clients': get_connected_clients()}); return
 
@@ -2369,19 +2567,6 @@ class Handler(BaseHTTPRequestHandler):
                     try: _ai_sse_clients.remove(q)
                     except ValueError: pass
             return
-
-        if path == '/api/settings':
-            gs = get_settings()
-            if not self.is_authed():
-                gs.pop('api_key', None)
-                gs.pop('search_api_key', None)
-                for p in gs.get('provider_presets', []):
-                    if isinstance(p, dict) and p.get('api_key'):
-                        p['api_key'] = '***'
-            self.json_resp(200, gs); return
-
-        if not self.is_authed():
-            self.json_resp(401, {'error': '未登录'}); return
 
         if path == '/api/editor-fonts':
             self.json_resp(200, {'fonts': get_settings().get('editor_font_presets', [])}); return
@@ -2451,6 +2636,24 @@ class Handler(BaseHTTPRequestHandler):
             self.json_resp(200, {'books': books}); return
 
         qs = parse_qs(urlparse(self.path).query)
+
+        if path == '/api/import-book-status':
+            tid = qs.get('task_id', [''])[0]
+            if not tid:
+                self.json_resp(400, {'error': '缺少 task_id'}); return
+            t = bg_task_get(tid)
+            if not t:
+                self.json_resp(404, {'error': '任务不存在'}); return
+            resp = {'status': t.get('status', 'running'), 'progress': t.get('progress', 0), 'error': t.get('error', '')}
+            raw_result = t.get('result', '')
+            if raw_result:
+                try:
+                    parsed = json.loads(raw_result)
+                    if isinstance(parsed, dict):
+                        resp.update(parsed)
+                except Exception:
+                    pass
+            self.json_resp(200, resp); return
 
         if path.startswith('/api/book/') and '/chapters' in path:
             parts = path.split('/')
@@ -2701,6 +2904,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(404, {'error': '书本不存在'}); return
             messages = _load_chat_history(bid)
             self.json_resp(200, {'messages': messages}); return
+
+        if path.startswith('/api/book/') and path.endswith('/inspirations'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': 'book not found'}); return
+            self.json_resp(200, {'items': get_inspiration_items(bid)}); return
 
         if path.startswith('/api/book/') and path.endswith('/annotations'):
             parts = path.split('/')
@@ -3191,14 +3401,24 @@ class Handler(BaseHTTPRequestHandler):
                 raw = base64.b64decode(file_b64)
             except:
                 self.json_resp(400, {'error': '文件数据无效'}); return
+            if len(raw) > 150 * 1024 * 1024:
+                self.json_resp(400, {'error': '文件超过 150MB，请拆分后再导入'}); return
             try:
                 parser = IMPORT_PARSERS[ext]
-                chapters, err = parser(raw, filename)
+                result = parser(raw, filename)
+                cover_data = None
+                if len(result) == 4:
+                    chapters, parsed_title, err, cover_data = result
+                elif len(result) == 3:
+                    chapters, parsed_title, err = result
+                else:
+                    chapters, err = result
+                    parsed_title = ''
             except Exception as e:
                 self.json_resp(500, {'error': f'解析失败: {str(e)[:100]}'}); return
             if err: self.json_resp(400, {'error': err}); return
             if not chapters: self.json_resp(400, {'error': '未能解析出章节'}); return
-            book_title = data.get('title', '').strip() or filename.replace(ext, '')
+            book_title = data.get('title', '').strip() or parsed_title or filename.replace(ext, '')
             bid = 'book_' + str(int(time.time() * 1000))
             bd = get_book_dir(bid)
             ch_dir = os.path.join(bd, 'chapters')
@@ -3214,6 +3434,12 @@ class Handler(BaseHTTPRequestHandler):
                 ch_order.append(cid)
             meta = {'id': bid, 'title': book_title, 'created': time.time(), 'updated': time.time(), 'chapter_order': ch_order, 'current_chapter_id': ch_order[0] if ch_order else ''}
             save_json(os.path.join(bd, 'meta.json'), meta)
+            if cover_data and isinstance(cover_data, bytes) and len(cover_data) > 100:
+                try:
+                    with open(os.path.join(bd, 'cover'), 'wb') as f:
+                        f.write(cover_data)
+                except Exception:
+                    pass
             save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
             log_action('IMPORT', f'{bid}: {len(chapters)} chapters from {filename}')
             self.json_resp(200, {'book': meta, 'imported': len(chapters)}); return
@@ -3682,6 +3908,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if action == 'restore' and data.get('id'):
                 cid = data['id']
+                if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
                 tp = os.path.join(trash_dir, f"{cid}.json")
                 if os.path.exists(tp):
                     try:
@@ -3962,6 +4189,8 @@ class Handler(BaseHTTPRequestHandler):
                                 ch_list_parts.append(f'id={_cid} 第{_ci+1}章 {_cd.get("title", "未命名")}')
                         ch_list_ctx = '\n'.join(ch_list_parts[:50])
                         kb_tool_context = _build_chat_kb_tool_context(book_id, user_text, cid_chat)
+                        inspiration_items = get_inspiration_items(book_id)
+                        inspiration_context = _format_inspirations_for_prompt(inspiration_items)
                         bookshelf_tree = _build_bookshelf_tree()
 
                         annotate_tool = """你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。系统会把该章的完整正文发给你。
@@ -4010,6 +4239,16 @@ class Handler(BaseHTTPRequestHandler):
 【章节列表】
 {ch_list_ctx}
 
+"""
+                        annotate_tool += f"""
+
+【灵感备忘】
+你可以读取并添加“灵感备忘”。现有未归档条目：
+{inspiration_context}
+
+当用户让你记下一个灵感，或你判断某个创作想法值得暂存时，可以写入新条目。
+调用格式：[ADD_INSPIRATION]{{"text":"要写入的灵感"}}[/ADD_INSPIRATION]
+不要把工具标签展示给用户。
 """
 
                         is_first_round = not history_list
@@ -4316,6 +4555,8 @@ class Handler(BaseHTTPRequestHandler):
                             try:
                                 cmd = json.loads(m.group(1).strip())
                                 cid = cmd.get('chapter_id', '')
+                                if not is_valid_id(cid):
+                                    continue  # AI 工具调用，恶意 prompt 注入可塞穿越路径，直接跳过
                                 text_snippet = cmd.get('text', '')
                                 note = cmd.get('note', '')
                                 color = cmd.get('color', 'yellow')
@@ -4372,7 +4613,7 @@ class Handler(BaseHTTPRequestHandler):
                             try:
                                 cmd = json.loads(m.group(1).strip())
                                 ccid = cmd.get('chapter_id', '')
-                                if ccid:
+                                if ccid and is_valid_id(ccid):
                                     cp = os.path.join(get_book_dir(book_id), 'chapters', f"{ccid}.json")
                                     if os.path.exists(cp):
                                         settings_cc = get_settings()
@@ -4385,6 +4626,20 @@ class Handler(BaseHTTPRequestHandler):
                                                 tool_calls.append({'type': 'complete_chapter', 'label': '本章通读', 'status': 'running'})
                             except Exception as e:
                                 log_action('COMPLETE_CHAPTER_ERROR', str(e)[:200])
+
+                        inspirations_changed = False
+                        inspiration_add_count = 0
+                        for m_insp in re.finditer(r'\[ADD_INSPIRATION\](.*?)\[/ADD_INSPIRATION\]', result, re.S):
+                            try:
+                                cmd = json.loads(m_insp.group(1).strip())
+                                text_insp = cmd.get('text') or cmd.get('content') or ''
+                                if add_inspiration_item(book_id, text_insp, source='luca'):
+                                    inspirations_changed = True
+                                    inspiration_add_count += 1
+                            except Exception as e:
+                                log_action('ADD_INSPIRATION_ERROR', str(e)[:200])
+                        if inspiration_add_count:
+                            tool_calls.append({'type': 'inspiration_add', 'label': f'灵感备忘 x{inspiration_add_count}', 'status': 'done'})
 
                         kb_reread_started = False
                         for m_rr in re.finditer(r'\[REREAD_KB\](.*?)\[/REREAD_KB\]', result, re.S):
@@ -4502,6 +4757,7 @@ class Handler(BaseHTTPRequestHandler):
                         result = re.sub(r'\[ANNOTATE_ADD\].*?\[/ANNOTATE_ADD\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[ANNOTATE_REMOVE\].*?\[/ANNOTATE_REMOVE\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[COMPLETE_CHAPTER\].*?\[/COMPLETE_CHAPTER\]', '', result, flags=re.S).strip()
+                        result = re.sub(r'\[ADD_INSPIRATION\].*?\[/ADD_INSPIRATION\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[REREAD_KB\].*?\[/REREAD_KB\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[SUGGEST_READTHROUGH\].*?\[/SUGGEST_READTHROUGH\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[CITE\].*?\[/CITE\]', '', result, flags=re.S).strip()
@@ -4554,13 +4810,14 @@ class Handler(BaseHTTPRequestHandler):
                                 'needs_summary': needs_rt,
                                 'annotations_changed': annotation_changes,
                                 'complete_chapter': complete_chapter_triggered,
+                                'inspirations_changed': inspirations_changed,
                                 'kb_reread_started': kb_reread_started,
                                 'kb_citations': kb_citations,
                                 'kb_proposals': kb_proposals,
                                 'tool_calls': tool_calls,
                             }
                             _replace_pending_chat_msg(book_id, task_id, result, reason, meta=meta)
-                            bg_task_update(task_id, result=result, reasoning=reason, progress=100, needs_readthrough=needs_rt, needs_summary=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered, kb_reread_started=kb_reread_started, kb_citations=kb_citations, kb_proposals=kb_proposals, tool_calls=tool_calls)
+                            bg_task_update(task_id, result=result, reasoning=reason, progress=100, needs_readthrough=needs_rt, needs_summary=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered, inspirations_changed=inspirations_changed, kb_reread_started=kb_reread_started, kb_citations=kb_citations, kb_proposals=kb_proposals, tool_calls=tool_calls)
                             bg_task_done(task_id)
                             _schedule_idle_compress(book_id)
                     except Exception as e:
@@ -4583,6 +4840,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(200, {'annotations': anns}); return
                 elif sub == 'add':
                     cid = data.get('chapter_id', '')
+                    if not is_valid_id(cid):
+                        self.json_resp(400, {'error': 'Invalid chapter_id'}); return
                     text_snippet = data.get('text', '')
                     note = data.get('note', '')
                     color = data.get('color', 'yellow')
@@ -5082,7 +5341,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True}); return
 
         if path == '/api/import-book':
-            import_start = time.time()
             filename = data.get('filename', '')
             file_b64 = data.get('data', '')
             if not filename or not file_b64:
@@ -5098,64 +5356,10 @@ class Handler(BaseHTTPRequestHandler):
             if file_size > 150 * 1024 * 1024:
                 self.json_resp(400, {'error': '文件超过 150MB，请拆分成 smaller 文件'}); return
             log_action('IMPORT_BOOK_START', f'{filename} size={file_size} ext={ext}')
-            try:
-                parser = IMPORT_PARSERS[ext]
-                result = parser(raw, filename)
-                cover_data = None
-                if len(result) == 4:
-                    chapters, book_title, err, cover_data = result
-                elif len(result) == 3:
-                    chapters, book_title, err = result
-                else:
-                    chapters, err = result
-                    book_title = ''
-            except Exception as e:
-                log_action('IMPORT_BOOK_PARSE_ERR', f'{filename}: {str(e)[:200]}')
-                self.json_resp(500, {'error': f'解析失败: {str(e)[:100]}'}); return
-            if err:
-                log_action('IMPORT_BOOK_PARSE_ERR', f'{filename}: {err}')
-                self.json_resp(400, {'error': err}); return
-            if not chapters: self.json_resp(400, {'error': '未能解析出章节'}); return
-            bid = 'book_' + str(int(time.time() * 1000))
-            bd = get_book_dir(bid)
-            ch_dir = os.path.join(bd, 'chapters')
-            os.makedirs(ch_dir, exist_ok=True)
-            os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
-            order = []
-            imported = 0
-            for ch in chapters:
-                try:
-                    cid = 'ch_' + re.sub(r'[^\w]', '_', ch.get('title', 'untitled')[:30]) + '_' + str(int(time.time() * 1000)) + str(imported)
-                    if not is_valid_id(cid):
-                        cid = 'ch_' + str(int(time.time() * 1000)) + str(imported)
-                    content = ch.get('content', '')
-                    ch_data = {'id': cid, 'title': ch.get('title', '未命名')[:200], 'content': content, 'updated': time.time()}
-                    if ch.get('_import_meta'):
-                        ch_data['_import_meta'] = ch['_import_meta']
-                    save_json(os.path.join(ch_dir, f"{cid}.json"), ch_data)
-                    order.append(cid)
-                    imported += 1
-                except Exception as e:
-                    continue
-            title = book_title or filename
-            if not book_title:
-                for ext_test in ['.txt', '.md', '.docx', '.pdf', '.epub']:
-                    if title.lower().endswith(ext_test):
-                        title = title[:-len(ext_test)]
-                        break
-            meta = {'id': bid, 'title': title, 'created': time.time(), 'updated': time.time(), 'chapter_order': order}
-            save_json(os.path.join(bd, 'meta.json'), meta)
-            if cover_data and isinstance(cover_data, bytes) and len(cover_data) > 100:
-                try:
-                    with open(os.path.join(bd, 'cover'), 'wb') as f:
-                        f.write(cover_data)
-                    log_action('EPUB_COVER_IMPORT', bid)
-                except Exception:
-                    pass
-            save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
-            elapsed = round(time.time() - import_start, 2)
-            log_action('IMPORT_BOOK', f'{bid}: {imported} chapters from {filename} in {elapsed}s')
-            self.json_resp(200, {'book_id': bid, 'title': title, 'imported': imported}); return
+            # 解析放后台线程：避免通过 Cloudflare Tunnel 等代理时 HTTP 响应被 100s 空闲超时切掉
+            tid = bg_task_start('import-book', '', filename)
+            threading.Thread(target=_do_import_book_task, args=(tid, raw, filename, ext), daemon=True).start()
+            self.json_resp(200, {'task_id': tid, 'async': True}); return
 
         # ---- 系列管理 ----
         if path == '/api/series/create':
@@ -5329,15 +5533,15 @@ class Handler(BaseHTTPRequestHandler):
                 _normalize_local_llm_preset(p)
             settings['editor_font_presets'] = _normalize_editor_font_presets(settings.get('editor_font_presets', []))
             selected_font = _clean_editor_font_id(settings.get('editor_font_preset_id', ''))
-            if selected_font and not any(p.get('id') == selected_font for p in settings['editor_font_presets']):
+            if selected_font and selected_font not in BUILTIN_EDITOR_FONT_IDS and not any(p.get('id') == selected_font for p in settings['editor_font_presets']):
                 selected_font = ''
             settings['editor_font_preset_id'] = selected_font
             settings['ai_auto_comment'] = True
             settings['ai_temperature'] = None
             try:
-                settings['editor_font_weight'] = max(100, min(900, int(settings.get('editor_font_weight') or 400)))
+                settings['editor_font_weight'] = max(100, min(900, int(settings.get('editor_font_weight') or 200)))
             except Exception:
-                settings['editor_font_weight'] = 400
+                settings['editor_font_weight'] = 200
             # 如果 provider_presets 被更新，同步顶层字段
             presets = settings.get('provider_presets', [])
             idx = settings.get('active_provider_idx', 0)
@@ -5417,6 +5621,38 @@ class Handler(BaseHTTPRequestHandler):
             messages = data.get('messages', [])
             _save_chat_history(bid, messages, merge=True)
             self.json_resp(200, {'saved': len(messages)}); return
+
+        if path.startswith('/api/book/') and path.endswith('/inspirations'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': 'book not found'}); return
+            action = data.get('action', 'add')
+            items = get_inspiration_items(bid)
+            if action == 'add':
+                item = add_inspiration_item(bid, data.get('text', ''), data.get('source', 'user'))
+                if not item:
+                    self.json_resp(400, {'error': 'empty text'}); return
+                self.json_resp(200, {'item': item, 'items': get_inspiration_items(bid)}); return
+            iid = data.get('id', '')
+            if action in ('archive', 'restore'):
+                ok = False
+                for it in items:
+                    if it.get('id') == iid:
+                        it['archived'] = (action == 'archive')
+                        it['updated_at'] = datetime.now().isoformat(timespec='seconds')
+                        ok = True
+                        break
+                if ok:
+                    save_inspiration_items(bid, items)
+                self.json_resp(200, {'ok': ok, 'items': items}); return
+            if action == 'delete':
+                new_items = [it for it in items if not (it.get('id') == iid and it.get('archived'))]
+                ok = len(new_items) != len(items)
+                if ok:
+                    save_inspiration_items(bid, new_items)
+                self.json_resp(200, {'ok': ok, 'items': new_items}); return
+            self.json_resp(400, {'error': 'bad action'}); return
 
         if path.startswith('/api/book/') and path.endswith('/clear-chat'):
             parts = path.split('/')
@@ -5536,7 +5772,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(400, {'error': '浏览器控制模块未安装'}); return
             settings = get_settings()
             # 从聊天任务中获取待确认的搜索请求
-            task = bg_task_get_by_book_type(bid, 'chat')
+            req_task_id = str(data.get('task_id') or '')
+            task = bg_task_get(req_task_id) if req_task_id else bg_task_get_by_book_type(bid, 'chat')
+            if task and (task.get('book_id') != bid or task.get('type') != 'chat'):
+                task = None
             if not task or not task.get('pending_browse'):
                 self.json_resp(400, {'error': '没有待确认的搜索请求'}); return
             pb = task['pending_browse']
@@ -5556,11 +5795,17 @@ class Handler(BaseHTTPRequestHandler):
             bid = unquote(parts[3]) if len(parts) > 3 else ''
             if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
                 self.json_resp(404, {'error': '书本不存在'}); return
-            task = bg_task_get_by_book_type(bid, 'chat')
+            req_task_id = str(data.get('task_id') or '')
+            task = bg_task_get(req_task_id) if req_task_id else bg_task_get_by_book_type(bid, 'chat')
+            if task and (task.get('book_id') != bid or task.get('type') != 'chat'):
+                task = None
             if task and task.get('pending_browse'):
                 tid = task.get('id', '')
-                bg_task_update(tid, pending_browse=None, result=task.get('result', '') + '\n\n（搜索已取消）')
-                bg_task_done(tid, '搜索已取消')
+                result = (task.get('result', '') + '\n\n（搜索已取消）').strip()
+                _replace_pending_chat_msg(bid, tid, result, task.get('reasoning', ''))
+                bg_task_update(tid, pending_browse=None, result=result, progress=100)
+                bg_task_done(tid)
+                self.json_resp(200, {'success': True}); return
             self.json_resp(200, {'success': True}); return
 
         # 通读 API (POST) — 新版使用 kb_pipeline + kb_storage
@@ -5860,9 +6105,9 @@ _bg_task_counter = 0
 
 def bg_task_start(task_type, book_id, name):
     global _bg_task_counter
-    _bg_task_counter += 1
-    tid = f"{task_type}_{book_id}_{_bg_task_counter}"
     with _bg_lock:
+        _bg_task_counter += 1
+        tid = f"{task_type}_{book_id}_{_bg_task_counter}"
         _bg_tasks[tid] = {
             'id': tid, 'type': task_type, 'book_id': book_id, 'name': name,
             'status': 'running', 'progress': 0, 'result': '', 'error': '',
@@ -7105,6 +7350,48 @@ def get_prediction_md(bid):
     if os.path.exists(p):
         with open(p, 'r', encoding='utf-8') as f: return f.read()
     return ''
+
+def _inspiration_path(bid):
+    return os.path.join(get_book_dir(bid), 'inspirations.json')
+
+def get_inspiration_items(bid):
+    data = load_json(_inspiration_path(bid), dict)
+    items = data.get('items', []) if isinstance(data, dict) else []
+    if not isinstance(items, list):
+        items = []
+    return items
+
+def save_inspiration_items(bid, items):
+    save_json(_inspiration_path(bid), {'items': items})
+
+def add_inspiration_item(bid, text, source='user'):
+    text = str(text or '').replace('\r\n', '\n').replace('\r', '\n').strip()
+    if not text:
+        return None
+    now = datetime.now().isoformat(timespec='seconds')
+    item = {
+        'id': f"insp_{int(time.time() * 1000)}_{secrets.token_hex(3)}",
+        'text': text[:4000],
+        'source': source or 'user',
+        'archived': False,
+        'created_at': now,
+        'updated_at': now,
+    }
+    items = get_inspiration_items(bid)
+    items.append(item)
+    save_inspiration_items(bid, items)
+    return item
+
+def _format_inspirations_for_prompt(items):
+    active = [it for it in items if not it.get('archived')]
+    if not active:
+        return '（暂无）'
+    lines = []
+    for i, it in enumerate(active[-40:], 1):
+        text = re.sub(r'\s+', ' ', str(it.get('text', '')).strip())
+        if text:
+            lines.append(f'{i}. {text[:220]}')
+    return '\n'.join(lines) or '（暂无）'
 
 def _read_chapter_file(bid, cid):
     p = os.path.join(get_book_dir(bid), 'chapters', f'{cid}.json')

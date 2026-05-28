@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -53,7 +53,7 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);min-
 .login-titlebar{display:none;height:38px;background:rgba(14,23,44,.76);border-bottom:1px solid rgba(255,255,255,.06);backdrop-filter:blur(18px);flex-shrink:0;-webkit-app-region:drag;align-items:center;padding:0 14px;justify-content:flex-end}
 body.electron .login-titlebar{display:flex}
 .login-titlebar .win-controls{display:flex;align-items:stretch;height:38px;-webkit-app-region:no-drag}
-.login-titlebar .win-controls button{background:none;border:none;color:var(--t2);width:46px;height:38px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .1s;font-size:14px;padding:0}
+.login-titlebar .win-controls button{background:none;border:none;color:var(--t2);width:46px;height:38px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:0s;font-size:14px;padding:0}
 .login-titlebar .win-controls button:hover{background:var(--surface3);color:var(--t1)}
 .login-titlebar .win-controls .wc-close:hover{background:var(--danger);color:#fff}
 .login-titlebar .win-controls svg{width:10px;height:10px;stroke:currentColor;stroke-width:1.3;fill:none}
@@ -87,7 +87,7 @@ body.electron-platform-darwin .login-titlebar .win-controls .wc-max:hover{backgr
 .brand h1{font-family:var(--font-serif);font-size:22px;font-weight:700;letter-spacing:-.5px}
 .fg{margin-bottom:16px}
 .fg label{display:block;font-size:9px;font-weight:700;color:var(--t2);margin-bottom:4px;letter-spacing:.5px;text-transform:uppercase}
-.fg input{width:100%;padding:10px 12px;background:var(--surface2);color:var(--t1);border:1px solid var(--border);border-radius:var(--r1);font-size:14px;outline:none;transition:border-color .15s}
+.fg input{width:100%;padding:10px 12px;background:var(--surface2);color:var(--t1);border:1px solid var(--border);border-radius:var(--r1);font-size:14px;outline:none;transition:0s}
 .fg input:focus{border-color:var(--accent-a20)}
 .fg input::placeholder{color:var(--t-on-surface-muted)}
 .fg .hint{font-size:11px;color:var(--t3);margin-top:4px}
@@ -97,24 +97,24 @@ body.electron-platform-darwin .login-titlebar .win-controls .wc-max:hover{backgr
  border:1px solid var(--accent);
  border-radius:var(--radius);
  font-size:14px;font-weight:700;
- cursor:pointer;transition:all .15s;
+ cursor:pointer;transition:0s;
  margin-top:4px;
  box-shadow:0 6px 18px rgba(0,0,0,.18);
 }
-.btn:hover{opacity:.92;transform:translateY(-1px)}
+.btn:hover{opacity:.92}
 .btn:active{opacity:.8;transform:translateY(0)}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .err{color:var(--danger);font-size:12px;margin-top:10px;text-align:center;display:none}
 .setup-mode .brand h1::after{content:' — Setup';font-size:12px;font-weight:400;color:var(--t2);margin-left:6px}
-.remember-toggle{display:block;text-align:center;margin:8px auto;padding:6px 12px;width:fit-content;border:1.5px solid var(--border2);border-radius:var(--r1);cursor:pointer;user-select:none;font-size:13px;color:var(--t3);background:transparent;transition:all .15s;outline:none}
+.remember-toggle{display:block;text-align:center;margin:8px auto;padding:6px 12px;width:fit-content;border:1.5px solid var(--border2);border-radius:var(--r1);cursor:pointer;user-select:none;font-size:13px;color:var(--t3);background:transparent;transition:0s;outline:none}
 .remember-toggle:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 .remember-toggle.active{background:var(--accent);border-color:var(--accent);color:var(--bg)}
 .forgot-pwd{display:none;text-align:center;margin-top:14px}
-.forgot-pwd button{background:none;border:none;color:var(--t3);font-size:12px;cursor:pointer;transition:color .15s;padding:4px 8px;border-radius:var(--r1)}
+.forgot-pwd button{background:none;border:none;color:var(--t3);font-size:12px;cursor:pointer;transition:0s;padding:4px 8px;border-radius:var(--r1)}
 .forgot-pwd button:hover{color:var(--accent)}
 .forgot-pwd button:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 
-.login-theme-toggle{position:fixed;top:16px;right:16px;z-index:200;width:36px;height:36px;background:var(--surface2);border:1px solid var(--border2);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .2s;color:var(--t2);padding:7px}
+.login-theme-toggle{position:fixed;top:16px;right:16px;z-index:200;width:36px;height:36px;background:var(--surface2);border:1px solid var(--border2);border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:0s;color:var(--t2);padding:7px}
 .login-theme-toggle:hover{background:var(--surface3);color:var(--accent);border-color:var(--accent-a20)}
 .login-theme-toggle svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
 </style>

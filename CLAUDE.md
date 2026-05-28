@@ -8,13 +8,19 @@
 - 浅色模式下文字必须是黑色/深灰色（`#111` / `#333` / `#666`），不随主题色变化。
 - **`--on-accent`**：主题色背景上的文字色（固定 `#1a1a1a` 深色），**禁止**在 `background:var(--accent)` 的元素上使用 `color:var(--bg)`。
 - 浅色模式是深色模式的完整翻版：所有 `:root` 变量在 `[data-theme-mode="light"]` 中都有对应覆盖（border、scrollbar、accent-a* 透明序列等）。
-- 浅色模式 `--panel-shadow: none`，书籍卡片不使用阴影。
+
+## 阴影与玻璃
+
+- **全局禁止 `box-shadow`**：`--panel-shadow` 和 `--glass-shadow` 已在 `:root` 和 `[data-theme-mode="light"]` 都设为 `none`。任何新代码不要写字面量 `box-shadow:0 N N rgba(...)`。需要层级区分时用 `background` / `border` / `border-color`。
+- **`backdrop-filter` 仅允许一处**：`.left-sidebar::before` 章节栏毛玻璃（带 `mask-image` 右侧渐隐）。其它任何面板、modal、dropdown、hover 状态一律不要再加 `backdrop-filter` / `-webkit-backdrop-filter`，blur 是掉帧主因。
+- **不要做装饰性动画**：`@keyframes` 不写 `transform: translateY/scaleX` 等位移缩放的纯装饰动画（已删除 `tl-flow`，简化 `rt-bounce` / `aiDotBreathe` / `dlPulse` 为 opacity-only）。状态/loading 指示器只用 opacity 脉动。
 
 ## Hover / 交互动效
 
-- **统一风格**：所有 hover 效果使用 `transition: all .15s ease`，仅改变 `border-color` + 轻微 `box-shadow`，**禁止** `transform: translateY` 上浮效果（按钮除外，允许 -1px）。
-- **边框环**：不使用 `box-shadow: 0 0 0 Npx` 做 hover 边框环（会与正常阴影冲突），改用 `border-color: var(--accent-a25)` 直接变边框色。
-- hover 阴影统一为 `0 2px 12px rgba(0,0,0,.15)` 量级，不夸张。
+- **统一风格**：所有 hover 效果使用 `transition: border-color .15s ease` 或类似具体属性（不用 `transition: all`），仅改变 `border-color` / `background` / `color`。**禁止** `transform`（包括 -1px 上浮）、`scale`、`translateY` 任何位移/缩放。UI 必须沉稳，不抖不浮。
+- **禁止 hover 加任何 `box-shadow`、`backdrop-filter` 或 `filter: blur()`**。
+- **不改 `border-width`**：hover 时只改 `border-color`，保持 1px。`1px → 2px` 即使 `box-sizing: border-box` 也会让内容内缩 1px 产生抖动。
+- **边框环**：不使用 `box-shadow: 0 0 0 Npx` 做 hover 边框环，改用 `border-color: var(--accent-a25)` 直接变边框色。
 - 列表项 hover 使用 `background: var(--surface2)`，不改变 transform。
 
 ## 布局
@@ -41,6 +47,10 @@
 - 账号锁定：5 次失败 → 15 分钟锁定
 - CORS：仅对 localhost/127.0.0.1/::1 回显 Origin
 - 知识库必须向后兼容：已有 `kb.db` 是用户花大量时间通读得到的核心资产。新增知识库能力时只做增量迁移和兼容查询，不要求重通读，不自动清空旧表 / 旧索引 / 旧 `source.md`。只有用户明确点击重通读或清空知识库时，才允许重建。
+
+## 预览
+
+- 调用 preview 工具时，使用 `http://localhost:10000`（前端开发服务器固定端口），不要自己起 dev server。
 
 ## 行为准则
 

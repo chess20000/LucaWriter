@@ -1,0 +1,864 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LucaWriter 只读演示版</title>
+<meta name="description" content="LucaWriter 的 Cloudflare Pages 静态只读演示版。无需后端、无需构建，展示小说写作工作台的核心浏览体验。">
+<link rel="icon" type="image/png" href="icon.png">
+<style>
+:root{
+  --bg:#f6f4ef;
+  --panel:#ffffff;
+  --panel-2:#f0eee8;
+  --panel-3:#e9e5db;
+  --ink:#1b1b1d;
+  --muted:#62636a;
+  --soft:#8a8b93;
+  --line:#d9d2c4;
+  --accent:#a96f2d;
+  --accent-2:#0f766e;
+  --accent-3:#7562d8;
+  --accent-4:#c24174;
+  --good:#15803d;
+  --warn:#a16207;
+  --shadow:0 18px 42px rgba(43,37,28,.12);
+  --radius:8px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","Noto Sans SC",Arial,sans-serif;
+  --serif:"Iowan Old Style","Source Han Serif SC","Noto Serif SC","Songti SC",serif;
+}
+[data-theme="dark"]{
+  --bg:#121417;
+  --panel:#1b1f24;
+  --panel-2:#232831;
+  --panel-3:#2b313a;
+  --ink:#f4f1ea;
+  --muted:#c1bbb0;
+  --soft:#918c84;
+  --line:#3a414c;
+  --accent:#d39b4d;
+  --accent-2:#53b7ad;
+  --accent-3:#a99bff;
+  --accent-4:#f08cb2;
+  --good:#68d391;
+  --warn:#f6c453;
+  --shadow:0 18px 42px rgba(0,0,0,.28);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  color:var(--ink);
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.32),transparent 280px),
+    var(--bg);
+  font-family:var(--font);
+  overflow:hidden;
+}
+button,input{font:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.5}
+.demo-shell{
+  height:100%;
+  display:grid;
+  grid-template-rows:44px minmax(0,1fr);
+}
+.topbar{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:0 14px;
+  background:var(--panel);
+  border-bottom:1px solid var(--line);
+  box-shadow:0 1px 0 rgba(0,0,0,.02);
+  min-width:0;
+}
+.brand{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:150px;
+}
+.brand img{width:24px;height:24px;border-radius:6px}
+.brand strong{font-size:14px;white-space:nowrap}
+.book-title{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  flex:1;
+}
+.book-title span:first-child{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-weight:700;
+}
+.pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:24px;
+  padding:3px 8px;
+  border:1px solid var(--line);
+  border-radius:999px;
+  color:var(--muted);
+  background:var(--panel-2);
+  font-size:12px;
+  white-space:nowrap;
+}
+.pill-dot{
+  width:7px;
+  height:7px;
+  border-radius:999px;
+  background:var(--good);
+}
+.top-actions{display:flex;align-items:center;gap:8px}
+.icon-btn,.text-btn{
+  border:1px solid var(--line);
+  background:var(--panel);
+  color:var(--ink);
+  min-height:30px;
+  border-radius:7px;
+}
+.icon-btn{
+  width:32px;
+  display:grid;
+  place-items:center;
+  font-weight:800;
+}
+.text-btn{padding:0 10px;font-size:12px}
+.text-btn.primary{
+  border-color:transparent;
+  background:var(--accent);
+  color:#fff;
+}
+.workspace{
+  display:grid;
+  grid-template-columns:minmax(240px,18vw) minmax(360px,1fr) minmax(284px,23vw);
+  min-height:0;
+}
+.sidebar,.luca{
+  min-height:0;
+  background:var(--panel-2);
+  border-right:1px solid var(--line);
+  display:flex;
+  flex-direction:column;
+}
+.luca{border-right:0;border-left:1px solid var(--line)}
+.side-head,.luca-head{
+  padding:14px;
+  border-bottom:1px solid var(--line);
+}
+.side-head h2,.luca-head h2,.panel-title{
+  margin:0;
+  font-size:13px;
+}
+.side-head p,.luca-head p{
+  margin:6px 0 0;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.5;
+}
+.search-wrap{padding:12px 14px;border-bottom:1px solid var(--line)}
+.search-box{
+  width:100%;
+  height:34px;
+  border:1px solid var(--line);
+  border-radius:7px;
+  background:var(--panel);
+  color:var(--ink);
+  padding:0 10px;
+  outline:none;
+}
+.search-box:focus{border-color:var(--accent)}
+.chapter-list{
+  overflow:auto;
+  padding:8px;
+  min-height:0;
+}
+.chapter-btn{
+  width:100%;
+  border:1px solid transparent;
+  border-radius:7px;
+  background:transparent;
+  color:var(--ink);
+  padding:10px;
+  text-align:left;
+  display:grid;
+  gap:5px;
+}
+.chapter-btn:hover{background:var(--panel)}
+.chapter-btn.active{
+  background:var(--panel);
+  border-color:color-mix(in srgb,var(--accent) 35%,var(--line));
+  box-shadow:0 8px 18px rgba(0,0,0,.04);
+}
+.chapter-row{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  font-size:13px;
+  font-weight:700;
+}
+.chapter-row span:first-child{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.chapter-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  color:var(--muted);
+  font-size:11px;
+}
+.side-foot{
+  padding:12px 14px;
+  border-top:1px solid var(--line);
+  display:grid;
+  gap:8px;
+}
+.mini-stats{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+}
+.stat{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:7px;
+  padding:8px;
+}
+.stat b{display:block;font-size:15px}
+.stat span{font-size:11px;color:var(--muted)}
+.main{
+  min-width:0;
+  min-height:0;
+  display:grid;
+  grid-template-rows:minmax(0,1fr) 214px;
+  background:var(--panel);
+}
+.editor{
+  min-height:0;
+  overflow:auto;
+  padding:28px clamp(20px,5vw,76px);
+}
+.doc{
+  max-width:780px;
+  margin:0 auto;
+}
+.readonly-note{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:18px;
+  color:var(--muted);
+  font-size:12px;
+}
+.chapter-title{
+  margin:0;
+  font-family:var(--serif);
+  font-size:clamp(26px,3vw,40px);
+  line-height:1.18;
+  letter-spacing:0;
+}
+.chapter-subtitle{
+  margin:10px 0 24px;
+  color:var(--muted);
+  line-height:1.6;
+}
+.story-text{
+  font-family:var(--serif);
+  font-size:19px;
+  line-height:2.05;
+}
+.story-text p{margin:0 0 18px}
+.mark{
+  border-radius:4px;
+  padding:1px 3px;
+  background:color-mix(in srgb,var(--accent) 18%,transparent);
+  box-shadow:inset 0 -7px 0 color-mix(in srgb,var(--accent) 18%,transparent);
+}
+.hit{
+  border-radius:4px;
+  background:color-mix(in srgb,var(--accent-4) 24%,transparent);
+  box-shadow:inset 0 -7px 0 color-mix(in srgb,var(--accent-4) 18%,transparent);
+}
+.bottom{
+  min-height:0;
+  border-top:1px solid var(--line);
+  background:var(--panel-2);
+  display:grid;
+  grid-template-rows:42px minmax(0,1fr);
+}
+.tabs{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:7px 10px 0;
+  overflow:auto;
+}
+.tab{
+  height:29px;
+  border:1px solid var(--line);
+  background:var(--panel);
+  color:var(--muted);
+  border-radius:7px 7px 0 0;
+  padding:0 12px;
+  white-space:nowrap;
+}
+.tab.active{
+  color:var(--ink);
+  border-bottom-color:var(--panel);
+  background:var(--panel);
+  font-weight:700;
+}
+.tab-panel{
+  min-height:0;
+  overflow:auto;
+  background:var(--panel);
+  border-top:1px solid var(--line);
+  padding:14px;
+}
+.panel-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+}
+.info-card{
+  border:1px solid var(--line);
+  border-radius:7px;
+  padding:12px;
+  background:var(--panel);
+}
+.info-card h3{
+  margin:0 0 8px;
+  font-size:13px;
+}
+.info-card p,.info-card li{
+  margin:0;
+  color:var(--muted);
+  font-size:12px;
+  line-height:1.6;
+}
+.info-card ul{margin:0;padding-left:17px}
+.tag-row{display:flex;flex-wrap:wrap;gap:7px}
+.tag{
+  display:inline-flex;
+  align-items:center;
+  min-height:24px;
+  border-radius:999px;
+  border:1px solid var(--line);
+  padding:2px 8px;
+  font-size:12px;
+  color:var(--muted);
+  background:var(--panel-2);
+}
+.tag[data-kind="char"]{color:var(--accent-2)}
+.tag[data-kind="rule"]{color:var(--accent-3)}
+.tag[data-kind="risk"]{color:var(--accent-4)}
+.timeline{
+  display:grid;
+  gap:10px;
+}
+.event{
+  display:grid;
+  grid-template-columns:84px 1fr;
+  gap:12px;
+  align-items:start;
+}
+.event-time{
+  color:var(--accent);
+  font-size:12px;
+  font-weight:700;
+}
+.event-body{
+  border-left:3px solid var(--accent-2);
+  padding-left:10px;
+}
+.event-body b{font-size:13px}
+.event-body p{margin:4px 0 0;color:var(--muted);font-size:12px;line-height:1.6}
+.messages{
+  min-height:0;
+  overflow:auto;
+  padding:12px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.msg{
+  border:1px solid var(--line);
+  border-radius:7px;
+  background:var(--panel);
+  padding:10px;
+  max-width:94%;
+}
+.msg.user{
+  margin-left:auto;
+  background:color-mix(in srgb,var(--accent) 11%,var(--panel));
+}
+.msg b{
+  display:block;
+  font-size:11px;
+  color:var(--accent);
+  margin-bottom:5px;
+}
+.msg p{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+.prompt-palette{
+  padding:10px 12px;
+  border-top:1px solid var(--line);
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.prompt-chip{
+  border:1px solid var(--line);
+  border-radius:999px;
+  background:var(--panel);
+  color:var(--muted);
+  min-height:28px;
+  padding:0 9px;
+  font-size:12px;
+}
+.prompt-chip:hover{border-color:var(--accent);color:var(--ink)}
+.disabled-input{
+  margin:0 12px 12px;
+  border:1px solid var(--line);
+  background:var(--panel);
+  border-radius:7px;
+  color:var(--soft);
+  font-size:12px;
+  min-height:38px;
+  display:flex;
+  align-items:center;
+  padding:0 10px;
+}
+.toast{
+  position:fixed;
+  right:18px;
+  bottom:18px;
+  max-width:min(360px,calc(100vw - 36px));
+  background:var(--ink);
+  color:var(--panel);
+  border-radius:7px;
+  padding:10px 12px;
+  box-shadow:var(--shadow);
+  font-size:13px;
+  opacity:0;
+  transform:translateY(10px);
+  pointer-events:none;
+  transition:0s;
+}
+.toast.show{opacity:1;transform:translateY(0)}
+.empty{
+  padding:22px;
+  color:var(--muted);
+  text-align:center;
+  font-size:13px;
+}
+@media(max-width:1040px){
+  body{overflow:auto}
+  .demo-shell{min-height:100%;height:auto}
+  .workspace{
+    grid-template-columns:220px minmax(0,1fr);
+    grid-template-rows:minmax(560px,calc(100vh - 44px)) 420px;
+  }
+  .luca{
+    grid-column:1 / -1;
+    border-left:0;
+    border-top:1px solid var(--line);
+  }
+}
+@media(max-width:720px){
+  .topbar{height:auto;min-height:48px;flex-wrap:wrap;padding:8px}
+  .brand{min-width:0}
+  .book-title{order:3;flex-basis:100%}
+  .workspace{
+    display:flex;
+    flex-direction:column;
+  }
+  .sidebar,.main,.luca{min-height:auto}
+  .chapter-list{max-height:220px}
+  .main{grid-template-rows:minmax(520px,auto) auto}
+  .bottom{min-height:330px}
+  .panel-grid{grid-template-columns:1fr}
+  .editor{padding:22px 16px}
+  .story-text{font-size:17px;line-height:1.95}
+  .mini-stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .stat{padding:6px}
+  .stat b{font-size:13px}
+  .text-btn.hide-sm{display:none}
+}
+</style>
+</head>
+<body>
+<div class="demo-shell" data-theme="light">
+  <header class="topbar">
+    <div class="brand" aria-label="LucaWriter">
+      <img src="icon.png" alt="">
+      <strong>LucaWriter</strong>
+    </div>
+    <div class="book-title">
+      <span id="bookTitle">《雾灯档案》只读演示</span>
+      <span class="pill"><span class="pill-dot"></span>Cloudflare Pages 静态版</span>
+    </div>
+    <div class="top-actions">
+      <button class="text-btn hide-sm" id="deployBtn" type="button">部署说明</button>
+      <button class="text-btn primary" id="downloadBtn" type="button">桌面完整版</button>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="切换主题">◐</button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <aside class="sidebar">
+      <div class="side-head">
+        <h2>章节</h2>
+        <p>演示数据内置在页面中。可以切章、搜索、查看摘要，但不会保存或上传任何内容。</p>
+      </div>
+      <div class="search-wrap">
+        <input id="searchInput" class="search-box" type="search" placeholder="搜索章节或正文" autocomplete="off">
+      </div>
+      <nav id="chapterList" class="chapter-list" aria-label="章节列表"></nav>
+      <div class="side-foot">
+        <div class="mini-stats">
+          <div class="stat"><b id="statChapters">0</b><span>章节</span></div>
+          <div class="stat"><b id="statWords">0</b><span>演示字数</span></div>
+          <div class="stat"><b>5</b><span>知识点</span></div>
+          <div class="stat"><b>0</b><span>后端请求</span></div>
+        </div>
+        <button class="text-btn" id="readonlyBtn" type="button">为什么只读</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="editor" aria-label="只读正文">
+        <article class="doc">
+          <div class="readonly-note">
+            <span class="pill">只读</span>
+            <span id="chapterMeta">正在载入章节</span>
+          </div>
+          <h1 id="chapterTitle" class="chapter-title"></h1>
+          <p id="chapterSubtitle" class="chapter-subtitle"></p>
+          <div id="storyText" class="story-text"></div>
+        </article>
+      </section>
+
+      <section class="bottom" aria-label="知识面板">
+        <div class="tabs" id="tabs">
+          <button class="tab active" type="button" data-tab="summary">摘要笔记</button>
+          <button class="tab" type="button" data-tab="outline">本章大纲</button>
+          <button class="tab" type="button" data-tab="radar">吃书雷达</button>
+          <button class="tab" type="button" data-tab="timeline">时间线</button>
+          <button class="tab" type="button" data-tab="prediction">读者预言</button>
+        </div>
+        <div id="tabPanel" class="tab-panel"></div>
+      </section>
+    </main>
+
+    <aside class="luca">
+      <div class="luca-head">
+        <h2>Luca</h2>
+        <p>这里展示的是预设回复。完整 AI 对话、通读、纠错和标注需要桌面版或后端服务。</p>
+      </div>
+      <div id="messages" class="messages"></div>
+      <div class="prompt-palette">
+        <button class="prompt-chip" type="button" data-prompt="recap">回顾当前章</button>
+        <button class="prompt-chip" type="button" data-prompt="risk">找设定风险</button>
+        <button class="prompt-chip" type="button" data-prompt="next">预测下一步</button>
+      </div>
+      <div class="disabled-input">问 Luca：只读演示版不会连接 AI，也不会保存对话。</div>
+    </aside>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script>
+const demo = {
+  book: "雾灯档案",
+  chapters: [
+    {
+      id: "c1",
+      title: "第一章 雨夜档案馆",
+      subtitle: "调查员林澈在停电的档案馆里找到一份不该存在的航海记录。",
+      words: 1280,
+      tags: ["林澈","雾灯","旧港档案馆"],
+      paragraphs: [
+        "雨从傍晚开始落下，旧港档案馆的窗缝像一排没有合拢的眼睛，细细地往里吹冷风。林澈把最后一盏应急灯放在阅览桌上，灯芯里的电量只剩二十七分钟。",
+        "他本来只是来核对一份失踪人口卷宗。可第七排铁柜的锁自己弹开，里面露出的却是一册潮湿的航海日志。封面上写着：雾灯第十三次点亮，返航人数为零。",
+        "林澈翻到末页，看见自己的名字被一笔一画写在幸存者栏里。字迹新鲜，墨水还没完全干。更怪的是，那一栏旁边盖着明天的日期。",
+        "走廊尽头传来轻轻的敲击声。三下，停顿，再三下。像有人在黑暗里确认他是否已经读完。"
+      ],
+      summary: "林澈在旧港档案馆发现异常航海日志，日志预写了他的名字和未来日期，暗示雾灯事件与他的身份存在关联。",
+      outline: ["林澈进入旧港档案馆查失踪案。","第七排铁柜异常打开。","航海日志出现未来日期和林澈姓名。","走廊敲击声作为悬念收尾。"],
+      radar: ["未来日期需要和后续时间规则保持一致。","“幸存者栏”暗示林澈可能并非普通调查员。"],
+      prediction: "读者会猜测林澈曾经参与过一次被抹除的航行，或者他即将被迫补上这份日志里的空位。",
+      timeline: [
+        ["雨夜","林澈进入旧港档案馆。"],
+        ["同夜","雾灯航海日志出现。"],
+        ["未来日期","林澈的名字被写入幸存者栏。"]
+      ]
+    },
+    {
+      id: "c2",
+      title: "第二章 第十三盏雾灯",
+      subtitle: "港口的雾灯不再照向海面，而是照向城里每一个说谎的人。",
+      words: 1430,
+      tags: ["港口","第十三盏雾灯","谎言规则"],
+      paragraphs: [
+        "凌晨两点，港口的十二盏雾灯依次熄灭，只有新修的第十三盏亮了起来。它的光没有穿过海雾，反而折向城区，像一根细长的针，把睡梦中的街巷缝在一起。",
+        "灯光扫过报社时，主编许聆忽然跪倒在印刷机旁，吐出一枚黑色船钉。她说自己从未见过林澈，却在下一秒叫出了他童年的小名。",
+        "港口守则第七条写得很清楚：雾灯只为迷航者点亮。但今晚的灯光照见的不是船，而是人心里藏起来的谎。",
+        "林澈意识到，航海日志不是在记录过去。它在登记每一个即将被雾灯叫回海上的人。"
+      ],
+      summary: "第十三盏雾灯异常照向城区，暴露许聆的谎言和船钉线索。雾灯规则从航海辅助扩展为“召回迷航者”。",
+      outline: ["第十三盏雾灯异常点亮。","许聆吐出黑色船钉并暴露认识林澈。","港口守则被重新解释。","林澈判断日志正在登记未来受召者。"],
+      radar: ["雾灯照出谎言的能力需要限定触发条件。","许聆和林澈的旧关系应在后文回收。"],
+      prediction: "读者会开始关注谁说过谎，尤其是主动否认认识林澈的人。",
+      timeline: [
+        ["凌晨两点","十二盏旧雾灯熄灭。"],
+        ["同刻","第十三盏雾灯照向城区。"],
+        ["报社","许聆吐出黑色船钉。"]
+      ]
+    },
+    {
+      id: "c3",
+      title: "第三章 盐井街的失物招领",
+      subtitle: "每一件失物都标着归还日期，唯独林澈的怀表标着死亡日期。",
+      words: 1560,
+      tags: ["盐井街","怀表","失物招领处"],
+      paragraphs: [
+        "盐井街没有门牌，只有一排会随着潮声移动的摊位。林澈跟着许聆留下的船钉来到街尾，看见一家亮着绿灯的失物招领处。",
+        "柜台后面的老人把一本登记簿推给他。伞、钥匙、旧照片，每一件失物都有归还日期。只有一只银壳怀表旁边写着：归还人林澈，死亡日期八月十七日。",
+        "怀表停在三点十三分。林澈按下表冠，表盖弹开，里面不是齿轮，而是一小片仍在渗水的海面。海面中央漂着旧港档案馆的钥匙。",
+        "老人说，失物从不预言死亡。它只记得主人真正丢失自己的那一天。"
+      ],
+      summary: "林澈在盐井街找到标注死亡日期的怀表，发现怀表内部连接海面和档案馆钥匙。失物规则进一步指向“身份丢失”。",
+      outline: ["盐井街作为异常地点登场。","失物招领处保存未来归还记录。","林澈的怀表标注八月十七日。","老人说明死亡日期其实是自我丢失日期。"],
+      radar: ["八月十七日会成为强伏笔，后续不宜随意改期。","怀表与档案馆钥匙形成空间连接规则。"],
+      prediction: "资深读者会把三点十三分和第十三盏雾灯联系起来，猜测“13”是召回仪式的编号。",
+      timeline: [
+        ["盐井街","林澈找到失物招领处。"],
+        ["登记簿","怀表出现八月十七日。"],
+        ["三点十三分","怀表内显现海面和钥匙。"]
+      ]
+    },
+    {
+      id: "c4",
+      title: "第四章 无名船员",
+      subtitle: "一个没有脸的船员交还林澈的童年照片，照片背面写着“别上船”。",
+      words: 1490,
+      tags: ["无名船员","童年照片","别上船"],
+      paragraphs: [
+        "林澈从怀表里的海面取出钥匙，钥匙却在掌心化成一枚湿透的邮票。邮票上的图案是一艘没有船名的渡轮，船头站着一个脸被海雾抹去的人。",
+        "当天黄昏，那个无名船员真的出现在档案馆门口。他不说话，只递来一张照片。照片里七岁的林澈坐在港堤上，身后第十三盏雾灯正在施工。",
+        "照片背面有两行字。第一行是许聆的笔迹：如果他想起船名，就带他离开旧港。第二行像林澈自己的字：别上船。",
+        "林澈抬头时，无名船员已经走到雨里。地面没有脚印，只有一串被拖拽过的海藻。"
+      ],
+      summary: "无名船员交还童年照片，证明第十三盏雾灯与林澈童年相关。照片背面同时出现许聆和林澈自己的警告。",
+      outline: ["钥匙变化成邮票。","无名船员进入现实。","童年照片揭示林澈与第十三盏雾灯的早期关联。","“别上船”形成明确阻止命令。"],
+      radar: ["“林澈自己的字”涉及时间回环，需要后文给出机制。","无名船员没有脚印但留下海藻，身份可能非活人。"],
+      prediction: "读者会怀疑无名船员是未来的林澈，或者是某个被雾灯抹掉名字的人。",
+      timeline: [
+        ["黄昏","无名船员出现在档案馆。"],
+        ["童年照片","第十三盏雾灯施工被证实。"],
+        ["照片背面","许聆与林澈留下相互矛盾的提示。"]
+      ]
+    }
+  ]
+};
+
+const state = { chapter: demo.chapters[0].id, tab: "summary", query: "", dark: false };
+const $ = (id) => document.getElementById(id);
+
+function escapeHtml(value){
+  return String(value).replace(/[&<>"']/g, ch => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  }[ch]));
+}
+
+function currentChapter(){
+  return demo.chapters.find(ch => ch.id === state.chapter) || demo.chapters[0];
+}
+
+function toast(text){
+  const el = $("toast");
+  el.textContent = text;
+  el.classList.add("show");
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => el.classList.remove("show"), 2600);
+}
+
+function highlight(text){
+  let html = escapeHtml(text);
+  const ch = currentChapter();
+  ch.tags.forEach(tag => {
+    html = html.replaceAll(escapeHtml(tag), `<span class="mark">${escapeHtml(tag)}</span>`);
+  });
+  const q = state.query.trim();
+  if(q.length >= 2){
+    const safe = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    html = html.replace(new RegExp(safe, "gi"), match => `<span class="hit">${escapeHtml(match)}</span>`);
+  }
+  return html;
+}
+
+function renderChapters(){
+  const q = state.query.trim().toLowerCase();
+  const list = $("chapterList");
+  const filtered = demo.chapters.filter(ch => {
+    const body = [ch.title,ch.subtitle,ch.summary,ch.tags.join(" "),ch.paragraphs.join(" ")].join(" ").toLowerCase();
+    return !q || body.includes(q);
+  });
+  list.innerHTML = filtered.map(ch => `
+    <button class="chapter-btn ${ch.id === state.chapter ? "active" : ""}" type="button" data-chapter="${ch.id}">
+      <span class="chapter-row"><span>${escapeHtml(ch.title)}</span><span>${ch.words}</span></span>
+      <span class="chapter-meta">${ch.tags.map(t => `<span>${escapeHtml(t)}</span>`).join("")}</span>
+    </button>
+  `).join("") || `<div class="empty">没有匹配章节</div>`;
+}
+
+function renderStory(){
+  const ch = currentChapter();
+  $("chapterTitle").textContent = ch.title;
+  $("chapterSubtitle").textContent = ch.subtitle;
+  $("chapterMeta").textContent = `${ch.words} 字 · ${ch.tags.join(" / ")}`;
+  $("storyText").innerHTML = ch.paragraphs.map(p => `<p>${highlight(p)}</p>`).join("");
+}
+
+function card(title, body){
+  return `<section class="info-card"><h3>${escapeHtml(title)}</h3>${body}</section>`;
+}
+
+function renderTab(){
+  const ch = currentChapter();
+  const panel = $("tabPanel");
+  if(state.tab === "summary"){
+    panel.innerHTML = `<div class="panel-grid">
+      ${card("章节摘要", `<p>${escapeHtml(ch.summary)}</p>`)}
+      ${card("出场要素", `<div class="tag-row">${ch.tags.map((t,i) => `<span class="tag" data-kind="${i === 0 ? "char" : "rule"}">${escapeHtml(t)}</span>`).join("")}</div>`)}
+      ${card("伏笔提示", `<p>${escapeHtml(ch.prediction)}</p>`)}
+    </div>`;
+  }else if(state.tab === "outline"){
+    panel.innerHTML = `<div class="panel-grid">
+      ${card("本章推进", `<ul>${ch.outline.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`)}
+      ${card("核心记忆", `<p>${escapeHtml(ch.tags[0])} 与 ${escapeHtml(ch.tags[ch.tags.length - 1])} 的关系已进入长期追踪。</p>`)}
+      ${card("可查实体", `<div class="tag-row">${ch.tags.map(t => `<button class="prompt-chip entity-find" type="button" data-find="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join("")}</div>`)}
+    </div>`;
+  }else if(state.tab === "radar"){
+    panel.innerHTML = `<div class="panel-grid">
+      ${card("一致性提醒", `<ul>${ch.radar.map(x => `<li>${escapeHtml(x)}</li>`).join("")}</ul>`)}
+      ${card("只读说明", `<p>这里不会调用 AI 深度确认。完整版会读取知识库、章节原文和时间线再给出核查建议。</p>`)}
+      ${card("风险等级", `<div class="tag-row"><span class="tag" data-kind="risk">伏笔待回收</span><span class="tag" data-kind="rule">规则需限定</span></div>`)}
+    </div>`;
+  }else if(state.tab === "timeline"){
+    panel.innerHTML = `<div class="timeline">${ch.timeline.map(([time,text]) => `
+      <div class="event"><div class="event-time">${escapeHtml(time)}</div><div class="event-body"><b>${escapeHtml(text)}</b><p>来自 ${escapeHtml(ch.title)} 的静态事件节点。</p></div></div>
+    `).join("")}</div>`;
+  }else{
+    panel.innerHTML = `<div class="panel-grid">
+      ${card("读者预言", `<p>${escapeHtml(ch.prediction)}</p>`)}
+      ${card("下一章悬念", `<p>演示版根据内置摘要展示“像 Luca 会说的话”，不产生真实模型输出。</p>`)}
+      ${card("评论视角", `<p>目前最强的吸引点是物件规则和身份悬疑，读者会期待“林澈到底何时丢失了自己”。</p>`)}
+    </div>`;
+  }
+}
+
+function renderMessages(kind = "intro"){
+  const ch = currentChapter();
+  const replies = {
+    intro: [
+      ["user","这本书前面发生了什么？"],
+      ["luca",`现在读到 ${ch.title}。核心线索是 ${ch.tags.join("、")}，目前最大的悬念是林澈与雾灯事件的旧关联。`]
+    ],
+    recap: [
+      ["user","回顾当前章。"],
+      ["luca",ch.summary]
+    ],
+    risk: [
+      ["user","找设定风险。"],
+      ["luca",`我会重点盯住：${ch.radar.join("；")} 这些点后文需要明确规则或回收。`]
+    ],
+    next: [
+      ["user","预测下一步。"],
+      ["luca",ch.prediction]
+    ]
+  };
+  $("messages").innerHTML = (replies[kind] || replies.intro).map(([who,text]) => `
+    <div class="msg ${who === "user" ? "user" : ""}">
+      <b>${who === "user" ? "你" : "Luca"}</b>
+      <p>${escapeHtml(text)}</p>
+    </div>
+  `).join("");
+}
+
+function renderStats(){
+  $("statChapters").textContent = demo.chapters.length;
+  $("statWords").textContent = demo.chapters.reduce((sum,ch) => sum + ch.words, 0).toLocaleString("zh-CN");
+}
+
+function setChapter(id){
+  state.chapter = id;
+  renderChapters();
+  renderStory();
+  renderTab();
+  renderMessages("intro");
+}
+
+function setTab(tab){
+  state.tab = tab;
+  document.querySelectorAll(".tab").forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tab));
+  renderTab();
+}
+
+document.addEventListener("click", event => {
+  const chapterBtn = event.target.closest("[data-chapter]");
+  if(chapterBtn) setChapter(chapterBtn.dataset.chapter);
+
+  const tabBtn = event.target.closest("[data-tab]");
+  if(tabBtn) setTab(tabBtn.dataset.tab);
+
+  const promptBtn = event.target.closest("[data-prompt]");
+  if(promptBtn) renderMessages(promptBtn.dataset.prompt);
+
+  const findBtn = event.target.closest("[data-find]");
+  if(findBtn){
+    $("searchInput").value = findBtn.dataset.find;
+    state.query = findBtn.dataset.find;
+    renderChapters();
+    renderStory();
+    toast(`已在正文中高亮：${findBtn.dataset.find}`);
+  }
+});
+
+$("searchInput").addEventListener("input", event => {
+  state.query = event.target.value;
+  renderChapters();
+  renderStory();
+});
+
+$("themeBtn").addEventListener("click", () => {
+  state.dark = !state.dark;
+  document.querySelector(".demo-shell").dataset.theme = state.dark ? "dark" : "light";
+});
+
+$("deployBtn").addEventListener("click", () => {
+  toast("Cloudflare Pages 发布目录：landing/pages-demo，构建命令留空。");
+});
+
+$("downloadBtn").addEventListener("click", () => {
+  toast("完整版需要 Python 后端或桌面安装包；这个目录只提供静态演示。");
+});
+
+$("readonlyBtn").addEventListener("click", () => {
+  toast("只读版没有登录、保存、AI 调用和知识库写入，因此能直接托管在 Pages。");
+});
+
+renderStats();
+renderChapters();
+renderStory();
+renderTab();
+renderMessages();
+</script>
+</body>
+</html>
