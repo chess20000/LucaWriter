@@ -1,11 +1,11 @@
 {
   "name": "lucawriter",
-  "version": "1.2.0",
-  "description": "LucaWriter - AI写作搭档",
+  "version": "1.2.0c",
+  "description": "LucaWriter Community - AI写作搭档",
   "main": "main.js",
   "author": "LucaWriter",
   "license": "Apache-2.0",
-  "_releaseArtifactNameComment": "Keep installer artifact names versionless. Landing uses /releases/latest/download/LucaWriter-Setup.exe and LucaWriter-mac-${arch}.dmg fixed links, so do not add ${version} back to artifactName.",
+  "_releaseArtifactNameComment": "Keep installer artifact names versionless.",
   "scripts": {
     "icons": "set LUCA_ICON_SCOPE=electron&& python make_icon.py",
     "prebuild": "npm run icons",
@@ -25,7 +25,7 @@
     "productName": "LucaWriter",
     "copyright": "Copyright © 2026 LucaWriter",
     "directories": {
-      "output": "../release/v1.2.0"
+      "output": "../release/v1.2.0c"
     },
     "files": [
       "main.js",
@@ -44,33 +44,17 @@
       {
         "from": "dist-backend/LucaWriterBackend",
         "to": "backend",
-        "filter": [
-          "**/*"
-        ]
+        "filter": ["**/*"]
       },
       {
         "from": "../frontend",
         "to": "frontend",
-        "filter": [
-          "**/*",
-          "!**/__pycache__/**"
-        ]
+        "filter": ["**/*", "!**/__pycache__/**"]
       },
       {
         "from": "dist-builtin",
         "to": "builtin",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "../local_llm",
-        "to": "local_llm",
-        "filter": [
-          "**/*",
-          "!models/**",
-          "!*.md"
-        ]
+        "filter": ["**/*"]
       }
     ],
     "win": {

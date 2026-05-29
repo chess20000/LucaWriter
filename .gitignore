@@ -30,6 +30,8 @@ env/
 
 _*.py
 demo/
+*.epub
+tmp_*.png
 
 # Allow .gitkeep in otherwise-ignored directories
 !.gitkeep
