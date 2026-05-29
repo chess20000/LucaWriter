@@ -7563,13 +7563,14 @@ def _download_with_url(url, dest_path, total_size=0):
 
 
 def _detect_local_model():
-    """自动检测 local_llm/models/ 目录下第一个 .gguf 模型文件"""
+    """自动检测 local_llm/models/ 目录下最新的 .gguf 模型文件（按修改时间排序）"""
     models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
     if not os.path.isdir(models_dir):
         return None
-    ggufs = sorted([f for f in os.listdir(models_dir) if f.lower().endswith('.gguf')])
+    ggufs = [f for f in os.listdir(models_dir) if f.lower().endswith('.gguf')]
     if not ggufs:
         return None
+    ggufs.sort(key=lambda f: os.path.getmtime(os.path.join(models_dir, f)), reverse=True)
     return os.path.join(models_dir, ggufs[0])
 
 
