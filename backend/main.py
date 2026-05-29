@@ -5902,6 +5902,9 @@ class Handler(BaseHTTPRequestHandler):
                     if k in data:
                         try: cfg[k] = type(data[k])(data[k])
                         except: cfg[k] = data[k]
+                if 'read_mode' in data:
+                    m = str(data.get('read_mode') or '').strip().lower()
+                    cfg['read_mode'] = m if m in ('batch', 'chapter') else 'batch'
                 save_readthrough_config(bid, cfg)
                 self.json_resp(200, cfg); return
             if path.endswith('/generate-outline') or path.endswith('/readthrough/generate-outline'):
