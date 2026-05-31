@@ -45,34 +45,42 @@ if exist "%ROOT_DIR%release\v1.2.1" rmdir /s /q "%ROOT_DIR%release\v1.2.1"
 echo Clean done.
 echo.
 
-echo [2/8] Cleaning pip cache and installing Python dependencies...
-%PYTHON_EXE% -m pip cache purge >nul 2>&1
-%PYTHON_EXE% -m pip install -r "%ROOT_DIR%requirements.txt" --quiet --no-cache-dir
+echo [2/8] Creating clean build venv and installing dependencies...
+set "BUILD_VENV=%BUILD_TEMP%\venv"
+if exist "%BUILD_VENV%" rmdir /s /q "%BUILD_VENV%"
+%PYTHON_EXE% -m venv "%BUILD_VENV%"
+if errorlevel 1 (
+    echo [ERROR] Failed to create build venv
+    pause
+    exit /b 1
+)
+set "VENV_PYTHON=%BUILD_VENV%\Scripts\python.exe"
+%VENV_PYTHON% -m pip install -r "%ROOT_DIR%requirements.txt" --quiet
 if errorlevel 1 (
     echo [ERROR] Failed to install Python dependencies
     pause
     exit /b 1
 )
-%PYTHON_EXE% -m pip install pyinstaller Pillow --quiet --no-cache-dir
+%VENV_PYTHON% -m pip install pyinstaller Pillow --quiet
 if errorlevel 1 (
     echo [ERROR] Failed to install PyInstaller/Pillow
     pause
     exit /b 1
 )
-echo Python dependencies installed.
+echo Clean build venv ready (only requirements.txt packages).
 echo.
 
 echo [3/8] Generating app icon...
 cd /d "%ROOT_DIR%"
-%PYTHON_EXE% electron\make_icon.py
+%VENV_PYTHON% electron\make_icon.py
 if errorlevel 1 (
     echo [WARN] Icon generation failed, using default icon
 )
 echo Icon done.
 echo.
 
-echo [4/8] Building backend with PyInstaller...
-%PYTHON_EXE% -m PyInstaller --onedir --noconsole ^
+echo [4/8] Building backend with PyInstaller (using clean venv)...
+%VENV_PYTHON% -m PyInstaller --onedir --noconsole ^
     --name LucaWriterBackend ^
     --distpath "%DIST_BACKEND%" ^
     --workpath "%BUILD_TEMP%" ^
@@ -83,13 +91,6 @@ echo [4/8] Building backend with PyInstaller...
     --hidden-import ebooklib ^
     --hidden-import ebooklib.epub ^
     --collect-all certifi ^
-    --exclude-module torch ^
-    --exclude-module torchvision ^
-    --exclude-module torchaudio ^
-    --exclude-module torchsde ^
-    --exclude-module torchao ^
-    --exclude-module safetensors ^
-    --exclude-module tensorboard ^
     "%ROOT_DIR%backend\main.py"
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed
