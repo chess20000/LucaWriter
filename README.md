@@ -1,6 +1,7 @@
 # LucaWriter
 **桌面版下载**
 [Windows下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe) · [macOS下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-mac-arm64.dmg)
+mac端不是最新版，需要从源码构建
 
 项目主页：[lucawriter.fun](https://lucawriter.fun/)
 
