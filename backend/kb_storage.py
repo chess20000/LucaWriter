@@ -905,7 +905,15 @@ import numpy as np
 _chroma_clients = {}
 _chroma_clients_lock = threading.Lock()
 _CHROMA_KB_COLLECTION = 'luca_kb'
-_CHROMA_SETTINGS = _ChromaSettings(anonymized_telemetry=False)
+_CHROMA_SETTINGS = _ChromaSettings(
+    anonymized_telemetry=False,
+    chroma_server_host=None,
+    chroma_server_http_port=None,
+    chroma_server_grpc_port=None,
+    chroma_coordinator_host='',
+    chroma_logservice_host='',
+    chroma_otel_collection_endpoint='',
+)
 
 def _get_chroma_client(book_id):
     client = _chroma_clients.get(book_id)

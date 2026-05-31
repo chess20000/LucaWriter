@@ -36,7 +36,15 @@ if not os.environ.get('SSL_CERT_FILE'):
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from chromadb.config import Settings as _ChromaSettings
-_CHROMA_SETTINGS = _ChromaSettings(anonymized_telemetry=False)
+_CHROMA_SETTINGS = _ChromaSettings(
+    anonymized_telemetry=False,
+    chroma_server_host=None,
+    chroma_server_http_port=None,
+    chroma_server_grpc_port=None,
+    chroma_coordinator_host='',
+    chroma_logservice_host='',
+    chroma_otel_collection_endpoint='',
+)
 import numpy as np
 
 import kb_pipeline
@@ -221,7 +229,7 @@ def _normalize_local_llm_preset(p, port=None):
 
 DEFAULT_PROVIDER_PRESETS = [
     {'name': 'LMStudio', 'base_url': 'http://localhost:1234/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
-    {'name': 'DeepSeek', 'base_url': 'https://api.deepseek.com', 'api_key': '', 'model': 'deepseek-chat', 'use_custom_json': False, 'custom_json': ''},
+    {'name': 'DeepSeek', 'base_url': 'https://api.deepseek.com', 'api_key': '', 'model': 'deepseek-chat', 'use_custom_json': False, 'custom_json': '', 'context_length': 1048576},
     {'name': '自定义1', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
     {'name': '自定义2', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
     {'name': '本地 Llama.cpp', 'base_url': _local_llm_base_url(), 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': '', 'context_length': 65536},
@@ -2901,6 +2909,24 @@ class Handler(BaseHTTPRequestHandler):
             strategy = _apply_bundle_limit(_decide_local_strategy(hw))
             _save_local_strategy(hw, strategy)
             self.json_resp(200, {'hardware': hw, 'strategy': strategy}); return
+
+        if path == '/api/local-llm/models-dir':
+            models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+            self.json_resp(200, {'path': os.path.abspath(models_dir)}); return
+
+        if path == '/api/local-llm/open-models-dir':
+            models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+            os.makedirs(models_dir, exist_ok=True)
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(models_dir)
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', models_dir], check=False)
+                else:
+                    subprocess.run(['xdg-open', models_dir], check=False)
+                self.json_resp(200, {'ok': True}); return
+            except Exception as e:
+                self.json_resp(500, {'error': str(e)}); return
 
 
         # 浏览器控制 API
@@ -7800,9 +7826,25 @@ def _monitor_local_llm(proc):
     """后台线程：读取子进程输出并更新进度"""
     _local_llm_set(status='starting', progress=5)
     try:
-        # llama-server 输出量大，我们直接轮询 HTTP 端口更可靠
         for i in range(60):
             time.sleep(1)
+            # 检查子进程是否已退出（崩溃）
+            if proc.poll() is not None:
+                exit_code = proc.returncode
+                # 读 stderr.log 获取崩溃信息
+                stderr_path = os.path.join(_LOCAL_LLM_DIR, 'stderr.log')
+                crash_info = ''
+                if os.path.exists(stderr_path):
+                    try:
+                        with open(stderr_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            crash_info = f.read().strip()[:300]
+                    except Exception:
+                        pass
+                msg = f'进程异常退出(code={exit_code})'
+                if crash_info:
+                    msg += f': {crash_info}'
+                _local_llm_set(status='error', progress=_LOCAL_LLM_STATE.get('progress', 5), error=msg)
+                return
             # 通过日志文件判断进度
             log_path = os.path.join(_LOCAL_LLM_DIR, 'server.log')
             if os.path.exists(log_path):
@@ -7855,19 +7897,23 @@ def _start_local_llm():
             return True, '正在启动中'
     try:
         log_path = os.path.join(_LOCAL_LLM_DIR, 'server.log')
+        stderr_path = os.path.join(_LOCAL_LLM_DIR, 'stderr.log')
         # 清空旧日志
         open(log_path, 'w').close()
-        log_fp = open(log_path, 'a', encoding='utf-8', errors='ignore')
+        open(stderr_path, 'w').close()
         strategy = _load_local_strategy()
         # 同步 provider preset 的 base_url 到真实端口（避免 settings 里显示旧端口）
         _sync_local_provider_url(_get_local_llm_port())
-        cmd = [exe, '-m', _LOCAL_LLM_MODEL] + _build_llm_args(strategy)
+        # 使用 --log-file 让 llama-server 自己管理日志文件（避免 Windows stdout 缓冲问题）
+        cmd = [exe, '-m', _LOCAL_LLM_MODEL, '--log-file', log_path, '--log-colors', 'off'] + _build_llm_args(strategy)
+        stderr_fp = open(stderr_path, 'a', encoding='utf-8', errors='ignore')
         try:
-            _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR, stdout=log_fp, stderr=subprocess.STDOUT,
+            _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR,
+                                               stdout=subprocess.DEVNULL,
+                                               stderr=stderr_fp,
                                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         finally:
-            # Popen 已经把 fd 传给子进程（Win 上是 DuplicateHandle），父端可以立刻关闭，避免反复启停泄漏句柄
-            try: log_fp.close()
+            try: stderr_fp.close()
             except Exception: pass
         threading.Thread(target=_monitor_local_llm, args=(_LOCAL_LLM_PROC,), daemon=True).start()
         return True, ''
@@ -8146,10 +8192,10 @@ def _build_llm_args(strategy):
         '--port', str(_get_local_llm_port()),
         '-c', '65536',
         '-fa', 'auto',
-        # K cache 保持 q8_0（TurboQuant+ README 警告: "never lead with a turbo K"）
+        # K cache 用 q8_0
         '-ctk', 'q8_0',
-        # V cache 用 turbo3：约 4.6× 压缩 @ <1.5% PPL 损失，比 q8_0 省 ~75% V 显存
-        '-ctv', 'turbo3',
+        # V cache 用 q8_0（turbo3 需要较新 llama.cpp 版本，当前打包的版本不支持）
+        '-ctv', 'q8_0',
         '-np', '1',
         '-t', str(min(cpu_t, 8)),
         '--timeout', '300',

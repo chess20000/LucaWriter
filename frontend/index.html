@@ -98,6 +98,7 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 .topbar-center-logo img{width:20px;height:20px;opacity:.7}
 .topbar-back:hover{color:var(--t-on-surface);border-color:var(--accent-a25);background:var(--accent-a12)}
 .topbar-back svg{display:block;transform:translateX(-2px)}
+.topbar-back svg:last-child{transform:translateX(-2px) translateY(1px)}
 .topbar-breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;overflow:hidden;flex:1;min-width:0}
 .topbar-breadcrumb .bc-book{color:var(--t-on-surface);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;flex-shrink:1;min-width:48px;font-weight:650}
 .topbar-breadcrumb .bc-sep{color:var(--t3);flex-shrink:0;font-size:12px}
@@ -926,14 +927,21 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .provider-block{flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r2);padding:8px 6px;text-align:center;cursor:pointer;transition:0s;display:flex;flex-direction:column;align-items:center;gap:4px}
 .provider-block:hover{border-color:var(--accent);background:var(--surface3)}
 .provider-block.active{background:var(--accent-dim);border-color:var(--accent)}
+.provider-block.selected .pb-dot{background:var(--accent)}
 .provider-block .pb-dot{width:8px;height:8px;border-radius:var(--r1);background:var(--surface4);transition:0s}
-.provider-block.active .pb-dot{background:var(--accent)}
 .provider-block .pb-name{font-size:11px;font-weight:600;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .provider-block.active .pb-name{color:var(--accent)}
+.provider-block-apply{display:none;margin:-10px 0 14px;text-align:center}
+.provider-block-apply.visible{display:block}
+.provider-block-apply button{padding:4px 16px;font-size:12px;border-radius:var(--r2);border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);cursor:pointer;transition:border-color .15s ease}
+.provider-block-apply button:hover{border-color:var(--accent-hover)}
 .local-llm-box{position:relative;text-align:center;margin-bottom:16px;padding:14px;border:1px dashed var(--border);border-radius:var(--r2);background:var(--surface2)}
 .local-llm-title{font-size:14px;font-weight:700;margin-bottom:8px}
 .local-llm-info-btn{position:absolute;top:10px;right:10px;width:20px;height:20px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--t3);font-size:12px;font-weight:700;line-height:18px;text-align:center;cursor:pointer;padding:0}
 .local-llm-info-btn:hover,.local-llm-info-btn.active{border-color:var(--accent);color:var(--accent);background:var(--accent-a12)}
+.local-llm-folder-btn{position:absolute;top:10px;right:34px;width:20px;height:20px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--t3);font-size:11px;line-height:18px;text-align:center;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center}
+.local-llm-folder-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-a12)}
+.local-llm-folder-btn svg{width:12px;height:12px;fill:currentColor}
 .local-llm-row{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--t2)}
 .local-llm-dot{display:inline-block;width:10px;height:10px;border-radius:var(--r1);background:#888;transition:0s}
 .local-llm-dot.on{background:var(--accent)}
@@ -1349,6 +1357,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 <div id="stAPI">
  <div class="local-llm-box" id="localLLMBox">
  <button class="local-llm-info-btn" id="localInfoBtn" type="button" onclick="toggleLocalLLMInfo()" title="本地模型详情">i</button>
+ <button class="local-llm-folder-btn" id="localFolderBtn" type="button" onclick="openLocalModelsDir()" title="打开模型文件夹"><svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></button>
  <div class="local-llm-title">内置模型</div>
  <div class="local-llm-row"><span class="local-llm-dot" id="localStatusDot"></span><span id="localStatusText"></span></div>
  <div class="local-llm-model" id="localDetectedModel" data-full-name="">模型名称：自动检测中...</div>
@@ -1383,6 +1392,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
     <div class="provider-block" data-idx="2" onclick="switchProviderPreset(2)"><span class="pb-dot"></span><span class="pb-name">自定义1</span></div>
     <div class="provider-block" data-idx="3" onclick="switchProviderPreset(3)"><span class="pb-dot"></span><span class="pb-name">自定义2</span></div>
  </div>
+ <div class="provider-block-apply" id="providerApplyBtn"><button onclick="applyProviderPreset()">✓ 应用</button></div>
  <div id="remoteApiForm">
   <div class="mg"><label>API URL</label><input id="sUrl" placeholder="如 http://localhost:1234/v1"></div>
  <div class="mg"><label>API Key</label><input id="sKey" type="text" class="pw-mask" placeholder="sk-..." autocomplete="off"></div>
@@ -1390,7 +1400,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  <div class="mg" id="ctxLenRow">
   <label>上下文长度（token）<span class="ctx-tip" title="设定模型的上下文窗口大小。Luca 会根据此值自动控制注入的实体数量和笔记长度，确保不超限。不知道的话留空即可。">ⓘ</span></label>
   <div style="display:flex;align-items:center;gap:8px">
-   <input id="sPresetCtxLen" type="number" min="0" step="1" placeholder="如 128000" style="flex:1" oninput="scheduleContextEstimate()">
+   <input id="sPresetCtxLen" type="number" min="0" step="1" placeholder="65536" style="flex:1" oninput="scheduleContextEstimate()">
    <span id="ctxEstimate" style="font-size:11px;color:var(--t3);white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis">-</span>
   </div>
   <p id="ctxWarn" style="font-size:11px;color:var(--warn);display:none;margin-top:2px"></p>
@@ -3472,6 +3482,7 @@ function _cmDelete(id){
 
 var providerPresets=[];
 var currentPresetIdx=0;
+var _selectedPresetIdx=0; // 用户当前选中的（黄点），点击应用后才同步到 currentPresetIdx
 var editorFontPresets=[];
 var _currentEditorFontPresetId='';
 var _editorFontSaveTimer=null;
@@ -3603,7 +3614,7 @@ function deleteEditorFont(id){
  });
 }
 
-function loadSettings(){api('GET','/api/settings',undefined,function(d,s){if(s===200){settings=d;providerPresets=d.provider_presets||[];currentPresetIdx=d.active_provider_idx||0;applySettings();applyZoom(parseFloat(settings.ui_scale)||1.0)}})}
+function loadSettings(){api('GET','/api/settings',undefined,function(d,s){if(s===200){settings=d;providerPresets=d.provider_presets||[];currentPresetIdx=d.active_provider_idx||0;_selectedPresetIdx=currentPresetIdx;applySettings();applyZoom(parseFloat(settings.ui_scale)||1.0)}})}
 
 function _normHexColor(v){
  v=String(v||'').trim().toUpperCase();
@@ -3632,7 +3643,6 @@ function applySettings(){
  document.documentElement.style.setProperty('--editor-font-size',fs+'px');
  var selectedEditorFontPresetId=settings.editor_font_preset_id||'';
  _currentEditorFontWeight=parseInt(settings.editor_font_weight)||200;
- if(!selectedEditorFontPresetId&&(_currentEditorFontWeight===300||_currentEditorFontWeight===400))_currentEditorFontWeight=200;
  document.documentElement.style.setProperty('--editor-font-weight',String(_currentEditorFontWeight));
  editorFontPresets=_normalizeEditorFontPresets(settings.editor_font_presets||[]);
  _currentEditorFontPresetId=selectedEditorFontPresetId;
@@ -4004,7 +4014,7 @@ function openSettings(){
  if(!providerPresets.length){
   providerPresets=[
   {name:'LMStudio',base_url:'http://localhost:1234/v1',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''},
-  {name:'DeepSeek',base_url:'https://api.deepseek.com',api_key:'',model:'deepseek-v4-flash',context_length:0,use_custom_json:false,custom_json:''},
+  {name:'DeepSeek',base_url:'https://api.deepseek.com',api_key:'',model:'deepseek-v4-flash',context_length:1048576,use_custom_json:false,custom_json:''},
        {name:'预设4',base_url:'',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''},
   {name:'5',base_url:'',api_key:'',model:'',context_length:0,use_custom_json:false,custom_json:''},
   {name:'本地 Llama.cpp',base_url:'',api_key:'',model:'',context_length:65536,use_custom_json:false,custom_json:''}
@@ -4012,7 +4022,9 @@ function openSettings(){
  }
  currentPresetIdx=settings.active_provider_idx||0;
  if(currentPresetIdx<0||currentPresetIdx>=providerPresets.length)currentPresetIdx=0;
+ _selectedPresetIdx=currentPresetIdx;
  renderProviderSlider();
+ _refreshApplyBtn();
  loadPresetToForm(currentPresetIdx);
  refreshLocalLLMProgress();
  refreshContextEstimate();
@@ -4071,6 +4083,7 @@ function renderProviderSlider(){
  }
  blocks.forEach(function(b,i){
  b.classList.toggle('active',i===currentPresetIdx);
+ b.classList.toggle('selected',i===_selectedPresetIdx);
  var p=providerPresets[i];
  if(p){
  var nameEl=b.querySelector('.pb-name');
@@ -4112,6 +4125,12 @@ function toggleLocalLLMInfo(){
  if(btn)btn.classList.toggle('active',open);
 }
 
+function openLocalModelsDir(){
+ fetch('/api/local-llm/open-models-dir',{method:'POST'}).then(function(r){return r.json()}).then(function(d){
+  if(!d.ok)console.error('openLocalModelsDir error',d.error);
+ }).catch(function(e){console.error('openLocalModelsDir error',e)});
+}
+
 function _localModelShortName(name){
  name=(name||'').trim();
  if(!name)return '未检测到模型';
@@ -4138,9 +4157,11 @@ function useProvider(idx,done,opts){
  try{saveFormToPreset(currentPresetIdx);}catch(e){}
  // 立刻更新 UI
  currentPresetIdx=idx;
+ _selectedPresetIdx=idx;
  renderProviderSlider();
  loadPresetToForm(idx);
  _refreshLocalLLMSelectedUI();
+ _refreshApplyBtn();
  if(!opts.silent){
   var name=(providerPresets[idx]&&providerPresets[idx].name)||'该提供商';
   toast('已切换到 '+name,'success');
@@ -4148,7 +4169,8 @@ function useProvider(idx,done,opts){
  // 防抖静默持久化：快速连点只保存最后一次
  clearTimeout(_providerSaveTimer);
  _providerSaveTimer=setTimeout(function(){
-  api('POST','/api/settings',{active_provider_idx:currentPresetIdx},function(r,s){
+  saveFormToPreset(currentPresetIdx);
+  api('POST','/api/settings',{active_provider_idx:currentPresetIdx,provider_presets:providerPresets},function(r,s){
    if(s===200){settings=r;providerPresets=r.provider_presets||providerPresets;}
   });
  },1000);
@@ -4486,9 +4508,29 @@ function toggleLocalLLM(){
 }
 
 function switchProviderPreset(idx){
- if(idx===currentPresetIdx && settings && settings.active_provider_idx===idx)return;
- // 点击块 = 直接切换 provider（持久化 + 通知所有 UI 重算 is-current 高亮）
- useProvider(idx);
+ if(idx<0||idx>=providerPresets.length)return;
+ if(idx===_selectedPresetIdx && idx===currentPresetIdx)return;
+ // 保存当前表单到旧选中预设
+ try{saveFormToPreset(_selectedPresetIdx);}catch(e){}
+ // 更新选中态
+ _selectedPresetIdx=idx;
+ renderProviderSlider();
+ loadPresetToForm(idx);
+ // 显示/隐藏应用按钮
+ _refreshApplyBtn();
+}
+
+function applyProviderPreset(){
+ if(_selectedPresetIdx===currentPresetIdx)return;
+ saveFormToPreset(_selectedPresetIdx);
+ useProvider(_selectedPresetIdx); // useProvider 内部已同步 _selectedPresetIdx、渲染 UI、持久化
+}
+
+function _refreshApplyBtn(){
+ var btn=$('providerApplyBtn');
+ if(!btn)return;
+ var show=(_selectedPresetIdx!==currentPresetIdx);
+ btn.classList.toggle('visible',show);
 }
 
  function loadPresetToForm(idx){
