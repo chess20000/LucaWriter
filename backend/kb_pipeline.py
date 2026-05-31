@@ -762,6 +762,9 @@ def do_readthrough(book_id, settings, config=None, resume=False):
 
         max_batch_chapters = _max_batch_chapters(read_context_window)
         use_batch = bool(read_context_window > 0 and max_batch_chapters > 1)
+        # 尊重用户选择的阅读模式
+        if cfg.get('read_mode') == 'chapter':
+            use_batch = False
         if use_batch:
             if context_window > 0:
                 rt_log(book_id, f'上下文限制: {context_window} tokens，最多 {max_batch_chapters} 章/批')
@@ -772,6 +775,8 @@ def do_readthrough(book_id, settings, config=None, resume=False):
                 rt_log(book_id, f'上下文限制仅 {context_window} tokens，使用单章模式')
             else:
                 rt_log(book_id, '未设置上下文长度，使用单章模式')
+        if cfg.get('read_mode') == 'chapter':
+            rt_log(book_id, '用户选择了逐章精读，已强制使用单章模式')
 
         def stop_check():
             st = get_rt_state(book_id)

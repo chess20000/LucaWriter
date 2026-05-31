@@ -11,11 +11,16 @@ release/
 build_output.log
 electron/dist-backend/
 electron/dist-builtin/
+electron/dist-test/
 electron/dist-icon-check*/
 electron/build-temp/
 electron/build-venv/
 electron/.pyinstaller_cache/
 electron/node_modules/
+
+# Test artifacts
+.vector_db_test/
+.vector_db_test2/
 
 # Logs
 *.log

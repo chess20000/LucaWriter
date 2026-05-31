@@ -34,6 +34,7 @@ if not os.environ.get('SSL_CERT_FILE'):
             os.environ['SSL_CERT_FILE'] = _macos_cert
 
 import chromadb
+import chromadb.api.rust  # 确保 PyInstaller 打包包含该模块（chromadb 运行时动态导入）
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from chromadb.config import Settings as _ChromaSettings
 _CHROMA_SETTINGS = _ChromaSettings(

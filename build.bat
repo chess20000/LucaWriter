@@ -84,6 +84,19 @@ echo Icon done.
 echo.
 
 echo [4/8] Building backend with PyInstaller (using clean venv)...
+REM 查找 chromadb 安装路径（先调用辅助脚本避免批处理引号嵌套问题）
+for /f "tokens=1,* delims==" %%a in ('%VENV_PYTHON% "%ROOT_DIR%electron\find_chromadb_paths.py"') do (
+    if "%%a"=="chromadb" set "CHROMADB_DIR=%%b"
+    if "%%a"=="chromadb_rust_bindings" set "CHROMADB_RUST_DIR=%%b"
+)
+echo chromadb: %CHROMADB_DIR%
+echo chromadb_rust_bindings: %CHROMADB_RUST_DIR%
+if "%CHROMADB_DIR%"=="" (
+    echo [ERROR] 找不到 chromadb 路径，无法打包
+    pause
+    exit /b 1
+)
+
 %VENV_PYTHON% -m PyInstaller --onedir --noconsole ^
     --name LucaWriterBackend ^
     --distpath "%DIST_BACKEND%" ^
@@ -95,7 +108,11 @@ echo [4/8] Building backend with PyInstaller (using clean venv)...
     --hidden-import ebooklib ^
     --hidden-import ebooklib.epub ^
     --hidden-import chromadb.telemetry.product.posthog ^
+    --hidden-import chromadb.api.rust ^
+    --additional-hooks-dir "%ROOT_DIR%electron\hooks" ^
     --collect-all certifi ^
+    --add-data "%CHROMADB_DIR%;chromadb" ^
+    --add-data "%CHROMADB_RUST_DIR%;chromadb_rust_bindings" ^
     "%ROOT_DIR%backend\main.py"
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed
