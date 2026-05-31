@@ -2,11 +2,13 @@
 
 **桌面版下载**
 
-[Windows 下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe) · macOS 版需要从源码构建（见下方说明）
+[Windows 下载](https://gh-proxy.com/github.com/chess20000/LucaWriter/releases/latest/download/LucaWriter-Setup.exe)
+macOS 版需要从源码构建（见下方说明）
 
-项目主页：[lucawriter.fun](https://lucawriter.fun/)
+项目主页：
+[lucawriter.fun](https://lucawriter.fun/)
 
-LucaWriter 是一款面向长篇小说与网文作者的写作辅助工具，通过 AI 构建每本书独立的知识库，帮你记住每一个人物、地点、事件和设定，并在用户吃书时发送提醒。
+LucaWriter 是一款面向长篇小说与网文作者的写作辅助工具，通过 AI 构建每本书独立的知识库，帮你记住每一个人物、地点、事件和设定。
 
 > **设计哲学**：归于情感的艺术创作，应由人类自己完成。LucaWriter 不生成正文，只做回顾和提醒。
 
