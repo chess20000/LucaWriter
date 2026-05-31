@@ -48,7 +48,7 @@
  --editor-font-family:var(--font-longform);
  --editor-font-weight:200;
  --scrollbar:rgba(255,255,255,.14);--scrollbar-hover:rgba(214,214,211,.24);
- --z-bottom-panel:60;--z-main-row:70;--z-chapter-overlay:95;
+ --z-bottom-panel:90;--z-main-row:70;--z-chapter-overlay:95;
  /* text-on-surface colors for better contrast */
  --on-accent:#191919;
  --t-on-surface:var(--t1);--t-on-surface-weak:var(--t2);--t-on-surface-muted:var(--t3);
@@ -437,9 +437,9 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .ctx-tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--surface2);color:var(--t3);font-size:10px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle}
 
 .bottom-panel{position:relative;z-index:var(--z-bottom-panel);display:flex;flex-direction:column;overflow:visible;transition:0s;height:30px;padding-left:18px}
-.bottom-panel.collapsed{overflow:hidden;max-height:none}
+.bottom-panel.collapsed{max-height:none}
 .bottom-handle{display:flex;align-items:center;justify-content:space-between;padding:0 16px 0 0;height:30px;flex-shrink:0;gap:0;user-select:none;position:relative;overflow:visible;z-index:2}
-.handle-grip{display:flex;align-items:center;position:absolute;left:50%;transform:translateX(-50%);gap:12px;cursor:ns-resize}
+.handle-grip{display:flex;align-items:center;position:absolute;left:50%;transform:translateX(-50%);gap:12px;cursor:ns-resize;z-index:3}
 .handle-grip span{display:block;width:20px;height:2px;background:var(--surface4);border-radius:1px;transition:0s}
 .handle-grip:hover span{background:var(--t2)}
 .handle-hint{font-size:11px;color:var(--t3);white-space:nowrap;opacity:.6;transition:0s;line-height:2px}
@@ -447,30 +447,40 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .bottom-panel:not(.collapsed) .handle-hint::after{content:'点击收起'}
 .bottom-tabs-wrap{position:relative;flex-shrink:0;display:flex;align-items:flex-start;margin-left:16px;overflow:visible;align-self:flex-start}
 /* redesigned bottom icons: bookmark-shaped tabs with swallowtail */
-.bottom-pill{background:var(--surface2);border:none;color:var(--t2);width:36px;height:42px;display:inline-flex;align-items:center;justify-content:center;clip-path:polygon(0 0,100% 0,100% 78%,50% 100%,0 78%);cursor:pointer;transition:all .15s;line-height:0;position:relative;z-index:2}
+.bottom-pill{background:var(--surface2);border:none;color:var(--t2);width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;cursor:pointer;transition:all .15s;line-height:0;position:relative;z-index:2}
 .bottom-pill:hover{color:var(--t1);filter:drop-shadow(0 1px 2px var(--accent-a25))}
 .bottom-pill.active{color:var(--accent);background:var(--accent-a12);filter:drop-shadow(0 1px 3px var(--accent-a30))}
 .bottom-tabs-flyout{position:absolute;left:100%;top:0;display:none;flex-direction:row;gap:4px;padding:0 0 0 8px;z-index:calc(var(--z-chapter-overlay) - 4);white-space:nowrap}
 .bottom-tabs-wrap.flyout-mode:hover .bottom-tabs-flyout,
 .bottom-tabs-flyout:hover{display:flex}
-.bicon{display:block;width:16px;height:16px}
-.bottom-pill .bicon,.bottom-tab .bicon,.bottom-tab-fly .bicon{margin-top:-4px}
+.bicon{display:block;width:18px;height:18px}
+.bottom-tab .bicon,.bottom-tab-fly .bicon{margin-top:-3px}
 .bottom-tab-fly{background:var(--surface2);border:none;color:var(--t3);width:36px;height:42px;display:inline-flex;align-items:center;justify-content:center;clip-path:polygon(0 0,100% 0,100% 78%,50% 100%,0 78%);cursor:pointer;transition:all .15s;line-height:0;opacity:.7}
 .bottom-tab-fly:hover{color:var(--t1);opacity:1;filter:drop-shadow(0 1px 2px var(--accent-a25))}
 .bottom-tab-fly.active{color:var(--accent);background:var(--accent-a12);opacity:1;filter:drop-shadow(0 1px 3px var(--accent-a30))}
 .bottom-tabs-inline{display:none;align-items:flex-start;gap:6px;margin-left:12px}
 .bottom-tabs-wrap:not(.flyout-mode) .bottom-tabs-inline{display:flex}
 
-#aiInputZone{width:280px;flex:none;display:flex;align-items:stretch;margin-left:0}
-.luca-popup{position:fixed;right:12px;width:280px;max-height:50vh;display:none;flex-direction:column;background:rgba(30,30,30,.45);backdrop-filter:blur(12px) saturate(130%);-webkit-backdrop-filter:blur(12px) saturate(130%);border:none;border-radius:var(--r2) var(--r2) 0 0;overflow:hidden;z-index:calc(var(--z-chapter-overlay) + 10)}
+#aiInputZone{width:280px;flex:none;display:flex;align-items:stretch;margin-left:0;position:relative;overflow:visible}
+.luca-popup{position:absolute;bottom:100%;left:0;right:0;max-height:50vh;display:none;flex-direction:column;background:rgba(30,30,30,.45);backdrop-filter:blur(12px) saturate(130%);-webkit-backdrop-filter:blur(12px) saturate(130%);border:none;border-radius:var(--r2) var(--r2) 0 0;overflow:hidden;z-index:calc(var(--z-chapter-overlay) + 10)}
 [data-theme-mode="light"] .luca-popup{background:rgba(245,245,245,.5)}
 .luca-popup.open{display:flex}
-.luca-popup-brand{display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:700;color:var(--t2);letter-spacing:1px;padding:10px 0 6px 0;flex-shrink:0;position:relative}
-.luca-clear-btn{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:18px;height:18px;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--t3);font-size:12px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:0s}
-.luca-clear-btn:hover{color:var(--t1);border-color:var(--t3)}
+.luca-popup-grip{width:40px;height:5px;border-radius:3px;background:var(--t2);opacity:.45;margin:6px auto;cursor:ns-resize;flex-shrink:0;transition:opacity .15s}
+.luca-popup-grip:hover{opacity:.85}
+.luca-popup-brand{display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:700;color:var(--t2);letter-spacing:1px;padding:6px 0 6px 0;flex-shrink:0;position:relative}
+
+.luca-brand-actions{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:4px}
+.luca-act-btn{width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:border-color .15s,color .15s}
+.luca-act-btn:hover{color:var(--t1);border-color:var(--t3)}
+.luca-chat-history{max-height:180px;overflow-y:auto;padding:0 8px 6px 8px;flex-shrink:0}
+.luca-history-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:var(--r1);cursor:pointer;font-size:11px;color:var(--t2);transition:background .12s}
+.luca-history-item:hover{background:var(--surface3)}
+.luca-history-item.active{color:var(--accent);background:var(--accent-a12)}
+.luca-history-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.luca-history-time{font-size:10px;color:var(--t3);flex-shrink:0;white-space:nowrap}
 .luca-popup-line{width:calc(100% - 28px);height:2px;margin:0 auto 0 auto;border-radius:1px;background:var(--border);flex-shrink:0}
 .luca-popup-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 14px 12px 14px;min-height:60px}
-.luca-float{position:fixed;left:18px;max-width:55%;font-size:12px;color:var(--t2);line-height:1.65;pointer-events:none;z-index:calc(var(--z-chapter-overlay) + 10);display:none;white-space:pre-wrap;word-break:break-all;padding:4px 0}
+.luca-float{position:absolute;bottom:calc(100% + 4px);right:0;max-width:55vw;font-size:12px;color:var(--t2);line-height:1.65;pointer-events:none;z-index:calc(var(--z-chapter-overlay) + 10);display:none;white-space:pre-wrap;word-break:break-all;padding:4px 0}
 .luca-float.show{display:block}
 .luca-float .luca-float-inner{display:flex;align-items:flex-start;gap:6px}
 .luca-float .luca-float-inner img{width:18px;height:18px;flex-shrink:0;margin-top:1px}
@@ -511,7 +521,6 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .ai-active-dots.show{display:inline-flex}
 .ai-active-label{margin-right:2px}
 .ai-active-dots.speed{font-family:var(--font-mono);font-weight:700;color:var(--accent);letter-spacing:0}
-.ai-speed-text{line-height:1}
 .ai-active-dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
 
 
@@ -558,7 +567,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .ai-reasoning-toggle{cursor:pointer;font-size:10px;color:var(--accent);font-weight:600;display:inline-flex;align-items:center;gap:3px}
 .ai-reasoning-toggle:hover{color:var(--accent2)}
 .ai-reasoning-body{display:none;font-size:11px;color:var(--t3);white-space:pre-wrap;padding:6px 8px;background:var(--surface3);border-radius:var(--r1);margin-top:4px;line-height:1.6;border-left:2px solid var(--accent);overflow:hidden}
-.ai-reasoning-body.open{display:block}
+.ai-reasoning-body.open{display:block;cursor:pointer}
 .generate-pane{flex-direction:column;height:100%;align-items:center;justify-content:center}
 .generate-body{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px 20px}
 .generate-btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
@@ -903,7 +912,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .prompt-btns{display:flex;gap:12px;justify-content:center;align-items:center}
 .prompt-btns button{flex:0 1 auto;min-width:140px;padding:10px 18px;border-radius:var(--r1);font-size:14px;font-weight:700;cursor:pointer;border:none;transition:0s;touch-action:manipulation}
 
-@media(max-width:900px){.luca-popup{width:340px}}
+@media(max-width:900px){}
 @media(max-width:768px){.main-row{display:none}.bottom-panel{display:none}}
 
 .pw-mask{-webkit-text-security:disc;font-family:var(--font-mono)}
@@ -1139,43 +1148,46 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  </div>
  </div>
 
- <div class="luca-popup" id="lucaPopup">
-  <div class="luca-popup-brand"><span>Luca</span><button class="luca-clear-btn" onclick="clearAIChat()" title="清空对话">&#215;</button></div>
-  <div class="luca-popup-line"></div>
-  <div class="luca-popup-messages" id="aiMessages"></div>
-  <div id="kbProposalModal" style="position:absolute;inset:0;background:rgba(0,0,0,.35);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:10;justify-content:center;align-items:center;display:none;border-radius:var(--r2)" onclick="if(event.target===this)this.style.display='none'">
-  <div style="background:var(--surface);border:1px solid var(--border2);border-radius:var(--r3);padding:18px 16px;width:92%;max-width:340px">
-  <div style="font-size:14px;font-weight:700;margin-bottom:12px">知识库修改提议</div>
-  <div id="kbProposalContent"></div>
-  <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
-  <button class="prompt-cancel" onclick="kbModalReject()">拒绝</button>
-  <button class="prompt-ok" onclick="kbModalConfirm()" style="min-width:80px">确认修改</button>
-  </div>
-  </div>
-  </div>
- </div>
- <div class="luca-float" id="lucaFloat"></div>
-
   <div class="bottom-panel" id="bottomPanel">
   <div class="bottom-handle" id="bottomHandle">
 	    <div class="bottom-tabs-wrap flyout-mode" id="bottomTabsWrap">
           <div class="bottom-tabs-flyout" id="bottomTabsFlyout">
-            <button class="bottom-tab-fly" data-btab="timeline" onclick="switchBottomTab('timeline')" title="时间线"><svg viewBox="0 0 16 16" class="bicon"><path d="M1.5 14.5h13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="8" cy="6.5" r="4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8 4v2.5l1.5 1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 10.5v4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab-fly" data-btab="prediction" onclick="switchBottomTab('prediction')" title="预言"><svg viewBox="0 0 16 16" class="bicon"><path d="M11.5 3.5c0 0-1.5-1-3-0.5s-2.5 2-2.5 3.5c0 1 0.5 2 1.5 2.5v1.5l1.5-1c0.5 0.2 1 0.2 1.5 0" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="5.5" r="0.6" fill="currentColor"/><path d="M3 9c1.5 0.5 2 1.5 2 2.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M2 11c1 0 1.5 0.8 1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab-fly" data-btab="outline" onclick="switchBottomTab('outline')" title="大纲"><svg viewBox="0 0 16 16" class="bicon"><path d="M3.5 1.5h9v11l-4.5-2.2-4.5 2.2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 5.5h4M6 8h4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab-fly" data-btab="inspiration" onclick="switchBottomTab('inspiration')" title="灵感"><svg viewBox="0 0 16 16" class="bicon"><path d="M8 1.5l1 3.5 3.5 1-3.5 1-1 3.5-1-3.5-3.5-1 3.5-1z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 10l0.6 2 2 0.6-2 0.6-0.6 2-0.6-2-2-0.6 2-0.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 10l0.6 2 2 0.6-2 0.6-0.6 2-0.6-2-2-0.6 2-0.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button class="bottom-tab-fly" data-btab="timeline" onclick="switchBottomTab('timeline')" title="时间线"><svg viewBox="0 0 16 16" class="bicon"><circle cx="8" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8 4v2.5l1.5 1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 12.5h5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+            <button class="bottom-tab-fly" data-btab="prediction" onclick="switchBottomTab('prediction')" title="预言"><svg viewBox="0 0 16 16" class="bicon"><circle cx="5" cy="6.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 11.5c1 1.5 3 1.5 4.5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M9 5.5c.7.8.7 2.2 0 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M11 4c1.2 1.5 1.2 4 0 5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+            <button class="bottom-tab-fly" data-btab="outline" onclick="switchBottomTab('outline')" title="大纲"><svg viewBox="0 0 16 16" class="bicon"><path d="M4 2h8v10l-4-2-4 2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 5.5h4M6 8h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+            <button class="bottom-tab-fly" data-btab="inspiration" onclick="switchBottomTab('inspiration')" title="灵感"><svg viewBox="0 0 16 16" class="bicon"><path d="M11.5 2L5 10.5l.5 2 2-.5L13 3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 4.5L6.5 9" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linecap="round"/></svg></button>
           </div>
-          <button class="bottom-pill" id="bottomPill" data-btab="summary" onclick="pillClick()" title="摘要"><svg viewBox="0 0 16 16" class="bicon"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><ellipse cx="8" cy="8" rx="6.5" ry="2.2" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" transform="rotate(30 8 8)"/><ellipse cx="8" cy="8" rx="6.5" ry="2.2" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" transform="rotate(-30 8 8)"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/></svg></button>
+          <button class="bottom-pill" id="bottomPill" data-btab="summary" onclick="pillClick()" title="摘要"><svg viewBox="0 0 16 16" class="bicon"><circle cx="8" cy="8" r="1.3" fill="currentColor" opacity="0.55"/><path d="M9 7C10.5 4.5 7 2.5 4.5 4 2 5.5 2.5 9.5 5 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M7 9C5.5 11.5 9 13.5 11.5 12 14 10.5 13.5 6.5 11 5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
           <div class="bottom-tabs-inline">
-            <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')" title="时间线"><svg viewBox="0 0 16 16" class="bicon"><path d="M1.5 14.5h13" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="8" cy="6.5" r="4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8 4v2.5l1.5 1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 10.5v4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')" title="预言"><svg viewBox="0 0 16 16" class="bicon"><path d="M11.5 3.5c0 0-1.5-1-3-0.5s-2.5 2-2.5 3.5c0 1 0.5 2 1.5 2.5v1.5l1.5-1c0.5 0.2 1 0.2 1.5 0" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="9" cy="5.5" r="0.6" fill="currentColor"/><path d="M3 9c1.5 0.5 2 1.5 2 2.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M2 11c1 0 1.5 0.8 1.5 1.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')" title="大纲"><svg viewBox="0 0 16 16" class="bicon"><path d="M3.5 1.5h9v11l-4.5-2.2-4.5 2.2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 5.5h4M6 8h4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab" data-btab="inspiration" onclick="switchBottomTab('inspiration')" title="灵感"><svg viewBox="0 0 16 16" class="bicon"><path d="M8 1.5l1 3.5 3.5 1-3.5 1-1 3.5-1-3.5-3.5-1 3.5-1z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 10l0.6 2 2 0.6-2 0.6-0.6 2-0.6-2-2-0.6 2-0.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 10l0.6 2 2 0.6-2 0.6-0.6 2-0.6-2-2-0.6 2-0.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')" title="时间线"><svg viewBox="0 0 16 16" class="bicon"><circle cx="8" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8 4v2.5l1.5 1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 12.5h5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+            <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')" title="预言"><svg viewBox="0 0 16 16" class="bicon"><circle cx="5" cy="6.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 11.5c1 1.5 3 1.5 4.5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M9 5.5c.7.8.7 2.2 0 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M11 4c1.2 1.5 1.2 4 0 5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+            <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')" title="大纲"><svg viewBox="0 0 16 16" class="bicon"><path d="M4 2h8v10l-4-2-4 2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 5.5h4M6 8h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+            <button class="bottom-tab" data-btab="inspiration" onclick="switchBottomTab('inspiration')" title="灵感"><svg viewBox="0 0 16 16" class="bicon"><path d="M11.5 2L5 10.5l.5 2 2-.5L13 3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 4.5L6.5 9" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linecap="round"/></svg></button>
           </div>
 	    </div>
     <div class="handle-grip"><span></span><span></span><span></span></div>
     <div id="aiInputZone" style="width:280px;flex:none;display:flex;align-items:stretch;margin-left:auto">
     <input class="ai-input" id="aiInput" placeholder="问 Luca" autocomplete="off" data-form-type="other" style="flex:1;min-width:0;height:30px;padding:0 10px;font-size:12px;border-radius:0;border:none;background:var(--surface2);color:var(--t1);outline:none" onkeydown="if(event.key==='Enter')sendAI()">
+    <div class="luca-popup" id="lucaPopup">
+     <div class="luca-popup-grip" id="lucaPopupGrip"></div>
+     <div class="luca-popup-brand"><span>Luca</span><div class="luca-brand-actions"><button class="luca-act-btn" onclick="toggleChatHistory()" title="历史对话"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 4h10M3 8h10M3 12h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="luca-act-btn" onclick="newChatSession()" title="新建对话"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 5v6M5 8h6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div></div>
+     <div class="luca-chat-history" id="chatHistoryPanel" style="display:none">
+      <div class="luca-history-list" id="chatHistoryList"></div>
+     </div>
+     <div class="luca-popup-line"></div>
+     <div class="luca-popup-messages" id="aiMessages"></div>
+     <div id="kbProposalModal" style="position:absolute;inset:0;background:rgba(0,0,0,.35);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:10;justify-content:center;align-items:center;display:none;border-radius:var(--r2)" onclick="if(event.target===this)this.style.display='none'">
+      <div style="background:var(--surface);border:1px solid var(--border2);border-radius:var(--r3);padding:18px 16px;width:92%;max-width:340px">
+       <div style="font-size:14px;font-weight:700;margin-bottom:12px">知识库修改提议</div>
+       <div id="kbProposalContent"></div>
+       <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button class="prompt-cancel" onclick="kbModalReject()">拒绝</button>
+        <button class="prompt-ok" onclick="kbModalConfirm()" style="min-width:80px">确认修改</button>
+       </div>
+      </div>
+     </div>
+    </div>
+    <div class="luca-float" id="lucaFloat"></div>
     </div>
   </div>
  <div class="bottom-body">
@@ -1608,6 +1620,8 @@ var _sourceUpdatePending=false;
 var _focusTitleAfterLoad=false;
 var allChapters=[],chapterOrder=[];
 var aiMessages=[];
+var currentChatSessionId='';
+var chatSessionList=[];
 var currentChapter=null;
 var currentBottomTab='summary';
 function _appHeight(){var a=$('app'),tb=$('topbar');var tbh=tb?tb.offsetHeight:38;return(a?a.clientHeight:window.innerHeight)-tbh}
@@ -1651,16 +1665,12 @@ document.addEventListener('pointerdown',function(e){
 /* === AI 活跃连接指示 === */
 var _aiActivityES=null;
 var _activeAICount=0;
-var _localLLMSpeed={active:false,phase:'idle',speed:0};
-var _localLLMSpeedTimer=null;
-
 function _startAIActivity(){
  if(_aiActivityES)return;
  _aiActivityES=new EventSource('/api/ai-activity');
  _aiActivityES.onmessage=function(e){
   var d=JSON.parse(e.data);
   _activeAICount=d.count||0;
-  _syncLocalLLMSpeedPoll();
   _renderAIDots();
  };
  _aiActivityES.onerror=function(){
@@ -1671,26 +1681,6 @@ function _startAIActivity(){
 }
 function _stopAIActivity(){
  if(_aiActivityES){_aiActivityES.close();_aiActivityES=null;}
- if(_localLLMSpeedTimer){clearInterval(_localLLMSpeedTimer);_localLLMSpeedTimer=null;}
-}
-function _syncLocalLLMSpeedPoll(){
- if(_activeAICount>0){
-  if(!_localLLMSpeedTimer){
-   _pollLocalLLMSpeed();
-   _localLLMSpeedTimer=setInterval(_pollLocalLLMSpeed,700);
-  }
- }else{
-  if(_localLLMSpeedTimer){clearInterval(_localLLMSpeedTimer);_localLLMSpeedTimer=null;}
-  _localLLMSpeed={active:false,phase:'idle',speed:0};
- }
-}
-function _pollLocalLLMSpeed(){
- api('GET','/api/local-llm/speed',undefined,function(d,s){
-  if(s===200&&d){
-   _localLLMSpeed=d;
-   _renderAIDots();
-  }
- });
 }
 function _renderAIDots(){
  var el=$('aiActiveDots');
@@ -1707,7 +1697,7 @@ function _renderAIDots(){
  if(_localLLMSpeed&&_localLLMSpeed.active&&(_localLLMSpeed.phase==='prefill'||_localLLMSpeed.phase==='gen')){
   var phase=_localLLMSpeed.phase==='prefill'?'prefill':'gen';
   var sp=Number(_localLLMSpeed.speed||0);
-  el.innerHTML='<span class="ai-speed-text">'+phase+(sp>0?' '+Math.round(sp)+' t/s':'')+'</span>';
+  el.innerHTML='<span>'+phase+(sp>0?' '+Math.round(sp)+' t/s':'')+'</span>';
   el.classList.add('show');
   el.classList.add('speed');
   el.title='本地模型正在'+(phase==='prefill'?'处理提示词':'生成回复')+(sp>0?' · '+Math.round(sp)+' token/s':'');
@@ -1887,6 +1877,10 @@ function clearAppState(){
 	 try{localStorage.removeItem('lucawriter_state')}catch(e){}
 }
 
+function _saveChatSessionId(){try{localStorage.setItem('lw_chat_session_id',currentChatSessionId)}catch(e){}}
+function _loadChatSessionId(){try{return localStorage.getItem('lw_chat_session_id')||''}catch(e){return ''}}
+function _clearChatSessionId(){try{localStorage.removeItem('lw_chat_session_id')}catch(e){}}
+
 function setWritingViewActive(on){
  var app=document.querySelector('.app');
  if(app)app.classList.toggle('writing-active',!!on);
@@ -2052,7 +2046,7 @@ function showBookCreate(){showPrompt('新建书本','书名','新建书本',func
 
 function openBook(id){
 	 setWritingViewActive(true);
-	 bookId=id;chapterId=null;currentChapter=null;inTrash=false;aiMessages=[];
+	 bookId=id;chapterId=null;currentChapter=null;inTrash=false;
 	 bookAnnotations={};
  var tsb=$('topbarSummaryBtn');if(tsb)tsb.style.display='';
   $('bookshelfView').classList.remove('active');
@@ -2082,7 +2076,7 @@ function openBook(id){
  saveAppState();
  setEditorLoading(true);
 	 loadChapters();
-	 loadAIMessages();
+	 if(!currentChatSessionId)loadAIMessages();
 	 loadTimelineRiver();
 	 loadPredictionCurrent();
   loadSourceToRT();
@@ -2545,7 +2539,20 @@ function getTodayStr(){var d=new Date();return d.getFullYear()+'-'+(d.getMonth()
 
 var _chatPollTimer=null;
 
-function loadAIMessages(){if(!bookId){aiMessages=[];renderAIMessages();return}api('GET','/api/book/'+bookId+'/messages',undefined,function(d,s){if(s===200&&d.messages&&d.messages.length)aiMessages=d.messages;else aiMessages=[];renderAIMessages();_checkPendingChat()})}
+function loadAIMessages(){
+ var sid=currentChatSessionId||_loadChatSessionId();
+ if(!sid){_initChatSession(function(){_checkPendingChat()});return}
+ api('GET','/api/chat-session/'+sid+'/messages',undefined,function(d,s){
+  if(s===200&&d.messages){
+   currentChatSessionId=sid;_saveChatSessionId();
+   if(d.messages.length)aiMessages=d.messages;else{aiMessages=[{type:'ai',text:'有什么我可以帮你的吗？'}];saveAIMessages()}
+  }else{
+   // session not found on server, start fresh
+   _clearChatSessionId();currentChatSessionId='';
+   _initChatSession(function(){_checkPendingChat()});return
+  }
+  renderAIMessages();_checkPendingChat()
+ })}
 
 function _checkPendingChat(){
  var last=aiMessages[aiMessages.length-1];
@@ -2626,7 +2633,7 @@ function _syncThinkingRotation(){
 
 function _stopChatPoll(){if(_chatPollTimer){clearInterval(_chatPollTimer);_chatPollTimer=null;}}
 
-function saveAIMessages(){if(!bookId)return;api('POST','/api/book/'+bookId+'/messages',{messages:aiMessages},function(){})}
+function saveAIMessages(){if(!currentChatSessionId)return;api('POST','/api/chat-session/'+currentChatSessionId+'/messages',{messages:aiMessages},function(){})}
 
 function _buildAIMsgEl(m,idx,scope){
  scope=scope||'book';
@@ -2643,7 +2650,7 @@ function _buildAIMsgEl(m,idx,scope){
  var header='<div class="ai-msg-header" onclick="toggleReasoningFromHeader(this)" data-has-reasoning="'+(hasReasoning||isLive?'1':'0')+'"><img class="ai-msg-logo" src="logo-white.png" alt="">'+statusText+'</div>';
  var reasonHtml='';
  if(m.reasoning){
- reasonHtml='<div class="ai-reasoning"><div class="ai-reasoning-body'+(m._reasoningOpen?' open':'')+'">'+esc(String(m.reasoning))+'</div></div>';
+ reasonHtml='<div class="ai-reasoning"><div class="ai-reasoning-body'+(m._reasoningOpen?' open':'')+'" onclick="collapseReasoning(this)">'+esc(String(m.reasoning))+'</div></div>';
  }
  if(m._pending && !m.text && !m.reasoning){
  var dots=(m._pollTick||0)%3;var dotStr=''+(dots===0?'\u25CF':(dots===1?'\u25CF\u25CF':'\u25CF\u25CF\u25CF'));
@@ -2757,7 +2764,7 @@ function renderAIMessages(){
   var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
   var savedScrollTop=c.scrollTop;
   c.innerHTML='';
-    if(!aiMessages.length){c.innerHTML='<div class="ai-msg ai-msg-ai" style="margin-top:auto"><div class="ai-msg-header"><img class="ai-msg-logo" src="logo-white.png" alt=""></div><div class="ai-msg-body">有什么我可以帮你的吗？</div></div>';_syncThinkingRotation();return}
+  if(!aiMessages.length){_syncThinkingRotation();return}
   aiMessages.forEach(function(m,idx){
  if(m.type==='system'&&m.subtype==='compressed_summary') return;
  var d=_buildAIMsgEl(m,idx);
@@ -2904,6 +2911,15 @@ function toggleReasoningFromHeader(el){
   }
 }
 
+function collapseReasoning(el){
+  el.classList.remove('streaming','open');
+  var msgEl=el.closest('.ai-msg');
+  if(msgEl&&msgEl.dataset.idx!==undefined){
+   var list=msgEl.dataset.scope==='series'?seriesAIMessages:aiMessages;
+   var m=list[+msgEl.dataset.idx];if(m)m._reasoningOpen=false;
+  }
+}
+
 function toggleReasoning(el){
   var body=el.closest('.ai-msg').querySelector('.ai-reasoning-body');
   if(!body)return;
@@ -2983,7 +2999,7 @@ function _doSendAI(text){
  var msgIdx=aiMessages.length-1;
 
  // 
- api('POST','/api/book/'+bookId+'/comment',{text:text,history:history},function(d,s){
+ api('POST','/api/book/'+bookId+'/comment',{text:text,history:history,session_id:currentChatSessionId},function(d,s){
  if(s!==200||!d.task_id){
  var m=aiMessages[msgIdx];if(m){m._pending=false;m.text='[错误: '+(d.error||'')+']';m.reasoning='';}
  renderAIMessages();saveAIMessages();
@@ -5089,7 +5105,91 @@ function switchBottomTab(tab){
 	if(tab==='summary'){pollRTStatus()}
 }
 
-function clearAIChat(){aiMessages=[];renderAIMessages();api('POST','/api/book/'+bookId+'/clear-chat',{},function(){})}
+function clearAIChat(){aiMessages=[];renderAIMessages();saveAIMessages()}
+
+function loadChatSessions(cb){
+ api('GET','/api/chat-sessions',undefined,function(d,s){
+  if(s===200&&d.sessions){chatSessionList=d.sessions}else{chatSessionList=[]}
+  if(cb)cb();
+ });
+}
+
+function newChatSession(){
+ api('POST','/api/chat-session/create',{},function(d,s){
+  if(s===200&&d.id){
+   currentChatSessionId=d.id;_saveChatSessionId();
+   aiMessages=[];
+   renderAIMessages();
+   var hp=$('chatHistoryPanel');if(hp)hp.style.display='none';
+   loadChatSessions(function(){renderChatHistory()});
+  }
+ });
+}
+
+function switchChatSession(sid){
+ if(sid===currentChatSessionId)return;
+ currentChatSessionId=sid;_saveChatSessionId();
+ var hp=$('chatHistoryPanel');if(hp)hp.style.display='none';
+ api('GET','/api/chat-session/'+sid+'/messages',undefined,function(d,s){
+  if(s===200&&d.messages){aiMessages=d.messages}else{aiMessages=[]}
+  renderAIMessages();
+  _checkPendingChat();
+ });
+}
+
+function toggleChatHistory(){
+ var hp=$('chatHistoryPanel');
+ if(!hp)return;
+ if(hp.style.display==='none'){
+  loadChatSessions(function(){renderChatHistory();hp.style.display=''});
+ }else{hp.style.display='none'}
+}
+
+function renderChatHistory(){
+ var c=$('chatHistoryList');if(!c)return;
+ if(!chatSessionList.length){c.innerHTML='<div style="padding:8px;font-size:11px;color:var(--t3)">暂无历史对话</div>';return}
+ var html='';
+ chatSessionList.forEach(function(s){
+  var active=s.id===currentChatSessionId?' active':'';
+  var title=esc(s.title||s.preview||'新对话');
+  var t='';
+  if(s.updated_at){
+   var d=new Date(s.updated_at*1000);
+   var now=new Date();
+   if(d.toDateString()===now.toDateString()){t=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
+   else{t=(d.getMonth()+1)+'/'+d.getDate()}
+  }
+  html+='<div class="luca-history-item'+active+'" onclick="switchChatSession(\''+s.id+'\')"><div class="luca-history-title">'+title+'</div><div class="luca-history-time">'+t+'</div></div>';
+ });
+ c.innerHTML=html;
+}
+
+function _initChatSession(cb){
+ loadChatSessions(function(){
+  if(chatSessionList.length){
+   // 优先选有消息的会话，避免刷新后误选空白会话
+   var best = chatSessionList[0];
+   for (var i = 0; i < chatSessionList.length; i++) {
+    var s = chatSessionList[i];
+    if (s.count > 0) { best = s; break; }
+    if (s.updated_at > best.updated_at) best = s;
+   }
+    currentChatSessionId = best.id;_saveChatSessionId();
+    api('GET','/api/chat-session/'+currentChatSessionId+'/messages',undefined,function(d,s){
+     if(s===200&&d.messages&&d.messages.length){aiMessages=d.messages}else{aiMessages=[{type:'ai',text:'有什么我可以帮你的吗？'}];saveAIMessages()}
+     renderAIMessages();
+     if(cb)cb();
+    });
+   }else{
+    api('POST','/api/chat-session/create',{},function(d,s){
+     if(s===200&&d.id){currentChatSessionId=d.id}
+     aiMessages=[{type:'ai',text:'有什么我可以帮你的吗？'}];renderAIMessages();
+     if(currentChatSessionId)saveAIMessages();
+     if(cb)cb();
+    });
+   }
+ });
+}
 
 var predicting=false;
 function startPrediction(){
@@ -5917,7 +6017,7 @@ function setupBottomPanelDrag(){
  var dragging=false,didDrag=false,startY=0,startH=0;
 
  handle.addEventListener('mousedown',function(e){
-  if(e.target.closest('.bottom-tabs-wrap')||e.target.closest('.bottom-toggle'))return;
+  if(e.target.closest('.bottom-tabs-wrap')||e.target.closest('.bottom-toggle')||e.target.closest('#aiInputZone'))return;
   dragging=false;didDrag=false;
   startY=e.clientY;
   startH=panel.offsetHeight;
@@ -5925,12 +6025,12 @@ function setupBottomPanelDrag(){
 
   handle.addEventListener('click',function(e){
   if(didDrag)return;
-  if(e.target.closest('.bottom-tabs-wrap')||e.target.closest('.bottom-toggle')||e.target.closest('#aiInputZone input'))return;
+  if(e.target.closest('.bottom-tabs-wrap')||e.target.closest('.bottom-toggle')||e.target.closest('#aiInputZone'))return;
   toggleBottomPanel();
  });
 
  handle.addEventListener('dblclick',function(e){
- if(e.target.closest('.bottom-tabs-wrap')||e.target.closest('.bottom-toggle'))return;
+ if(e.target.closest('.bottom-tabs-wrap')||e.target.closest('.bottom-toggle')||e.target.closest('#aiInputZone'))return;
  e.stopPropagation();
  localStorage.removeItem('lw_bottom_panel_h');
  var full=_appHeight();
@@ -5981,19 +6081,8 @@ function setupBottomPanelDrag(){
 
 var _lucaPopupOpen=false;
 var _lucaPopupCloseTimer=null;
-function _syncLucaPopupPos(){
- var panel=$('bottomPanel'),popup=$('lucaPopup'),fl=$('lucaFloat'),zone=$('aiInputZone');
- if(!panel)return;
- var h=panel.offsetHeight;
- if(popup){
-  popup.style.bottom=h+'px';
-  if(zone){
-   popup.style.left=zone.getBoundingClientRect().left+'px';
-   popup.style.width=zone.offsetWidth+'px';
-  }
- }
- if(fl){fl.style.bottom=(h+4)+'px';fl.style.left=(zone?zone.getBoundingClientRect().left:18)+'px';}
-}
+var _mouseInAiZone=false;
+function _syncLucaPopupPos(){}
 function openLucaPopup(){
  clearTimeout(_lucaPopupCloseTimer);
  if(_lucaPopupOpen)return;
@@ -6008,13 +6097,18 @@ function openLucaPopup(){
 }
 function closeLucaPopup(force){
  if(!_lucaPopupOpen)return;
- if(!force){var input=$('aiInput');if(document.activeElement===input)return;}
+ if(_lucaGripDragging)return;
+ if(!force){
+  if(document.activeElement===$('aiInput'))return;
+  if(_mouseInAiZone)return;
+ }
  _lucaPopupOpen=false;
  $('lucaPopup').classList.remove('open');
 }
 function _scheduleLucaClose(){
+ if(_lucaGripDragging)return;
  clearTimeout(_lucaPopupCloseTimer);
- _lucaPopupCloseTimer=setTimeout(closeLucaPopup,200);
+ _lucaPopupCloseTimer=setTimeout(closeLucaPopup,350);
 }
 function showLucaFloat(text){
  if(_lucaPopupOpen)return;
@@ -6033,10 +6127,10 @@ function closeLucaFloat(){
  var zone=$('aiInputZone');
  var popup=$('lucaPopup');
  if(!input||!zone||!popup)return;
- zone.addEventListener('mouseenter',function(){openLucaPopup()});
- zone.addEventListener('mouseleave',function(){_scheduleLucaClose()});
- popup.addEventListener('mouseenter',function(){clearTimeout(_lucaPopupCloseTimer)});
- popup.addEventListener('mouseleave',function(){_scheduleLucaClose()});
+ zone.addEventListener('mouseenter',function(){_mouseInAiZone=true;openLucaPopup()});
+ zone.addEventListener('mouseleave',function(){_mouseInAiZone=false;_scheduleLucaClose()});
+ popup.addEventListener('mouseenter',function(){_mouseInAiZone=true;clearTimeout(_lucaPopupCloseTimer)});
+  popup.addEventListener('mouseleave',function(e){if(e.relatedTarget&&zone.contains(e.relatedTarget))return;_mouseInAiZone=false;_scheduleLucaClose()});
  input.addEventListener('focus',function(){openLucaPopup()});
  input.addEventListener('blur',function(){_scheduleLucaClose()});
  input.addEventListener('keydown',function(e){
@@ -6046,6 +6140,34 @@ function closeLucaFloat(){
  if(editor){
   editor.addEventListener('keydown',function(){closeLucaFloat()});
  }
+})();
+var _lucaGripDragging=false;
+(function(){
+ var grip=$('lucaPopupGrip');
+ var popup=$('lucaPopup');
+ if(!grip||!popup)return;
+ var startY=0,startH=0;
+ grip.addEventListener('mousedown',function(e){
+  e.preventDefault();e.stopPropagation();
+  clearTimeout(_lucaPopupCloseTimer);
+  _lucaGripDragging=true;_mouseInAiZone=true;
+  startY=e.clientY;
+  startH=popup.offsetHeight;
+  document.body.style.cursor='ns-resize';
+  document.body.style.userSelect='none';
+ });
+ document.addEventListener('mousemove',function(e){
+  if(!_lucaGripDragging)return;
+  var delta=startY-e.clientY;
+  var nh=Math.max(120,Math.min(startH+delta,window.innerHeight*0.85));
+  popup.style.maxHeight=nh+'px';
+ });
+ document.addEventListener('mouseup',function(){
+  if(!_lucaGripDragging)return;
+  _lucaGripDragging=false;
+  document.body.style.cursor='';
+  document.body.style.userSelect='';
+ });
 })();
 
 	window.addEventListener('resize',function(){

@@ -127,6 +127,8 @@ PORT = 20000 if os.environ.get('DATA_DIR') else 10000
 BOOKS_DIR = os.path.join(DATA_DIR, 'books')
 LOG_DIR = os.path.join(DATA_DIR, 'logs')
 MESSAGES_DIR = os.path.join(DATA_DIR, 'messages')
+CHAT_SESSIONS_DIR = os.path.join(DATA_DIR, 'chat_sessions')
+os.makedirs(CHAT_SESSIONS_DIR, exist_ok=True)
 USER_FONTS_DIR = os.path.join(DATA_DIR, 'fonts')
 GLOBAL_CHAT_HISTORY_FILE = os.path.join(DATA_DIR, 'chat_history.json')
 SALT_FILE = os.path.join(DATA_DIR, 'salt')
@@ -220,9 +222,8 @@ def _normalize_local_llm_preset(p, port=None):
 DEFAULT_PROVIDER_PRESETS = [
     {'name': 'LMStudio', 'base_url': 'http://localhost:1234/v1', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
     {'name': 'DeepSeek', 'base_url': 'https://api.deepseek.com', 'api_key': '', 'model': 'deepseek-chat', 'use_custom_json': False, 'custom_json': ''},
-    {'name': 'MiniMax', 'base_url': 'https://api.minimaxi.com/v1', 'api_key': '', 'model': 'MiniMax-M2.5', 'use_custom_json': False, 'custom_json': ''},
-    {'name': '预设4', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
-    {'name': '预设5', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
+    {'name': '自定义1', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
+    {'name': '自定义2', 'base_url': '', 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': ''},
     {'name': '本地 Llama.cpp', 'base_url': _local_llm_base_url(), 'api_key': '', 'model': '', 'use_custom_json': False, 'custom_json': '', 'context_length': 65536},
 ]
 
@@ -251,6 +252,7 @@ DEFAULT_SETTINGS = {
     'embedding_backend': 'local',
     'local_embedding_model': 'BAAI/bge-small-zh-v1.5',
     'embedding_model': 'text-embedding-3-small',
+    'custom_colors': {},
 }
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
@@ -904,10 +906,10 @@ def get_settings():
     # 迁移：旧版本 max_tokens 默认 80，对长上下文+推理模型不够，自动提升
     if s.get('ai_max_tokens', 0) < 200:
         s['ai_max_tokens'] = 512; changed = True
-    # 迁移/初始化 provider_presets
+    # 迁移/初始化 provider_presets —— 只补缺失的，不覆盖已有的
     presets = s.get('provider_presets', [])
-    if not presets or len(presets) < 6:
-        # 尝试从旧版顶层配置创建第一个预设
+    if not presets:
+        # 全新用户：用默认预设
         old_url = s.get('base_url', '')
         old_key = s.get('api_key', '')
         old_model = s.get('model', '')
@@ -919,6 +921,12 @@ def get_settings():
         s['provider_presets'] = presets
         changed = True
     else:
+        # 已有预设：只补缺失的默认预设（不覆盖用户已配置的）
+        existing_names = {p.get('name', '') for p in presets}
+        for dp in DEFAULT_PROVIDER_PRESETS:
+            if dp['name'] not in existing_names:
+                presets.append(dict(dp))
+                changed = True
         # 迁移：把旧版 Ollama 预设替换为 DeepSeek
         for i, p in enumerate(presets):
             if p.get('name') == 'Ollama':
@@ -926,9 +934,13 @@ def get_settings():
                 p['base_url'] = 'https://api.deepseek.com'
                 p['model'] = 'deepseek-chat'
                 changed = True
-            # 同时确保 MiniMax URL 带 /v1
-            if p.get('name') == 'MiniMax' and not p.get('base_url', '').endswith('/v1'):
-                p['base_url'] = 'https://api.minimaxi.com/v1'
+        # 迁移：旧版占位名 "预设4"/"预设5" → "自定义1"/"自定义2"
+        for i, p in enumerate(presets):
+            if p.get('name') == '预设4':
+                p['name'] = '自定义1'
+                changed = True
+            elif p.get('name') == '预设5':
+                p['name'] = '自定义2'
                 changed = True
         # 迁移：确保本地 Llama.cpp 预设存在
         has_local = any('llama.cpp' in (p.get('name') or '').lower() for p in presets)
@@ -2897,6 +2909,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'available': False, 'error': '浏览器控制模块未安装'}); return
             self.json_resp(200, browser_agent.get_browser_status()); return
 
+        if path == '/api/chat-sessions':
+            _migrate_global_to_sessions()
+            self.json_resp(200, {'sessions': _list_chat_sessions()}); return
+
+        if path.startswith('/api/chat-session/') and path.endswith('/messages'):
+            sid = path.split('/')[3] if len(path.split('/')) > 4 else ''
+            if not sid.startswith('cs_'):
+                self.json_resp(400, {'error': 'invalid session id'}); return
+            p = _get_chat_history_path(sid)
+            if not os.path.isfile(p):
+                self.json_resp(404, {'error': 'session not found'}); return
+            self.json_resp(200, {'messages': load_json(p, list)}); return
+
         if path.startswith('/api/book/') and path.endswith('/messages'):
             parts = path.split('/')
             bid = unquote(parts[3]) if len(parts) > 3 else ''
@@ -4148,17 +4173,18 @@ class Handler(BaseHTTPRequestHandler):
                 if existing and existing.get('status') == 'running':
                     self.json_resp(400, {'error': '已有聊天任务在进行中，请稍候'}); return
                 tid = bg_task_start('chat', bid, 'AI对话')
-                _append_chat_history(bid, [
+                _chat_sid = data.get('session_id', '') or bid
+                _append_chat_history(_chat_sid, [
                     {'text': text, 'type': 'user'},
                     {'text': '', 'type': 'ai', 'reasoning': '', '_pending': True, 'task_id': tid},
                 ])
-                def do_chat_task(task_id, book_id, user_text, cfg_settings, history_list):
+                def do_chat_task(task_id, book_id, chat_sid, user_text, cfg_settings, history_list):
                     set_conn_meta('chat', 'AI对话', book_id)
                     try:
-                        history_list = _saved_chat_to_ai_history(book_id, task_id)
+                        history_list = _saved_chat_to_ai_history(chat_sid, task_id)
                         mt = None
                         tp = cfg_settings.get('ai_temperature', 0.7)
-                        source_ctx = get_smart_context(book_id, user_query=text, settings=cfg_settings)
+                        source_ctx = get_smart_context(book_id, user_query='', settings=cfg_settings)
 
                         bd_chat = get_book_dir(book_id)
                         meta_chat = load_json(os.path.join(bd_chat, 'meta.json'), dict)
@@ -4188,16 +4214,18 @@ class Handler(BaseHTTPRequestHandler):
                                 _cd = load_json(_cp, dict)
                                 ch_list_parts.append(f'id={_cid} 第{_ci+1}章 {_cd.get("title", "未命名")}')
                         ch_list_ctx = '\n'.join(ch_list_parts[:50])
-                        kb_tool_context = _build_chat_kb_tool_context(book_id, user_text, cid_chat)
+                        kb_tool_context = _build_chat_kb_tool_context(book_id, '', cid_chat)
                         inspiration_items = get_inspiration_items(book_id)
                         inspiration_context = _format_inspirations_for_prompt(inspiration_items)
                         bookshelf_tree = _build_bookshelf_tree()
+
+                        is_first_round = not history_list
 
                         annotate_tool = """你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。系统会把该章的完整正文发给你。
 - 调用格式：[READ_CHAPTER]{{"chapter_id":"章节ID"}}[/READ_CHAPTER]
 - 你不需要每次都读取正文——只有在用户明确要求你评论正文、修改建议、检查连贯性等需要看到原文时才调用。
 - 你可以一次读取多个章节，每个章节调用一次。
-- 当前章ID：{cid_chat or '未知'}
+- 当前章ID和章节列表详见文末附录。
 
 你还有一个"荧光笔"工具，可以在正文中为用户标注重点内容。
 - 添加标注格式：[ANNOTATE_ADD]{{"chapter_id":"当前章ID","text":"要标注的原文片段（需精确匹配）","note":"批注内容","color":"yellow"}}[/ANNOTATE_ADD]
@@ -4223,7 +4251,7 @@ class Handler(BaseHTTPRequestHandler):
   用途：当用户指出你对某个段落的理解整体有误、不是单个字段能改完时，调用局部重读。系统会只重读相关段落，并替换知识库里由这段误读产生的记录。
 
 【主动提议规则——非常重要】
-你必须在以下情况主动使用[PROPOSE_KB_EDIT]或[REREAD_KB]，不要等用户要求，也不要只口头说“我记住了/我会改”：
+你必须在以下情况主动使用[PROPOSE_KB_EDIT]或[REREAD_KB]，不要等用户要求，也不要只口头说"我记住了/我会改"：
 1. 用户说的内容和你知识库中的记录有矛盾（例如：你记得是李四杀的，用户说是王五杀的）
 2. 用户明确纠正你的回答（"你记错了""不是这样的""应该是XX"）
 3. 你自己发现知识库中的信息可能过时或有误
@@ -4236,34 +4264,38 @@ class Handler(BaseHTTPRequestHandler):
 如果你无法确定具体字段，或用户纠正的是一段话的整体理解、时间线关系、叙事视角、倒叙/插叙、复杂因果，请优先使用[REREAD_KB]局部重读。
 工具标签写完后，必须用一句话明确问作者："要不要更新到知识库里？"或"这样改对吗？"——不要假设作者默认同意，也不要只说"我记住了"。
 
-【章节列表】
-{ch_list_ctx}
-
-"""
-                        annotate_tool += f"""
-
 【灵感备忘】
-你可以读取并添加“灵感备忘”。现有未归档条目：
-{inspiration_context}
-
+你可以读取并添加"灵感备忘"。灵感列表详见文末附录。
 当用户让你记下一个灵感，或你判断某个创作想法值得暂存时，可以写入新条目。
 调用格式：[ADD_INSPIRATION]{{"text":"要写入的灵感"}}[/ADD_INSPIRATION]
 不要把工具标签展示给用户。
 """
 
-                        is_first_round = not history_list
-                        if is_first_round:
-                            sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
+                        appendix = f"""当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
-当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
+当前章ID：{cid_chat or '未知'}
+
+【全书阅读笔记】
+{source_ctx}
+
+【知识库记录ID】
+{kb_tool_context}
+
+【章节列表】
+{ch_list_ctx}
+
+【灵感备忘】
+{inspiration_context}"""
+                        if is_first_round:
+                            appendix += '\n\n【初始问候】如果对话历史为空（用户第一次开口），你的第一句回复开头自然地融入"有什么我可以帮你的吗"这层意思，但不要机械重复这句话。'
+
+                        sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
 
 【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。不要让用户复制粘贴或上传稿子——你自己调用工具即可。
 
 【说话方式】
-谨言慎行。你所说的每一个字都很重要。
-温文尔雅，彬彬有礼，沉稳从容，不卑不亢。
-惜字如金——五个字能说完不用十个。
-不要长篇大论，不要列选项，不要反问，不要结构化分析。
+谨言慎行。温文尔雅，不卑不亢。惜字如金。
+不要列选项，不要反问，不要结构化分析。
 看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
 你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句。
 你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
@@ -4278,53 +4310,19 @@ class Handler(BaseHTTPRequestHandler):
 被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
 严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
 你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
-                        严禁输出 markdown 表格。
+严禁输出 markdown 表格。
 
-                        【书库结构】
-                        {bookshelf_tree}
+【书库结构】
+{bookshelf_tree}
 
-                        这本小说大概是这样的：
+（全书阅读笔记和知识库记录ID详见文末附录）
 
-                        {source_ctx}
+用户当前正在浏览：{browse_ctx}
 
-                        【可用于知识库工具调用的记录ID】
-                        {kb_tool_context}
+{annotate_tool}
 
-                        用户当前正在浏览：{browse_ctx}
-
-                        用户对你发送了如下消息——
-
-                        {annotate_tool}"""
-                        else:
-                            sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写小说，你协助他完成创作。
-
-当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
-
-【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。
-
-【说话方式】
-谨言慎行。温文尔雅，不卑不亢。惜字如金。
-不要列选项，不要反问，不要结构化分析。
-看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
-                            【思考规则】一个问题不要反复思考多次，同一层面想一次就够了，否则可能陷入死循环。如果你的回复包含多个推理段落，在每个段落开头加上"第一，""第二，"这样的前缀。
-                            避免用"呗""啦"结尾，显得轻浮。
-                            严禁输出 markdown 表格。
-
-                            【书库结构】
-                            {bookshelf_tree}
-
-                            这本小说大概是这样的：
-
-                            {source_ctx}
-
-                            【可用于知识库工具调用的记录ID】
-                            {kb_tool_context}
-
-                            用户当前正在浏览：{browse_ctx}
-
-                            请继续和用户对话。
-
-                            {annotate_tool}"""
+=== 附录 ===
+{appendix}"""
                         msgs = [{'role': 'system', 'content': sys_msg}]
                         for h in history_list:
                             role = h.get('role')
@@ -4364,10 +4362,10 @@ class Handler(BaseHTTPRequestHandler):
                                                         should_stop_fn=lambda: bg_task_should_stop(task_id))
                         if err:
                             if '用户停止' in err or bg_task_should_stop(task_id):
-                                _replace_pending_chat_msg(book_id, task_id, '[已停止]')
+                                _replace_pending_chat_msg(chat_sid, task_id, '[已停止]')
                                 bg_task_done(task_id, '已停止')
                             else:
-                                _replace_pending_chat_msg(book_id, task_id, '[错误: ' + err + ']')
+                                _replace_pending_chat_msg(chat_sid, task_id, '[错误: ' + err + ']')
                                 bg_task_done(task_id, err)
                             return
 
@@ -4762,6 +4760,33 @@ class Handler(BaseHTTPRequestHandler):
                         result = re.sub(r'\[SUGGEST_READTHROUGH\].*?\[/SUGGEST_READTHROUGH\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[CITE\].*?\[/CITE\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[PROPOSE_KB_EDIT\].*?\[/PROPOSE_KB_EDIT\]', '', result, flags=re.S).strip()
+
+                        # [THEME] 主题生成（仅两色：bg + accent，surface 由 bg 自动派生）
+                        theme_data = None
+                        theme_data_list = []
+                        for m_theme in re.finditer(r'\[THEME\]\s*(.*?)\s*\[/THEME\]', result, re.S):
+                            try:
+                                raw = m_theme.group(1).strip()
+                                parts = raw.split('|', 1)
+                                name = parts[1].strip() if len(parts) > 1 else '自定义主题'
+                                colors = {}
+                                for pair in parts[0].split(','):
+                                    pair = pair.strip()
+                                    if ':' in pair:
+                                        k, v = pair.split(':', 1)
+                                        k = k.strip(); v = v.strip()
+                                        if k in ('bg', 'accent') and re.match(r'^#[0-9A-Fa-f]{6}$', v):
+                                            colors[k] = v.upper()
+                                if len(colors) >= 2:
+                                    td = {'name': name, 'colors': colors}
+                                    theme_data_list.append(td)
+                                    if tool_calls is None: tool_calls = []
+                                    tool_calls.append({'type': 'theme_gen', 'label': f'生成主题: {name}', 'status': 'done'})
+                            except:
+                                pass
+                        if theme_data_list:
+                            theme_data = theme_data_list[0]  # 向后兼容
+                        result = re.sub(r'\[THEME\]\s*.*?\s*\[/THEME\]', '', result, flags=re.S).strip()
                         # 清理已废弃的工具标记（后端不再执行这些工具，但 AI 可能仍输出）
                         result = re.sub(r'\[FETCH_URL\].*?\[/FETCH_URL\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[SEARCH\].*?\[/SEARCH\]', '', result, flags=re.S).strip()
@@ -4815,20 +4840,22 @@ class Handler(BaseHTTPRequestHandler):
                                 'kb_citations': kb_citations,
                                 'kb_proposals': kb_proposals,
                                 'tool_calls': tool_calls,
+                                'theme_data': theme_data,
+                                'theme_data_list': theme_data_list,
                             }
-                            _replace_pending_chat_msg(book_id, task_id, result, reason, meta=meta)
-                            bg_task_update(task_id, result=result, reasoning=reason, progress=100, needs_readthrough=needs_rt, needs_summary=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered, inspirations_changed=inspirations_changed, kb_reread_started=kb_reread_started, kb_citations=kb_citations, kb_proposals=kb_proposals, tool_calls=tool_calls)
+                            _replace_pending_chat_msg(chat_sid, task_id, result, reason, meta=meta)
+                            bg_task_update(task_id, result=result, reasoning=reason, progress=100, needs_readthrough=needs_rt, needs_summary=needs_rt, annotations_changed=annotation_changes, complete_chapter=complete_chapter_triggered, inspirations_changed=inspirations_changed, kb_reread_started=kb_reread_started, kb_citations=kb_citations, kb_proposals=kb_proposals, tool_calls=tool_calls, theme_data=theme_data, theme_data_list=theme_data_list)
                             bg_task_done(task_id)
-                            _schedule_idle_compress(book_id)
+                            _schedule_idle_compress(chat_sid)
                     except Exception as e:
                         err_str = str(e)
                         if bg_task_should_stop(task_id):
-                            _replace_pending_chat_msg(book_id, task_id, '[已停止]')
+                            _replace_pending_chat_msg(chat_sid, task_id, '[已停止]')
                             bg_task_done(task_id, '已停止')
                         else:
-                            _replace_pending_chat_msg(book_id, task_id, '[错误: ' + err_str + ']')
+                            _replace_pending_chat_msg(chat_sid, task_id, '[错误: ' + err_str + ']')
                             bg_task_done(task_id, err_str)
-                threading.Thread(target=do_chat_task, args=(tid, bid, text, settings, data.get('history', [])), daemon=True).start()
+                threading.Thread(target=do_chat_task, args=(tid, bid, _chat_sid, text, settings, data.get('history', [])), daemon=True).start()
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'annotations':
@@ -5613,6 +5640,52 @@ class Handler(BaseHTTPRequestHandler):
             _download_set(status='idle', progress=0)
             self.json_resp(200, {'ok': True}); return
 
+        if path == '/api/chat-session/create':
+            _migrate_global_to_sessions()
+            sid = _create_chat_session()
+            # 内置模型：后台预热，首字延迟优化
+            _settings = get_settings()
+            _presets = _settings.get('provider_presets', [])
+            _idx = _settings.get('active_provider_idx', 0)
+            if _presets and 0 <= _idx < len(_presets) and _is_local_llm_preset(_presets[_idx]):
+                def _warmup(sid):
+                    time.sleep(0.5)
+                    try:
+                        msgs = _load_chat_history(sid)
+                        if msgs:
+                            return
+                        _settings2 = get_settings()
+                        _presets2 = _settings2.get('provider_presets', [])
+                        _idx2 = _settings2.get('active_provider_idx', 0)
+                        if not _presets2 or not (0 <= _idx2 < len(_presets2)) or not _is_local_llm_preset(_presets2[_idx2]):
+                            return
+                        sys_prompt = _settings2.get('ai_system_prompt', '你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。温文尔雅，沉稳从容。惜字如金，只输出简练聊天文字。')
+                        reply, err = call_ai(_settings2, [
+                            {'role': 'system', 'content': sys_prompt},
+                            {'role': 'user', 'content': '你好'}
+                        ], 256, 0.7, timeout=30)
+                        if err or not reply:
+                            return
+                        msgs = _load_chat_history(sid)
+                        if msgs:
+                            return
+                        _save_chat_history(sid, [{'type': 'ai', 'text': reply.strip()}])
+                    except Exception as e:
+                        log_action('WARMUP_ERR', str(e)[:200])
+                threading.Thread(target=_warmup, args=(sid,), daemon=True).start()
+            self.json_resp(200, {'id': sid}); return
+
+        if path.startswith('/api/chat-session/') and path.endswith('/messages'):
+            sid = path.split('/')[3] if len(path.split('/')) > 4 else ''
+            if not sid.startswith('cs_'):
+                self.json_resp(400, {'error': 'invalid session id'}); return
+            p = _get_chat_history_path(sid)
+            if not os.path.isfile(p):
+                self.json_resp(404, {'error': 'session not found'}); return
+            msgs = [_clean_chat_message(m) for m in (data.get('messages', []) if isinstance(data.get('messages'), list) else []) if isinstance(m, dict)]
+            save_json(p, msgs)
+            self.json_resp(200, {'saved': len(msgs)}); return
+
         if path.startswith('/api/book/') and path.endswith('/messages'):
             parts = path.split('/')
             bid = unquote(parts[3]) if len(parts) > 3 else ''
@@ -6279,8 +6352,13 @@ def _clean_chat_message(m):
 def _chat_message_same(a, b):
     if not isinstance(a, dict) or not isinstance(b, dict):
         return a == b
-    keys = ('type', 'subtype', 'text', 'reasoning', 'task_id', '_pending')
-    return all(a.get(k) == b.get(k) for k in keys)
+    keys = ('type', 'subtype', 'text', 'reasoning', 'task_id')
+    if not all(a.get(k) == b.get(k) for k in keys):
+        return False
+    # _pending: treat missing key as equivalent to False
+    ap = a.get('_pending')
+    bp = b.get('_pending')
+    return bool(ap) == bool(bp)
 
 def _chat_task_key(m):
     if isinstance(m, dict) and m.get('task_id'):
@@ -6373,7 +6451,56 @@ def _migrate_global_chat_history_locked():
         save_json(GLOBAL_CHAT_HISTORY_FILE, merged)
 
 def _get_chat_history_path(entity_id):
+    if entity_id and entity_id.startswith('cs_'):
+        return os.path.join(CHAT_SESSIONS_DIR, f'{entity_id}.json')
     return GLOBAL_CHAT_HISTORY_FILE
+
+def _list_chat_sessions():
+    sessions = []
+    if not os.path.isdir(CHAT_SESSIONS_DIR):
+        return sessions
+    for f in os.listdir(CHAT_SESSIONS_DIR):
+        if not f.endswith('.json'):
+            continue
+        sid = f[:-5]
+        if not sid.startswith('cs_'):
+            continue
+        path = os.path.join(CHAT_SESSIONS_DIR, f)
+        msgs = load_json(path, list)
+        title = ''
+        preview = ''
+        for m in msgs:
+            if isinstance(m, dict) and m.get('type') == 'user' and m.get('text'):
+                if not title:
+                    t = m['text']
+                    title = t[:30] + ('…' if len(t) > 30 else '')
+                t = m['text']
+                preview = t[:60] + ('…' if len(t) > 60 else '')
+        try:
+            updated = os.path.getmtime(path)
+        except Exception:
+            updated = 0
+        sessions.append({'id': sid, 'title': title, 'preview': preview, 'updated_at': updated, 'count': len(msgs)})
+    sessions.sort(key=lambda s: s.get('updated_at', 0), reverse=True)
+    return sessions
+
+def _create_chat_session():
+    import uuid
+    sid = 'cs_' + uuid.uuid4().hex[:10]
+    save_json(os.path.join(CHAT_SESSIONS_DIR, f'{sid}.json'), [])
+    return sid
+
+def _migrate_global_to_sessions():
+    existing = [f for f in os.listdir(CHAT_SESSIONS_DIR) if f.endswith('.json')] if os.path.isdir(CHAT_SESSIONS_DIR) else []
+    if existing:
+        return
+    if not os.path.exists(GLOBAL_CHAT_HISTORY_FILE):
+        return
+    msgs = load_json(GLOBAL_CHAT_HISTORY_FILE, list)
+    if not msgs:
+        return
+    sid = _create_chat_session()
+    save_json(os.path.join(CHAT_SESSIONS_DIR, f'{sid}.json'), msgs)
 
 def _load_chat_history(entity_id):
     path = _get_chat_history_path(entity_id)
@@ -6426,7 +6553,7 @@ def _replace_pending_chat_msg(book_id, task_id, text, reasoning='', meta=None):
             _migrate_global_chat_history_locked()
             messages = load_json(path, list)
             replaced = False
-            item = {'text': text, 'type': 'ai', 'reasoning': reasoning}
+            item = {'text': text, 'type': 'ai', 'reasoning': reasoning, 'task_id': task_id}
             if isinstance(meta, dict):
                 item.update(meta)
             item = _clean_chat_message(item)
@@ -6437,7 +6564,9 @@ def _replace_pending_chat_msg(book_id, task_id, text, reasoning='', meta=None):
                     replaced = True
                     break
             if not replaced:
-                messages.append(item)
+                already = any(m.get('type') == 'ai' and m.get('task_id') == task_id and not m.get('_pending') for m in messages)
+                if not already:
+                    messages.append(item)
             save_json(path, messages)
     except Exception as e:
         log_action('CHAT_REPLACE_ERROR', f'{book_id}/{task_id}: {str(e)[:100]}')
@@ -6686,10 +6815,16 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
         _series_ch_list_ctx = '\n'.join(_series_ch_list_parts[:80])
         bookshelf_tree = _build_bookshelf_tree()
         is_first_round = not history_list
-        if is_first_round:
-            sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
+        appendix = f"""当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
 
-当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
+【系列阅读笔记】
+{source_ctx}
+
+【章节列表】
+{_series_ch_list_ctx}"""
+        if is_first_round:
+            appendix += '\n\n【初始问候】如果对话历史为空（用户第一次开口），你的第一句回复开头自然地融入"有什么我可以帮你的吗"这层意思，但不要机械重复这句话。'
+        sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
 
 【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。
 
@@ -6710,13 +6845,15 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
 严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
 你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
-                        严禁输出 markdown 表格。
+严禁输出 markdown 表格。
 
-                        【书库结构】
-                        {bookshelf_tree}
+【书库结构】
+{bookshelf_tree}
 
-                        【你的专长】
-                        你是系列小说的宏观顾问，擅长：
+（系列阅读笔记和章节列表详见文末附录）
+
+【你的专长】
+你是系列小说的宏观顾问，擅长：
 - 系列整体架构规划：各本书的定位、节奏、篇幅
 - 世界观补全：哪些方面还没展开，下一本适合从哪个角度拓展
 - 人物弧线：跨书的人物成长和命运安排
@@ -6733,66 +6870,14 @@ def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
 - 注意：调用前先简短告诉用户"好的，我这就启动系列通读"，然后输出工具标签。
 
 这个系列叫「{series_title}」，以下是各本书的阅读笔记：
-
-{source_ctx}
-
-用户当前正在浏览：{series_title}
-
-用户对你发送了如下消息——
-
-【章节列表】
-{_series_ch_list_ctx}
-
-"""
-        else:
-            sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
-
-当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
-
-【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。
-
-【输出风格】
-1. 谨言慎行。温文尔雅，不卑不亢。惜字如金
-2. 不要开场白和结束语，不要"首先…其次…最后…"
-3. 看到好就简短说好，有问题就精准点出。不浮夸也不冷漠
-4. 你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句
-5. 你欣赏世界观宏大、设定严丝合缝的好作品。设定细节一被提及，主动多关心两句，热衷于和作者推敲
-6. 避免用"呗""啦"结尾，显得轻浮
-【思考规则】一个问题不要反复思考多次，同一层面想一次就够了，否则可能陷入死循环。如果你的回复包含多个推理段落，在每个段落开头加上"第一，""第二，"这样的前缀。
-
-【绝对禁止】
-严禁任何身份描述。严禁说：
-- "我是你的朋友／搭档／助手／助理" "写小说的朋友"
-- "我叫XX" "我就是帮你XX的" "你的写作搭档"
-被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
-严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
-你的品格从言行中流露。
-                        严禁输出 markdown 表格。
-
-                        【书库结构】
-                        {bookshelf_tree}
-
-                        【你的专长】系列小说的宏观顾问：架构规划、世界观补全、人物弧线、伏笔管理、连贯性检查、读者体验。
-
-你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。
-- 调用格式：[READ_CHAPTER]{{"chapter_id":"章节ID"}}[/READ_CHAPTER]
-
-【隐藏功能】你可以主动启动系列通读进程。当用户要求通读系列，或你判断需要全面了解细节才能回答时，请调用：
-- 调用格式：[START_SERIES_READTHROUGH][/START_SERIES_READTHROUGH]
-- 调用前先简短告诉用户"好的，我这就启动系列通读"，然后输出工具标签。
-
-这个系列叫「{series_title}」，以下是各本书的阅读笔记：
-
-{source_ctx}
+（详见文末附录）
 
 用户当前正在浏览：{series_title}
 
 请继续和用户对话。
 
-【章节列表】
-{_series_ch_list_ctx}
-
-"""
+=== 附录 ===
+{appendix}"""
         msgs = [{'role': 'system', 'content': sys_msg}]
         for h in history_list:
             role = h.get('role')
@@ -8139,7 +8224,8 @@ def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=Fals
         headers['Authorization'] = f'Bearer {key}'
     body = {'model': model, 'messages': messages}
     if max_tokens is not None and max_tokens > 0:
-        body['max_tokens'] = int(max_tokens)
+        # DeepSeek API max_tokens 上限 393216，大上下文窗口可能导致计算值超限
+        body['max_tokens'] = min(int(max_tokens), 131072)
     else:
         body['max_tokens'] = 4096
     if stream:

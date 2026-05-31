@@ -101,6 +101,9 @@ STRUCTURED_USER_TEMPLATE = '''【章节】{title}
 SYSTEM_OVERHEAD_TOKENS = 1500
 OUTPUT_PER_CHAPTER_TOKENS = 6000
 SAFETY_TOKENS = 2000
+# DeepSeek API 的 max_tokens 上限是 393216；大上下文窗口下 remaining 可能远超此值
+# 这里用一个保守上限，既能覆盖大批量章节输出，又不会触发 API 400 错误
+MAX_OUTPUT_TOKENS = 131072  # 128K，已足够 20+ 章批量输出
 
 
 def _est_tokens(text: str) -> int:
@@ -112,7 +115,7 @@ def _compute_output_budget(ctx_len: int, input_chars: int, prev_context: str) ->
         return 8192
     input_tokens = _est_tokens(prev_context) + int(input_chars * 0.55) + SYSTEM_OVERHEAD_TOKENS
     remaining = ctx_len - input_tokens - SAFETY_TOKENS
-    return max(4096, remaining)
+    return max(4096, min(remaining, MAX_OUTPUT_TOKENS))
 
 
 def _extract_json_from_text(raw: str) -> str:
