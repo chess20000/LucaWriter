@@ -64,7 +64,7 @@ def create_icns(src_path, dst_path):
 
 def main():
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    src_icon = os.path.join(project_dir, 'icon.png')
+    src_icon = os.path.join(project_dir, 'icons', 'icon.png')
     if not os.path.exists(src_icon):
         print(f'Source icon not found: {src_icon}', file=sys.stderr)
         sys.exit(1)

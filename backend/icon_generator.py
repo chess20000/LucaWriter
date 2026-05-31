@@ -10,8 +10,8 @@ from PIL import Image, ImageDraw
 import numpy as np
 
 # 模板图标路径
-TEMPLATE_ICON_PATH = os.path.join(os.path.dirname(__file__), '..', 'icon_template.png')
-GOLD_ICON_PATH = os.path.join(os.path.dirname(__file__), '..', 'icon_gold.png')
+TEMPLATE_ICON_PATH = os.path.join(os.path.dirname(__file__), '..', 'icons', 'icon_template.png')
+GOLD_ICON_PATH = os.path.join(os.path.dirname(__file__), '..', 'icons', 'icon_gold.png')
 
 # 缓存生成的图标
 _icon_cache = {}

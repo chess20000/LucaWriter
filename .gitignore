@@ -1,17 +1,14 @@
+# User data
 usrdata/
+
+# Local LLM
 local_llm/
+local_llm.cpu_backup_v1.1.4/
+local_llm.cuda_mtp_backup/
+
+# Build outputs
 release/
-*.log
-*.pyc
-*.tmp
-*.msc
-server_err.txt
-server_out.txt
-.rebuild
-.rebuild_result
-__pycache__/
-backend/data_builtin_test/
-backend/.msc
+build_output.log
 electron/dist-backend/
 electron/dist-builtin/
 electron/dist-icon-check*/
@@ -19,15 +16,57 @@ electron/build-temp/
 electron/build-venv/
 electron/.pyinstaller_cache/
 electron/node_modules/
+
+# Logs
+*.log
+logs/
+server_err.txt
+server_out.txt
+server_test_out.txt
+codex-server.err.log
+codex-server.out.log
+server.stderr.log
+server.stdout.log
+backend/server.err.log
+backend/server.out.log
+
+# Python
+*.pyc
+__pycache__/
+backend/__pycache__/
+backend/data_builtin_test/
+.venv/
+venv/
+env/
+.python-version
+
+# Temp / artifacts
+*.tmp
+*.msc
+backend/.msc
+.rebuild
+.rebuild_result
+test_*.png
+tmp_*
+torchinductor_*/
+
+# Handoff / design docs (not source code)
+HANDOFF*
+KB_REWRITE_DESIGN*
+LOCAL_MODEL_DESIGN*
+
+# Novel files (not project code)
+*LUCA_Legend*
+
+# IDE / editor
 .DS_Store
 .idea/
 .vscode/
-.env
-venv/
-env/
-.venv/
 .claude/
 .chat-history/
+
+# Environment
+.env
 
 _*.py
 demo/

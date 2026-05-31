@@ -11,8 +11,8 @@ COPY frontend/index.html /app/frontend/index.html
 COPY frontend/login.html /app/frontend/login.html
 COPY frontend/icon.png /app/frontend/icon.png
 COPY frontend/icon.ico /app/frontend/icon.ico
-COPY icon_template.png /app/icon_template.png
-COPY icon_gold.png /app/icon_gold.png
+COPY icons/icon_template.png /app/icons/icon_template.png
+COPY icons/icon_gold.png /app/icons/icon_gold.png
 
 RUN mkdir -p /app/usrdata
 

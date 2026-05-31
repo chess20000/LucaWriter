@@ -15,7 +15,7 @@ def find_project_dir():
         candidates.append(base)
 
     for candidate in candidates:
-        if os.path.exists(os.path.join(candidate, 'icon_gold.png')):
+        if os.path.exists(os.path.join(candidate, 'icons', 'icon_gold.png')):
             return candidate
     return os.path.dirname(SCRIPT_DIR)
 
@@ -24,8 +24,8 @@ PROJECT_DIR = find_project_dir()
 ROOT_DIR = os.path.join(PROJECT_DIR, 'electron')
 if not os.path.isdir(ROOT_DIR):
     ROOT_DIR = SCRIPT_DIR
-SOURCE_ICON = os.path.join(PROJECT_DIR, 'icon_gold.png')
-ROOT_ICON = os.path.join(PROJECT_DIR, 'icon.png')
+SOURCE_ICON = os.path.join(PROJECT_DIR, 'icons', 'icon_gold.png')
+ROOT_ICON = os.path.join(PROJECT_DIR, 'icons', 'icon.png')
 ICON_SCOPE = os.environ.get('LUCA_ICON_SCOPE', 'all').strip().lower()
 
 SIZES_ICO = [16, 24, 32, 48, 64, 128, 256]
@@ -97,7 +97,7 @@ def main():
     print(f'Radius ratio: {RADIUS_RATIO}')
     print()
 
-    # 1. Root icon. Keep icon_gold.png immutable as the canonical source.
+    # 1. Root icon. Keep icons/icon_gold.png immutable as the canonical source.
     if ICON_SCOPE == 'all':
         print('[Root]')
         root_rounded = make_rounded(ROOT_ICON, 256)
