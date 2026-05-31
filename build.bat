@@ -45,29 +45,33 @@ if exist "%ROOT_DIR%release\v1.2.1" rmdir /s /q "%ROOT_DIR%release\v1.2.1"
 echo Clean done.
 echo.
 
-echo [2/8] Creating clean build venv and installing dependencies...
-set "BUILD_VENV=%BUILD_TEMP%\venv"
-if exist "%BUILD_VENV%" rmdir /s /q "%BUILD_VENV%"
-%PYTHON_EXE% -m venv "%BUILD_VENV%"
-if errorlevel 1 (
-    echo [ERROR] Failed to create build venv
-    pause
-    exit /b 1
+echo [2/8] Setting up clean build venv...
+set "BUILD_VENV=%ELECTRON_DIR%\build-venv"
+if not exist "%BUILD_VENV%\Scripts\python.exe" (
+    %PYTHON_EXE% -m venv "%BUILD_VENV%"
+    if errorlevel 1 (
+        echo [ERROR] Failed to create build venv
+        pause
+        exit /b 1
+    )
+    set "VENV_PYTHON=%BUILD_VENV%\Scripts\python.exe"
+    %VENV_PYTHON% -m pip install -r "%ROOT_DIR%requirements.txt" --quiet
+    if errorlevel 1 (
+        echo [ERROR] Failed to install Python dependencies
+        pause
+        exit /b 1
+    )
+    %VENV_PYTHON% -m pip install pyinstaller Pillow --quiet
+    if errorlevel 1 (
+        echo [ERROR] Failed to install PyInstaller/Pillow
+        pause
+        exit /b 1
+    )
+    echo Clean build venv created.
+) else (
+    echo Build venv already exists, skipping dependency install.
 )
 set "VENV_PYTHON=%BUILD_VENV%\Scripts\python.exe"
-%VENV_PYTHON% -m pip install -r "%ROOT_DIR%requirements.txt" --quiet
-if errorlevel 1 (
-    echo [ERROR] Failed to install Python dependencies
-    pause
-    exit /b 1
-)
-%VENV_PYTHON% -m pip install pyinstaller Pillow --quiet
-if errorlevel 1 (
-    echo [ERROR] Failed to install PyInstaller/Pillow
-    pause
-    exit /b 1
-)
-echo Clean build venv ready (only requirements.txt packages).
 echo.
 
 echo [3/8] Generating app icon...
