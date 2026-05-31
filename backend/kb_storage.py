@@ -897,6 +897,8 @@ def count_embedding_chunks(book_id):
 
 # ─── ChromaDB Wrapper ───
 
+# 禁用 chromadb telemetry 导入，避免 PyInstaller 打包后因缺少 posthog 模块崩溃
+os.environ['CHROMA_TELEMETRY_DISABLED'] = '1'
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from chromadb.config import Settings as _ChromaSettings

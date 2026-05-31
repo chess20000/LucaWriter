@@ -33,6 +33,8 @@ if not os.environ.get('SSL_CERT_FILE'):
         if sys.platform == 'darwin' and os.path.exists(_macos_cert):
             os.environ['SSL_CERT_FILE'] = _macos_cert
 
+# 禁用 chromadb telemetry 导入，避免 PyInstaller 打包后因缺少 posthog 模块崩溃
+os.environ['CHROMA_TELEMETRY_DISABLED'] = '1'
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from chromadb.config import Settings as _ChromaSettings

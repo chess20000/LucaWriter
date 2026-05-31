@@ -98,6 +98,7 @@ $PYTHON_EXE -m PyInstaller --onedir \
     --hidden-import PyPDF2 \
     --hidden-import ebooklib \
     --hidden-import ebooklib.epub \
+    --hidden-import chromadb.telemetry.product.posthog \
     --collect-all certifi \
     "$ROOT_DIR/backend/main.py" || {
     echo "[ERROR] PyInstaller build failed"
