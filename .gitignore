@@ -43,6 +43,8 @@ env/
 # Temp / artifacts
 *.tmp
 *.msc
+*.ico
+*.icns
 backend/.msc
 .rebuild
 .rebuild_result
