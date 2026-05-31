@@ -3,7 +3,7 @@ chcp 936 >nul 2>&1
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo   LucaWriter v1.2.1 Build Script
+echo   LucaWriter v1.2.3 Build Script
 echo ============================================
 echo.
 
@@ -41,7 +41,7 @@ echo [1/8] Cleaning old build files...
 if exist "%DIST_BACKEND%" rmdir /s /q "%DIST_BACKEND%"
 if exist "%DIST_BUILTIN%" rmdir /s /q "%DIST_BUILTIN%"
 if exist "%BUILD_TEMP%" rmdir /s /q "%BUILD_TEMP%"
-if exist "%ROOT_DIR%release\v1.2.1" rmdir /s /q "%ROOT_DIR%release\v1.2.1"
+if exist "%ROOT_DIR%release\v1.2.3" rmdir /s /q "%ROOT_DIR%release\v1.2.3"
 echo Clean done.
 echo.
 
@@ -148,6 +148,6 @@ echo.
 
 echo ============================================
 echo   Build Success!
-echo   Output: release\v1.2.1\
+echo   Output: release\v1.2.3\
 echo ============================================
 pause
