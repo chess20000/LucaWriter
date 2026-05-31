@@ -41,7 +41,7 @@ echo [1/8] Cleaning old build files...
 if exist "%DIST_BACKEND%" rmdir /s /q "%DIST_BACKEND%"
 if exist "%DIST_BUILTIN%" rmdir /s /q "%DIST_BUILTIN%"
 if exist "%BUILD_TEMP%" rmdir /s /q "%BUILD_TEMP%"
-if exist "%ROOT_DIR%release\v1.2.0" rmdir /s /q "%ROOT_DIR%release\v1.2.0"
+if exist "%ROOT_DIR%release\v1.2.1" rmdir /s /q "%ROOT_DIR%release\v1.2.1"
 echo Clean done.
 echo.
 
@@ -83,6 +83,13 @@ echo [4/8] Building backend with PyInstaller...
     --hidden-import ebooklib ^
     --hidden-import ebooklib.epub ^
     --collect-all certifi ^
+    --exclude-module torch ^
+    --exclude-module torchvision ^
+    --exclude-module torchaudio ^
+    --exclude-module torchsde ^
+    --exclude-module torchao ^
+    --exclude-module safetensors ^
+    --exclude-module tensorboard ^
     "%ROOT_DIR%backend\main.py"
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed
@@ -135,6 +142,6 @@ echo.
 
 echo ============================================
 echo   Build Success!
-echo   Output: release\v1.2.0\
+echo   Output: release\v1.2.1\
 echo ============================================
 pause

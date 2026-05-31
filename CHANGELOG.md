@@ -86,3 +86,8 @@
 
 - **修复 `_localLLMSpeed` 未定义**：添加缺失的变量声明
 - **修复 `memoryUpdating` 未定义**：添加缺失的变量声明
+
+## 🎯 内置模型策略收紧
+
+- **仅 NVIDIA 显卡可用**：内置本地模型（llama.cpp）现仅支持检测到 NVIDIA 显卡且显存 ≥8GB 时启用
+- **禁用 Mac / AMD / 纯 CPU 路径**：Apple Silicon、AMD 显卡、纯 CPU 推理路径暂时关闭，统一降级为 API 兜底

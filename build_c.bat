@@ -57,6 +57,13 @@ if not exist "%DIST_BACKEND%\LucaWriterBackend\LucaWriterBackend.exe" (
         --hidden-import ebooklib ^
         --hidden-import ebooklib.epub ^
         --collect-all certifi ^
+        --exclude-module torch ^
+        --exclude-module torchvision ^
+        --exclude-module torchaudio ^
+        --exclude-module torchsde ^
+        --exclude-module torchao ^
+        --exclude-module safetensors ^
+        --exclude-module tensorboard ^
         "%ROOT_DIR%backend\main.py"
     if errorlevel 1 (
         echo [ERROR] PyInstaller build failed

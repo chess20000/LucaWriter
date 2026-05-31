@@ -8068,57 +8068,28 @@ def _decide_local_strategy(hw):
         'cpu_threads': int(hw.get('cpu_threads') or 4),
     }
 
-    if os_name == 'macos' and is_apple:
-        if ram >= _RAM_TIER_B:
-            result.update(tier='B', binary='metal', model_key='qwen3.6-35b-apex-mini',
-                          offload_mode='metal', verdict='green',
-                          reason=f'Apple Silicon · {ram:.0f}GB 统一内存')
-            return result
-        if ram >= _RAM_TIER_A:
-            result.update(tier='A', binary='metal', model_key='qwen3.5-9b',
-                          offload_mode='metal',
-                          verdict='green' if ram >= _RAM_MAC_24 else 'yellow',
-                          reason=f'Apple Silicon · {ram:.0f}GB 统一内存')
-            if ram < _RAM_MAC_24:
-                result['notes'].append('运行时建议关闭其他大型应用以获得更流畅体验')
-            return result
-        result['reason'] = f'Apple Silicon 仅 {ram:.0f}GB 统一内存，不足以本地运行'
-        return result
-
-    qualified_gpu = vram >= _VRAM_MIN and vendor in ('nvidia', 'amd')
-    binary_for_gpu = 'cuda' if vendor == 'nvidia' else ('vulkan' if vendor == 'amd' else None)
+    # 仅支持 NVIDIA 显卡 + ≥8GB 显存。Mac/AMD/纯 CPU 路径当前禁用。
+    qualified_gpu = vram >= _VRAM_MIN and vendor == 'nvidia'
 
     if qualified_gpu and ram >= _RAM_TIER_B:
-        result.update(tier='B', binary=binary_for_gpu, model_key='qwen3.6-35b-apex-mini',
+        result.update(tier='B', binary='cuda', model_key='qwen3.6-35b-apex-mini',
                       offload_mode='hybrid', verdict='green',
-                      reason=f'{vendor.upper()} {vram:.0f}GB 显存 + {ram:.0f}GB 内存')
+                      reason=f'NVIDIA {vram:.0f}GB 显存 + {ram:.0f}GB 内存')
         return result
 
     if qualified_gpu and ram < _RAM_TIER_B:
-        result.update(tier='A', binary=binary_for_gpu, model_key='qwen3.5-9b',
+        result.update(tier='A', binary='cuda', model_key='qwen3.5-9b',
                       offload_mode='full_gpu', verdict='green',
-                      reason=f'{vendor.upper()} {vram:.0f}GB 显存 · {ram:.0f}GB 内存')
-        return result
-
-    if not qualified_gpu and ram >= _RAM_TIER_B:
-        result.update(tier='B', binary='cpu', model_key='qwen3.6-35b-apex-mini',
-                      offload_mode='cpu', verdict='green',
-                      reason=f'无 ≥8GB 独显 · {ram:.0f}GB 内存（纯 CPU 推理）')
-        result['notes'].append('纯 CPU 推理速度受限，生成约每秒 5-10 字')
-        return result
-
-    if not qualified_gpu and ram >= _RAM_TIER_A:
-        result.update(tier='A', binary='cpu', model_key='qwen3.5-9b',
-                      offload_mode='cpu', verdict='yellow',
-                      reason=f'无 ≥8GB 独显 · {ram:.0f}GB 内存（纯 CPU 推理）')
-        result['notes'].append('您没有独立显卡，AI 生成约每秒 5-8 字，比云端慢但完全免费且离线')
-        result['notes'].append('运行时建议关闭其他大型应用')
+                      reason=f'NVIDIA {vram:.0f}GB 显存 · {ram:.0f}GB 内存')
         return result
 
     bits = []
     if ram > 0: bits.append(f'{ram:.0f}GB 内存')
     if vram > 0: bits.append(f'{vendor.upper()} {vram:.0f}GB 显存')
-    result['reason'] = '硬件不达标：' + ('，'.join(bits) if bits else '未识别')
+    if vendor != 'none' and vendor not in ('nvidia',):
+        result['reason'] = f'当前版本仅支持 NVIDIA 显卡，您的 {vendor.upper()} 显卡暂不支持'
+    else:
+        result['reason'] = '硬件不达标：' + ('，'.join(bits) if bits else '未识别')
     return result
 
 
