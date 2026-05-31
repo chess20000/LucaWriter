@@ -33,8 +33,6 @@ if not os.environ.get('SSL_CERT_FILE'):
         if sys.platform == 'darwin' and os.path.exists(_macos_cert):
             os.environ['SSL_CERT_FILE'] = _macos_cert
 
-# 禁用 chromadb telemetry 导入，避免 PyInstaller 打包后因缺少 posthog 模块崩溃
-os.environ['CHROMA_TELEMETRY_DISABLED'] = '1'
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from chromadb.config import Settings as _ChromaSettings
@@ -7954,7 +7952,7 @@ def _stop_local_llm():
     return True, ''
 
 # ===== 硬件检测与本地模型选型 =====
-# psutil.virtual_memory().total 比标称内存少 0.3-0.5GB
+# 决策树详见 LOCAL_MODEL_DESIGN.md。psutil.virtual_memory().total 比标称内存少 0.3-0.5GB
 # （BIOS / 显存保留），所以"32GB 起"门槛用 30，"16GB 起"用 15。
 _RAM_TIER_B = 30   # 标称 ≥32GB
 _RAM_TIER_A = 15   # 标称 ≥16GB
@@ -8098,7 +8096,7 @@ def _detect_hardware():
 
 
 def _decide_local_strategy(hw):
-    """将硬件信息映射到本地模型策略。"""
+    """按 LOCAL_MODEL_DESIGN.md 决策树将硬件信息映射到本地模型策略。"""
     ram = float(hw.get('ram_gb') or 0)
     vram = float(hw.get('vram_gb') or 0)
     vendor = hw.get('gpu_vendor', 'none')
@@ -8185,7 +8183,8 @@ def _load_local_strategy():
 
 
 def _build_llm_args(strategy):
-    """根据策略构建 llama-server 命令行参数（不含 exe 和模型路径）。"""
+    """根据策略构建 llama-server 命令行参数（不含 exe 和模型路径）。
+    LOCAL_MODEL_DESIGN.md "启动参数" 一节的实现。"""
     s = strategy or {}
     cpu_t = int(s.get('cpu_threads') or 4)
     args = [

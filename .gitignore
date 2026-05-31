@@ -59,6 +59,7 @@ LOCAL_MODEL_DESIGN*
 
 # Novel files (not project code)
 *LUCA_Legend*
+!builtin/**
 
 # IDE / editor
 .DS_Store
