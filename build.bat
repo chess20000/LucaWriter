@@ -107,11 +107,12 @@ echo.
 
 echo [5/8] Copying builtin books...
 mkdir "%DIST_BUILTIN%" 2>nul
-copy "%ROOT_DIR%LUCA_Legend.md" "%DIST_BUILTIN%\" >nul
-if errorlevel 1 (
-    echo [ERROR] Failed to copy builtin book
-    pause
-    exit /b 1
+if exist "%ROOT_DIR%builtin\LUCA_Legend.md" (
+    copy "%ROOT_DIR%builtin\LUCA_Legend.md" "%DIST_BUILTIN%\" >nul
+) else if exist "%ROOT_DIR%LUCA_Legend.md" (
+    copy "%ROOT_DIR%LUCA_Legend.md" "%DIST_BUILTIN%\" >nul
+) else (
+    echo [WARN] No builtin book found, skipping
 )
 echo Builtin books copied.
 echo.
