@@ -3,7 +3,7 @@ chcp 936 >nul 2>&1
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo   LucaWriter v1.2.0 Build Script
+echo   LucaWriter v1.2.1 Build Script
 echo ============================================
 echo.
 

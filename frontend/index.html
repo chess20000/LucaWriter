@@ -48,7 +48,7 @@
  --editor-font-family:var(--font-longform);
  --editor-font-weight:200;
  --scrollbar:rgba(255,255,255,.14);--scrollbar-hover:rgba(214,214,211,.24);
- --z-bottom-panel:90;--z-main-row:70;--z-chapter-overlay:95;
+ --z-bottom-panel:90;--z-main-row:70;--z-chapter-overlay:9999;
  /* text-on-surface colors for better contrast */
  --on-accent:#191919;
  --t-on-surface:var(--t1);--t-on-surface-weak:var(--t2);--t-on-surface-muted:var(--t3);
@@ -97,6 +97,7 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 .topbar-center-logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:5}
 .topbar-center-logo img{width:20px;height:20px;opacity:.7}
 .topbar-back:hover{color:var(--t-on-surface);border-color:var(--accent-a25);background:var(--accent-a12)}
+.topbar-back svg{display:block;transform:translateX(-2px)}
 .topbar-breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;overflow:hidden;flex:1;min-width:0}
 .topbar-breadcrumb .bc-book{color:var(--t-on-surface);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;flex-shrink:1;min-width:48px;font-weight:650}
 .topbar-breadcrumb .bc-sep{color:var(--t3);flex-shrink:0;font-size:12px}
@@ -110,6 +111,8 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 .topbar-chapter-slot.active{display:flex}
 .topbar-ch-title{width:auto;min-width:80px;max-width:100%;background:transparent;border:none;border-bottom:2px dashed var(--border);font-size:13px;font-weight:700;color:var(--t1);outline:none;padding:0 0 2px 0;letter-spacing:0;pointer-events:auto}
 .topbar-ch-title::placeholder{color:var(--t3)}
+.topbar-ch-dot{flex-shrink:0;width:9px;height:9px;border-radius:50%;border:1.5px solid var(--t3);background:var(--surface);box-sizing:border-box;position:relative;left:-7px;top:-1px}
+.topbar-chapter-slot.active .topbar-ch-dot{background:var(--accent);border-color:var(--accent);border-width:2px;width:10px;height:10px}
 .topbar-status{display:none;align-items:center;gap:6px;flex:0 0 auto;min-width:0;height:26px;margin-left:auto;padding:0;border:none;background:transparent}
 .topbar-status:not(.has-chapter) .save-indicator{display:none}
 .topbar-actions{display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:0}
@@ -467,25 +470,27 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .luca-popup.open{display:flex}
 .luca-popup-grip{width:40px;height:5px;border-radius:3px;background:var(--t2);opacity:.45;margin:6px auto;cursor:ns-resize;flex-shrink:0;transition:opacity .15s}
 .luca-popup-grip:hover{opacity:.85}
-.luca-popup-brand{display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:700;color:var(--t2);letter-spacing:1px;padding:6px 0 6px 0;flex-shrink:0;position:relative}
+.luca-popup-brand{display:flex;align-items:center;justify-content:center;gap:2px;font-size:13px;font-weight:700;color:var(--t2);letter-spacing:1px;padding:6px 0 6px 0;flex-shrink:0;position:relative;overflow:hidden}
 
+.luca-session-title{font-size:10px;font-weight:400;color:var(--t3);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:2px;flex-shrink:1;min-width:0}
 .luca-brand-actions{position:absolute;right:8px;top:50%;transform:translateY(-50%);display:flex;gap:4px}
 .luca-act-btn{width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:transparent;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:border-color .15s,color .15s}
 .luca-act-btn:hover{color:var(--t1);border-color:var(--t3)}
-.luca-chat-history{max-height:180px;overflow-y:auto;padding:0 8px 6px 8px;flex-shrink:0}
+.luca-chat-history{max-height:180px;overflow-y:auto;padding:6px 8px 8px 8px;flex-shrink:0;min-height:0;border-bottom:1px solid var(--border)}
 .luca-history-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:var(--r1);cursor:pointer;font-size:11px;color:var(--t2);transition:background .12s}
 .luca-history-item:hover{background:var(--surface3)}
 .luca-history-item.active{color:var(--accent);background:var(--accent-a12)}
 .luca-history-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .luca-history-time{font-size:10px;color:var(--t3);flex-shrink:0;white-space:nowrap}
 .luca-popup-line{width:calc(100% - 28px);height:2px;margin:0 auto 0 auto;border-radius:1px;background:var(--border);flex-shrink:0}
-.luca-popup-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 14px 12px 14px;min-height:60px}
-.luca-float{position:absolute;bottom:calc(100% + 4px);right:0;max-width:55vw;font-size:12px;color:var(--t2);line-height:1.65;pointer-events:none;z-index:calc(var(--z-chapter-overlay) + 10);display:none;white-space:pre-wrap;word-break:break-all;padding:4px 0}
+.luca-popup-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 14px 12px 14px;min-height:0}
+.luca-float{position:absolute;bottom:calc(100% + 4px);left:10px;width:calc((100% - 10px - 14px) * 5 / 6);font-size:12px;color:var(--t1);line-height:1.65;pointer-events:none;z-index:calc(var(--z-chapter-overlay) + 10);display:none;white-space:pre-wrap;word-break:break-word;padding:8px 10px;border-radius:var(--r2);background:rgba(30,30,30,.55);backdrop-filter:blur(12px) saturate(130%);-webkit-backdrop-filter:blur(12px) saturate(130%)}
+[data-theme-mode="light"] .luca-float{background:rgba(245,245,245,.65)}
 .luca-float.show{display:block}
 .luca-float .luca-float-inner{display:flex;align-items:flex-start;gap:6px}
 .luca-float .luca-float-inner img{width:18px;height:18px;flex-shrink:0;margin-top:1px}
 [data-theme-mode="light"] .luca-float .luca-float-inner img{filter:invert(1);opacity:.5}
-.luca-float .luca-float-text{flex:1;min-width:0}
+.luca-float .luca-float-text{flex:1;min-width:0;text-align:left}
 .bottom-tab{background:var(--surface2);border:none;color:var(--t3);width:36px;height:42px;display:inline-flex;align-items:center;justify-content:center;clip-path:polygon(0 0,100% 0,100% 78%,50% 100%,0 78%);cursor:pointer;transition:all .15s;line-height:0;opacity:.7}
 .bottom-tab:hover{color:var(--t1);opacity:1;filter:drop-shadow(0 1px 2px var(--accent-a25))}
 .bottom-tab.active{color:var(--accent);background:var(--accent-a12);opacity:1;filter:drop-shadow(0 1px 3px var(--accent-a30))}
@@ -1037,6 +1042,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  <img src="logo-white.png" alt="LW">
  </div>
  <div class="topbar-chapter-slot" id="topbarChapterSlot">
+ <span class="topbar-ch-dot"></span>
  <input id="chTitleInput" class="topbar-ch-title" placeholder="章节标题" oninput="onTitleChange()" onkeydown="if(event.key==='Enter'){$('editorArea').focus();event.preventDefault()}" style="display:none">
  </div>
  <div class="topbar-status" id="topbarStatus" style="display:none">
@@ -1170,11 +1176,11 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
     <input class="ai-input" id="aiInput" placeholder="问 Luca" autocomplete="off" data-form-type="other" style="flex:1;min-width:0;height:30px;padding:0 10px;font-size:12px;border-radius:0;border:none;background:var(--surface2);color:var(--t1);outline:none" onkeydown="if(event.key==='Enter')sendAI()">
     <div class="luca-popup" id="lucaPopup">
      <div class="luca-popup-grip" id="lucaPopupGrip"></div>
-     <div class="luca-popup-brand"><span>Luca</span><div class="luca-brand-actions"><button class="luca-act-btn" onclick="toggleChatHistory()" title="历史对话"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 4h10M3 8h10M3 12h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="luca-act-btn" onclick="newChatSession()" title="新建对话"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 5v6M5 8h6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div></div>
+     <div class="luca-popup-brand"><span>Luca</span><span class="luca-session-title" id="lucaSessionTitle"></span><div class="luca-brand-actions"><button class="luca-act-btn" onclick="toggleChatHistory()" title="历史对话"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 4h10M3 8h10M3 12h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="luca-act-btn" onclick="newChatSession()" title="新建对话"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 5v6M5 8h6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div></div>
+     <div class="luca-popup-line"></div>
      <div class="luca-chat-history" id="chatHistoryPanel" style="display:none">
       <div class="luca-history-list" id="chatHistoryList"></div>
      </div>
-     <div class="luca-popup-line"></div>
      <div class="luca-popup-messages" id="aiMessages"></div>
      <div id="kbProposalModal" style="position:absolute;inset:0;background:rgba(0,0,0,.35);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:10;justify-content:center;align-items:center;display:none;border-radius:var(--r2)" onclick="if(event.target===this)this.style.display='none'">
       <div style="background:var(--surface);border:1px solid var(--border2);border-radius:var(--r3);padding:18px 16px;width:92%;max-width:340px">
@@ -1665,6 +1671,7 @@ document.addEventListener('pointerdown',function(e){
 /* === AI 活跃连接指示 === */
 var _aiActivityES=null;
 var _activeAICount=0;
+var _localLLMSpeed=null;
 function _startAIActivity(){
  if(_aiActivityES)return;
  _aiActivityES=new EventSource('/api/ai-activity');
@@ -2335,6 +2342,7 @@ function showSaveIndicator(ok){
  clearTimeout(el._t);el._t=setTimeout(function(){el.className='save-indicator'},2000);
 }
 
+var memoryUpdating=false;
 var saveDebounce=null;
 function scheduleSave(){
  clearTimeout(saveDebounce);
@@ -2551,7 +2559,8 @@ function loadAIMessages(){
    _clearChatSessionId();currentChatSessionId='';
    _initChatSession(function(){_checkPendingChat()});return
   }
-  renderAIMessages();_checkPendingChat()
+  renderAIMessages();_checkPendingChat();
+  loadChatSessions(function(){_updateSessionTitleDisplay()});
  })}
 
 function _checkPendingChat(){
@@ -2579,6 +2588,7 @@ function _startChatPoll(taskId){
  if(st.status==='done'||st.status==='error'){
  _stopChatPoll();
  if(st.status==='done'&&st.inspirations_changed){loadInspirations();}
+ _flashAIResponse(st.status==='done'?st.result||'':'');
  loadAIMessages();
  }else if(st.status==='running'){
  // pending 
@@ -2633,7 +2643,58 @@ function _syncThinkingRotation(){
 
 function _stopChatPoll(){if(_chatPollTimer){clearInterval(_chatPollTimer);_chatPollTimer=null;}}
 
-function saveAIMessages(){if(!currentChatSessionId)return;api('POST','/api/chat-session/'+currentChatSessionId+'/messages',{messages:aiMessages},function(){})}
+function saveAIMessages(){
+ if(!currentChatSessionId)return;
+ api('POST','/api/chat-session/'+currentChatSessionId+'/messages',{messages:aiMessages},function(){
+  // 后台刷新会话列表，触发后端自动生成标题
+  loadChatSessions(function(){
+   renderChatHistory();
+   _updateSessionTitleDisplay();
+  });
+ })
+}
+
+function _clampHistoryHeight(){
+ var hp=$('chatHistoryPanel'),popup=$('lucaPopup');
+ if(!hp||!popup||hp.style.display==='none')return;
+ // 死限位：弹出窗口顶部不能越过顶栏下边界（38px）
+ var zone=$('aiInputZone');
+ var topLimit=zone?zone.getBoundingClientRect().top-38:1e6;
+ // 先把历史面板压到1px，测量其他元素实际占用高度
+ hp.style.maxHeight='1px';
+ void popup.offsetHeight;
+ var othersH=popup.scrollHeight;
+ // 读取弹出窗口实际最大高度
+ var cs=getComputedStyle(popup);
+ var maxStr=popup.style.maxHeight||cs.maxHeight||'50vh';
+ var popupMaxH;
+ if(typeof maxStr==='string'&&maxStr.indexOf('vh')>0){
+  popupMaxH=window.innerHeight*parseFloat(maxStr)/100;
+ }else{
+  popupMaxH=parseFloat(maxStr)||popup.clientHeight;
+ }
+ // 应用顶栏死限位（取较小值）
+ popupMaxH=Math.min(popupMaxH,topLimit);
+ // 可用空间 = 弹出窗口最大高度 - 其他元素高度
+ var avail=Math.max(0,popupMaxH-othersH-2);
+ var maxH=Math.max(60,Math.min(180,avail));
+ hp.style.maxHeight=maxH+'px';
+ void popup.offsetHeight;
+}
+
+function _updateSessionTitleDisplay(){
+ var el=$('lucaSessionTitle');
+ if(!el)return;
+ if(!currentChatSessionId||!chatSessionList){el.textContent='';return}
+ for(var i=0;i<chatSessionList.length;i++){
+  var s=chatSessionList[i];
+  if(s.id===currentChatSessionId){
+   el.textContent=s.title?' — '+s.title:'';
+   return;
+  }
+ }
+ el.textContent='';
+}
 
 function _buildAIMsgEl(m,idx,scope){
  scope=scope||'book';
@@ -2739,24 +2800,67 @@ function _updateLiveAIMessage(msgIdx){
  var m=aiMessages[msgIdx];
  if(!m||m.type!=='ai')return;
  var oldEl=c.querySelector('[data-idx="'+msgIdx+'"]');
- var d=_buildAIMsgEl(m,msgIdx);
  if(oldEl){
-  var next=oldEl.nextElementSibling;
-  while(next&&!next.classList.contains('ai-msg')){
-   var rm=next;next=next.nextElementSibling;rm.remove();
+  // 原地更新文本，不重建 DOM，不销毁卡片元素
+  var body=oldEl.querySelector('.ai-msg-body');
+  if(body){
+   if(m._pending && !m.text && !m.reasoning){
+    body.style.cssText='color:var(--t3);font-style:italic';
+    var n=(m._pollTick||0)%3;
+    body.textContent=n===0?'\u25CF':(n===1?'\u25CF\u25CF':'\u25CF\u25CF\u25CF');
+   }else{
+    body.style.cssText='';
+    body.textContent=String(m.text||'');
+    if(m._pending){
+     var dot=document.createElement('span');dot.style.color='var(--accent)';
+     dot.textContent=(m._pollTick||0)%2===0?'\u25CF':'\u25CB';
+     body.appendChild(dot);
+    }
+   }
   }
-  oldEl.replaceWith(d);
+  // 更新 reasoning
+  if(m.reasoning){
+   var rw=oldEl.querySelector('.ai-reasoning');
+   if(!rw){
+    rw=document.createElement('div');rw.className='ai-reasoning';
+    var rb=document.createElement('div');rb.className='ai-reasoning-body';
+    rb.onclick=function(){collapseReasoning(this)};
+    rw.appendChild(rb);
+    var hdr=oldEl.querySelector('.ai-msg-header');
+    if(hdr)hdr.after(rw);else oldEl.prepend(rw);
+   }
+   var rb=rw.querySelector('.ai-reasoning-body');
+   if(rb){
+    rb.textContent=String(m.reasoning);
+    rb.className='ai-reasoning-body'+(m._reasoningOpen?' open':'');
+    rb.scrollTop=rb.scrollHeight;
+   }
+  }else{
+   var oldRw=oldEl.querySelector('.ai-reasoning');
+   if(oldRw)oldRw.remove();
+  }
+  // 更新 header 状态
+  var hdr=oldEl.querySelector('.ai-msg-header');
+  if(hdr){
+   var st=hdr.querySelector('.ai-msg-status');
+   if(st){
+    var isLive=m._pending||m._streaming;
+    if(isLive){st.className='ai-msg-status thinking-word';st.textContent='';}
+    else{st.className='ai-msg-status';st.textContent='已完成思考';}
+   }
+  }
  }else{
+  var d=_buildAIMsgEl(m,msgIdx);
   c.appendChild(d);
+  _appendAIMsgCards(c,m,d);
  }
- _appendAIMsgCards(c,m,d);
  if(m._streaming||m._pending){
-  var rb=d.querySelector('.ai-reasoning-body');
+  var rb=oldEl?oldEl.querySelector('.ai-reasoning-body'):null;
   if(rb)rb.scrollTop=rb.scrollHeight;
  }
  if(nearBottom)c.scrollTop=c.scrollHeight;
-  _syncThinkingRotation();
-  _applyThinkingWord();
+ _syncThinkingRotation();
+ _applyThinkingWord();
 }
 
 function renderAIMessages(){
@@ -3016,6 +3120,7 @@ function _doSendAI(text){
  clearInterval(pollTimer);
   if(m){m._pending=false;m.pending_browse=null;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;m.kb_reread_started=st.kb_reread_started;m.inspirations_changed=st.inspirations_changed;m.kb_citations=st.kb_citations||[];m.kb_proposals=st.kb_proposals||[];m.theme_data=st.theme_data;m.theme_data_list=st.theme_data_list||(st.theme_data?[st.theme_data]:[]);}
  renderAIMessages();saveAIMessages();
+ _flashAIResponse(st.result||'');
  if(st.annotations_changed){loadAnnotations();}
  if(st.inspirations_changed){loadInspirations();}
  if(st.kb_reread_started){toast('已开始局部重读','success');setTimeout(refreshChapterKnowledge,3500);}
@@ -5121,7 +5226,7 @@ function newChatSession(){
    aiMessages=[];
    renderAIMessages();
    var hp=$('chatHistoryPanel');if(hp)hp.style.display='none';
-   loadChatSessions(function(){renderChatHistory()});
+   loadChatSessions(function(){renderChatHistory();_updateSessionTitleDisplay()});
   }
  });
 }
@@ -5134,6 +5239,7 @@ function switchChatSession(sid){
   if(s===200&&d.messages){aiMessages=d.messages}else{aiMessages=[]}
   renderAIMessages();
   _checkPendingChat();
+  _updateSessionTitleDisplay();
  });
 }
 
@@ -5141,8 +5247,17 @@ function toggleChatHistory(){
  var hp=$('chatHistoryPanel');
  if(!hp)return;
  if(hp.style.display==='none'){
-  loadChatSessions(function(){renderChatHistory();hp.style.display=''});
- }else{hp.style.display='none'}
+  loadChatSessions(function(){
+   renderChatHistory();
+   // 先压到60px再显示，避免全尺寸展示→裁剪的跳动
+   hp.style.maxHeight='60px';
+   hp.style.display='';
+   _clampHistoryHeight();
+  });
+ }else{
+  hp.style.display='none';
+  hp.style.maxHeight='';
+ }
 }
 
 function renderChatHistory(){
@@ -5178,6 +5293,7 @@ function _initChatSession(cb){
     api('GET','/api/chat-session/'+currentChatSessionId+'/messages',undefined,function(d,s){
      if(s===200&&d.messages&&d.messages.length){aiMessages=d.messages}else{aiMessages=[{type:'ai',text:'有什么我可以帮你的吗？'}];saveAIMessages()}
      renderAIMessages();
+     _updateSessionTitleDisplay();
      if(cb)cb();
     });
    }else{
@@ -6091,9 +6207,7 @@ function openLucaPopup(){
  _syncLucaPopupPos();
  popup.classList.add('open');
  closeLucaFloat();
- renderAIMessages();
- var c=$('aiMessages');
- if(c)c.scrollTop=c.scrollHeight;
+ // render 由调用方（sendAI / focus）负责，避免过早渲染导致闪白
 }
 function closeLucaPopup(force){
  if(!_lucaPopupOpen)return;
@@ -6108,7 +6222,7 @@ function closeLucaPopup(force){
 function _scheduleLucaClose(){
  if(_lucaGripDragging)return;
  clearTimeout(_lucaPopupCloseTimer);
- _lucaPopupCloseTimer=setTimeout(closeLucaPopup,350);
+ _lucaPopupCloseTimer=setTimeout(closeLucaPopup,0);
 }
 function showLucaFloat(text){
  if(_lucaPopupOpen)return;
@@ -6117,6 +6231,12 @@ function showLucaFloat(text){
  _syncLucaPopupPos();
  el.innerHTML='<div class="luca-float-inner"><img src="logo-white.png" alt=""><div class="luca-float-text">'+esc(text)+'</div></div>';
  el.classList.add('show');
+}
+function _flashAIResponse(text){
+ if(!text||_lucaPopupOpen)return;
+ showLucaFloat(text);
+ clearTimeout(window._flashTimer);
+ window._flashTimer=setTimeout(closeLucaFloat,6000);
 }
 function closeLucaFloat(){
  var el=$('lucaFloat');
@@ -6128,7 +6248,11 @@ function closeLucaFloat(){
  var popup=$('lucaPopup');
  if(!input||!zone||!popup)return;
  zone.addEventListener('mouseenter',function(){_mouseInAiZone=true;openLucaPopup()});
- zone.addEventListener('mouseleave',function(){_mouseInAiZone=false;_scheduleLucaClose()});
+ zone.addEventListener('mouseleave',function(e){
+  // 鼠标往浏览器窗口外移不收起
+  if(!e.relatedTarget)return;
+  _mouseInAiZone=false;_scheduleLucaClose()
+ });
  popup.addEventListener('mouseenter',function(){_mouseInAiZone=true;clearTimeout(_lucaPopupCloseTimer)});
   popup.addEventListener('mouseleave',function(e){if(e.relatedTarget&&zone.contains(e.relatedTarget))return;_mouseInAiZone=false;_scheduleLucaClose()});
  input.addEventListener('focus',function(){openLucaPopup()});
@@ -6159,8 +6283,12 @@ var _lucaGripDragging=false;
  document.addEventListener('mousemove',function(e){
   if(!_lucaGripDragging)return;
   var delta=startY-e.clientY;
-  var nh=Math.max(120,Math.min(startH+delta,window.innerHeight*0.85));
+  // 死限位：弹出窗口顶部不能越过顶栏下边界（38px）
+  var zone=$('aiInputZone');
+  var maxAllowed=zone?zone.getBoundingClientRect().top-38:window.innerHeight*0.85;
+  var nh=Math.max(120,Math.min(startH+delta,maxAllowed));
   popup.style.maxHeight=nh+'px';
+  _clampHistoryHeight();
  });
  document.addEventListener('mouseup',function(){
   if(!_lucaGripDragging)return;
