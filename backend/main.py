@@ -2914,20 +2914,6 @@ class Handler(BaseHTTPRequestHandler):
             models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
             self.json_resp(200, {'path': os.path.abspath(models_dir)}); return
 
-        if path == '/api/local-llm/open-models-dir':
-            models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
-            os.makedirs(models_dir, exist_ok=True)
-            try:
-                if sys.platform == 'win32':
-                    os.startfile(models_dir)
-                elif sys.platform == 'darwin':
-                    subprocess.run(['open', models_dir], check=False)
-                else:
-                    subprocess.run(['xdg-open', models_dir], check=False)
-                self.json_resp(200, {'ok': True}); return
-            except Exception as e:
-                self.json_resp(500, {'error': str(e)}); return
-
 
         # 浏览器控制 API
         if path == '/api/browser/status':
@@ -5665,6 +5651,20 @@ class Handler(BaseHTTPRequestHandler):
             _DOWNLOAD_STOP_FLAG = True
             _download_set(status='idle', progress=0)
             self.json_resp(200, {'ok': True}); return
+
+        if path == '/api/local-llm/open-models-dir':
+            models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+            os.makedirs(models_dir, exist_ok=True)
+            try:
+                if sys.platform == 'win32':
+                    os.startfile(models_dir)
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', models_dir], check=False)
+                else:
+                    subprocess.run(['xdg-open', models_dir], check=False)
+                self.json_resp(200, {'ok': True}); return
+            except Exception as e:
+                self.json_resp(500, {'error': str(e)}); return
 
         if path == '/api/chat-session/create':
             _migrate_global_to_sessions()
