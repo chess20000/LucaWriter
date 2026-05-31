@@ -242,7 +242,7 @@ rm usrdata/users.json
 
 ## 版本
 
-当前版本：**v1.2.3**（查看 [CHANGELOG.md](CHANGELOG.md) 获取完整版本历史）
+当前版本：**v1.2.2**（查看 [CHANGELOG.md](CHANGELOG.md) 获取完整版本历史）
 
 ## 许可证
 
