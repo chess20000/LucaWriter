@@ -174,8 +174,8 @@ lucawriter/
 │   ├── preload.js          # 安全预加载脚本
 │   ├── package.json        # 打包配置
 │   └── build-venv/         # 构建用 Python 虚拟环境
-├── landing/                # 项目主页（可静态托管至 Cloudflare Pages）
-│   └── index.html          # 响应式 landing page
+├── landing/                # 项目宣传网站（与软件本体无关，可以删掉）
+│   └── index.html          # 网站页面（即lucawriter.fun）
 ├── local_llm/              # 本地模型（可选，需自行放置 llama-server 和 GGUF）
 ├── builtin/                # 内置资源
 ├── usrdata/                # 用户数据（运行时自动生成）
@@ -199,6 +199,8 @@ lucawriter/
 
 ### 初始化（清空所有数据）
 
+清空usrdata文件夹即可。
+
 ```bash
 rm -rf usrdata/*
 ```
@@ -210,7 +212,7 @@ rm -rf usrdata/*
 rm usrdata/users.json
 ```
 
-重置密码不影响书籍数据。LucaWriter 是本地单机应用，对数据文件的物理访问即代表最高权限。
+重置密码不影响书籍数据。
 
 ## 开发
 
