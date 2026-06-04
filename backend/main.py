@@ -757,6 +757,129 @@ def _clean_ai_text(text):
     return _strip_md_tables(re.sub(r'[#*`~]', '', text))
 
 
+_THEME_TAG_RE = re.compile(r'\[THEME\]\s*(.*?)\s*\[/THEME\]', re.S | re.I)
+_THEME_LOOSE_TAG_RE = re.compile(r'\[THEME\]\s*([^\r\n\[]+)', re.I)
+_THEME_REQUEST_RE = re.compile(r'(UI|界面|配色|换肤|色系|色调|主题色|生成主题|换个主题|推荐颜色|推荐配色)', re.I)
+
+
+def _is_dark_theme_hex(value):
+    s = (value or '').strip().lstrip('#').upper()
+    return len(s) == 6 and all(ch in '0123456789ABCDEF' for ch in s) and all(ch in '0123' for ch in s)
+
+
+def _is_bright_theme_hex(value):
+    s = (value or '').strip().lstrip('#').upper()
+    return len(s) == 6 and all(ch in '0123456789ABCDEF' for ch in s) and all(ch in '9ABCDEF' for ch in s)
+
+
+def _clean_theme_name(name):
+    name = (name or '').strip().strip(' "\'“”‘’「」『』')
+    if not name or '#' in name or '[' in name or ']' in name:
+        return 'AI 生成主题'
+    return name[:24]
+
+
+def _parse_theme_payload(raw):
+    raw = (raw or '').strip()
+    if not raw:
+        return None
+    norm = raw.replace('，', ',').replace('；', ',').replace('：', ':').replace('｜', '|').replace('＝', '=')
+    spec, name = (norm.split('|', 1) + [''])[:2] if '|' in norm else (norm, '')
+    colors = {}
+    patterns = {
+        'bg': r'(?:^|[\s,{;])(?:bg|background|page_bg|背景色|页面背景)\s*[:=]\s*(#[0-9A-Fa-f]{6})',
+        'accent': r'(?:^|[\s,{;])(?:accent|theme_accent|强调色|主题色|点缀色)\s*[:=]\s*(#[0-9A-Fa-f]{6})',
+    }
+    for key, pattern in patterns.items():
+        m = re.search(pattern, spec, re.I)
+        if m:
+            colors[key] = m.group(1).upper()
+    if len(colors) < 2:
+        for part in re.split(r'[,;\n]+', spec):
+            if ':' not in part and '=' not in part:
+                continue
+            sep = ':' if ':' in part else '='
+            k, v = part.split(sep, 1)
+            k = k.strip().lower()
+            v = v.strip()
+            if k in ('bg', 'background', 'page_bg', '背景色', '页面背景') and re.match(r'^#[0-9A-Fa-f]{6}$', v):
+                colors['bg'] = v.upper()
+            elif k in ('accent', 'theme_accent', '强调色', '主题色', '点缀色') and re.match(r'^#[0-9A-Fa-f]{6}$', v):
+                colors['accent'] = v.upper()
+    if len(colors) >= 2:
+        return {'name': _clean_theme_name(name), 'colors': {'bg': colors['bg'], 'accent': colors['accent']}}
+    return None
+
+
+def _extract_theme_data_list(text, allow_hex_fallback=False, max_items=2):
+    text = text or ''
+    out = []
+    seen = set()
+    for m in _THEME_TAG_RE.finditer(text):
+        td = _parse_theme_payload(m.group(1))
+        if not td:
+            continue
+        key = (td['colors'].get('bg'), td['colors'].get('accent'))
+        if key not in seen:
+            seen.add(key)
+            out.append(td)
+        if len(out) >= max_items:
+            return out
+    if not out:
+        for m in _THEME_LOOSE_TAG_RE.finditer(text):
+            td = _parse_theme_payload(m.group(1))
+            if not td:
+                continue
+            key = (td['colors'].get('bg'), td['colors'].get('accent'))
+            if key not in seen:
+                seen.add(key)
+                out.append(td)
+            if len(out) >= max_items:
+                return out
+    if out or not allow_hex_fallback:
+        return out
+
+    hexes = [(m.group(0).upper(), m.start()) for m in re.finditer(r'#[0-9A-Fa-f]{6}', text)]
+    for i, (bg, bg_pos) in enumerate(hexes):
+        if not _is_dark_theme_hex(bg):
+            continue
+        for accent, accent_pos in hexes[i + 1:]:
+            if accent_pos - bg_pos > 700:
+                break
+            if not _is_bright_theme_hex(accent):
+                continue
+            window = text[max(0, bg_pos - 140):min(len(text), accent_pos + 180)]
+            names = [n for n in re.findall(r'[“"「『]([^“”"「」『』#\[\]]{2,18})[”"」』]', window) if 'THEME' not in n.upper()]
+            td = {'name': _clean_theme_name(names[-1] if names else 'AI 生成主题'), 'colors': {'bg': bg, 'accent': accent}}
+            key = (bg, accent)
+            if key not in seen:
+                seen.add(key)
+                out.append(td)
+            break
+        if len(out) >= max_items:
+            break
+    return out
+
+
+_FALLBACK_THEME_PALETTES = [
+    ('玫瑰之夜', '#031122', '#F9AACC'),
+    ('琥珀深海', '#102033', '#FFCC99'),
+    ('苔光夜庭', '#221130', '#CCFFAA'),
+    ('雾蓝铜灯', '#302211', '#99DDEE'),
+    ('银紫暗潮', '#112233', '#EEC9FF'),
+]
+
+
+def _fallback_theme_data_list(seed_text, max_items=2):
+    seed = hashlib.sha256((seed_text or 'theme').encode('utf-8', errors='ignore')).hexdigest()
+    start = int(seed[:8], 16) % len(_FALLBACK_THEME_PALETTES)
+    out = []
+    for i in range(min(max_items, len(_FALLBACK_THEME_PALETTES))):
+        name, bg, accent = _FALLBACK_THEME_PALETTES[(start + i) % len(_FALLBACK_THEME_PALETTES)]
+        out.append({'name': name, 'colors': {'bg': bg, 'accent': accent}})
+    return out
+
+
 def _resolve_chapter_id(raw_id, chapter_order):
     """解析 AI 给的 chapter_id。AI 经常把'第N章'的 N 当 ID，做兜底映射。
     返回真实存在于 chapter_order 中的 ID，找不到返回 None。
@@ -4277,6 +4400,17 @@ class Handler(BaseHTTPRequestHandler):
 如果你无法确定具体字段，或用户纠正的是一段话的整体理解、时间线关系、叙事视角、倒叙/插叙、复杂因果，请优先使用[REREAD_KB]局部重读。
 工具标签写完后，必须用一句话明确问作者："要不要更新到知识库里？"或"这样改对吗？"——不要假设作者默认同意，也不要只说"我记住了"。
 
+【主题生成】
+你还可以为用户生成配色主题。当用户要求你"生成主题""换个配色""推荐颜色"或类似意思时，你可以输出一个或多个主题。
+- 调用格式：[THEME]bg:背景色,accent:强调色|主题名[/THEME]
+- 示例：[THEME]bg:#031122,accent:#F9AACC|玫瑰之夜[/THEME]
+- 颜色值必须为 6 位十六进制（#RRGGBB），bg=背景色，accent=主题色/强调色
+- 约束：
+  - bg（背景色）：每个十六进制位（R、G、B 各两位）必须 ≤ 3，即颜色很暗深，只能从 #000000 到 #333333 之间选
+  - accent（强调色）：每个十六进制位（R、G、B 各两位）必须 ≥ 9，即颜色很亮，只能从 #999999 到 #FFFFFF 之间选
+- 你一次可以输出多个主题（多个[THEME]标签），让用户选择
+- 注意：只输出 bg 和 accent 两色即可，surface 等派生色由前端自动计算
+
 【灵感备忘】
 你可以读取并添加"灵感备忘"。灵感列表详见文末附录。
 当用户让你记下一个灵感，或你判断某个创作想法值得暂存时，可以写入新条目。
@@ -4406,7 +4540,7 @@ class Handler(BaseHTTPRequestHandler):
                         elif r_norm and (f_norm.startswith(r_norm) or c_norm.startswith(r_norm)):
                             full_text = full_text[len(r_norm):].strip()
                         
-                        if not full_text and reasoning_text:
+                        if not (full_text or '').strip() and reasoning_text:
                             if re.search(r'^(用户让我|我需要调用|我应该调用|让我来查|我需要搜索|我需要查询|系统会帮我|我来调用)', reasoning_text.strip()):
                                 full_text = '（我整理了一下思路，但还没得出完整结论，请换个说法再试。）'
                             else:
@@ -4776,30 +4910,27 @@ class Handler(BaseHTTPRequestHandler):
 
                         # [THEME] 主题生成（仅两色：bg + accent，surface 由 bg 自动派生）
                         theme_data = None
-                        theme_data_list = []
-                        for m_theme in re.finditer(r'\[THEME\]\s*(.*?)\s*\[/THEME\]', result, re.S):
-                            try:
-                                raw = m_theme.group(1).strip()
-                                parts = raw.split('|', 1)
-                                name = parts[1].strip() if len(parts) > 1 else '自定义主题'
-                                colors = {}
-                                for pair in parts[0].split(','):
-                                    pair = pair.strip()
-                                    if ':' in pair:
-                                        k, v = pair.split(':', 1)
-                                        k = k.strip(); v = v.strip()
-                                        if k in ('bg', 'accent') and re.match(r'^#[0-9A-Fa-f]{6}$', v):
-                                            colors[k] = v.upper()
-                                if len(colors) >= 2:
-                                    td = {'name': name, 'colors': colors}
-                                    theme_data_list.append(td)
-                                    if tool_calls is None: tool_calls = []
-                                    tool_calls.append({'type': 'theme_gen', 'label': f'生成主题: {name}', 'status': 'done'})
-                            except:
-                                pass
+                        theme_data_list = _extract_theme_data_list(result)
+                        if not theme_data_list and _THEME_REQUEST_RE.search(user_text or ''):
+                            theme_data_list = _extract_theme_data_list(result, allow_hex_fallback=True)
+                            if not theme_data_list:
+                                theme_data_list = _extract_theme_data_list(''.join(reasoning_acc), allow_hex_fallback=True)
+                            if not theme_data_list:
+                                theme_data_list = _fallback_theme_data_list((user_text or '') + '\n' + (result or '') + '\n' + ''.join(reasoning_acc))
+                            if theme_data_list:
+                                result = '已生成主题。'
+                        if theme_data_list:
+                            if tool_calls is None: tool_calls = []
+                            for td in theme_data_list:
+                                tool_calls.append({'type': 'theme_gen', 'label': f'生成主题: {td.get("name") or "AI 生成主题"}', 'status': 'done'})
                         if theme_data_list:
                             theme_data = theme_data_list[0]  # 向后兼容
-                        result = re.sub(r'\[THEME\]\s*.*?\s*\[/THEME\]', '', result, flags=re.S).strip()
+                            if not result.strip():
+                                result = '已生成主题。'
+                        result = _THEME_TAG_RE.sub('', result).strip()
+                        result = _THEME_LOOSE_TAG_RE.sub('', result).strip()
+                        if theme_data_list and not result.strip():
+                            result = '已生成主题。'
                         # 清理已废弃的工具标记（后端不再执行这些工具，但 AI 可能仍输出）
                         result = re.sub(r'\[FETCH_URL\].*?\[/FETCH_URL\]', '', result, flags=re.S).strip()
                         result = re.sub(r'\[SEARCH\].*?\[/SEARCH\]', '', result, flags=re.S).strip()
@@ -7903,10 +8034,17 @@ def _start_local_llm():
         open(log_path, 'w').close()
         open(stderr_path, 'w').close()
         strategy = _load_local_strategy()
+        # 从当前激活预设读取用户设定的上下文长度
+        settings = get_settings()
+        presets = settings.get('provider_presets', [])
+        idx = settings.get('active_provider_idx', 0)
+        ctx_len = 65536
+        if presets and 0 <= idx < len(presets):
+            ctx_len = int(presets[idx].get('context_length', 0) or 65536)
         # 同步 provider preset 的 base_url 到真实端口（避免 settings 里显示旧端口）
         _sync_local_provider_url(_get_local_llm_port())
         # 使用 --log-file 让 llama-server 自己管理日志文件（避免 Windows stdout 缓冲问题）
-        cmd = [exe, '-m', _LOCAL_LLM_MODEL, '--log-file', log_path, '--log-colors', 'off'] + _build_llm_args(strategy)
+        cmd = [exe, '-m', _LOCAL_LLM_MODEL, '--log-file', log_path, '--log-colors', 'off'] + _build_llm_args(strategy, context_length=ctx_len)
         stderr_fp = open(stderr_path, 'a', encoding='utf-8', errors='ignore')
         try:
             _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR,
@@ -8183,15 +8321,16 @@ def _load_local_strategy():
     return strategy
 
 
-def _build_llm_args(strategy):
+def _build_llm_args(strategy, context_length=65536):
     """根据策略构建 llama-server 命令行参数（不含 exe 和模型路径）。
     LOCAL_MODEL_DESIGN.md "启动参数" 一节的实现。"""
     s = strategy or {}
     cpu_t = int(s.get('cpu_threads') or 4)
+    ctx = max(1024, int(context_length or 65536))
     args = [
         '--host', '127.0.0.1',
         '--port', str(_get_local_llm_port()),
-        '-c', '65536',
+        '-c', str(ctx),
         '-fa', 'auto',
         # K cache 用 q8_0
         '-ctk', 'q8_0',

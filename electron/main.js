@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, Menu, dialog, ipcMain, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, BrowserView, Menu, dialog, ipcMain, Tray, nativeImage, screen } = require('electron');
 const { spawn } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
@@ -8,6 +8,7 @@ const http = require('http');
 let pyProc = null;
 let mainWindow = null;
 let browserCtrlWindow = null;
+let _windowZoomed = false;  // track zoom state manually because frame:false maximize() fills behind taskbar
 let browserTabs = {};       // { tabId: { view: BrowserView, title: str, url: str, cdpTargetId: str } }
 let browserActiveTab = null;
 let browserTabSeq = 0;
@@ -262,9 +263,38 @@ function destroyTray() {
   }
 }
 
+// Frameless window (frame:false) on Windows maximize() fills entire screen including taskbar area.
+// Use workArea bounds instead to keep content above the taskbar.
+var _preZoomBounds = null;
+function maximizeToWorkArea() {
+  if (!mainWindow) return;
+  try {
+    _preZoomBounds = mainWindow.getBounds();
+    var wa = screen.getPrimaryDisplay().workArea;
+    mainWindow.setBounds(wa);
+    _windowZoomed = true;
+    notifyWindowZoomState();
+  } catch (e) {
+    mainWindow.maximize();
+    _windowZoomed = true;
+  }
+}
+function unzoomWindow() {
+  if (!mainWindow) return;
+  if (_preZoomBounds) {
+    mainWindow.setBounds(_preZoomBounds);
+    _preZoomBounds = null;
+  } else {
+    mainWindow.setBounds({ width: 1200, height: 800 });
+  }
+  _windowZoomed = false;
+  notifyWindowZoomState();
+}
+
 function isMainWindowZoomed() {
   if (!mainWindow) return false;
-  return process.platform === 'darwin' ? mainWindow.isFullScreen() : mainWindow.isMaximized();
+  if (process.platform === 'darwin') return mainWindow.isFullScreen();
+  return _windowZoomed;
 }
 
 function notifyWindowZoomState() {
@@ -281,10 +311,10 @@ ipcMain.on('window-maximize', function() {
   if (mainWindow) {
     if (process.platform === 'darwin') {
       mainWindow.setFullScreen(!mainWindow.isFullScreen());
-    } else if (mainWindow.isMaximized()) {
-      mainWindow.unmaximize();
+    } else if (_windowZoomed) {
+      unzoomWindow();
     } else {
-      mainWindow.maximize();
+      maximizeToWorkArea();
     }
   }
 });
@@ -325,7 +355,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'loading.html'));
-  mainWindow.maximize();
+  maximizeToWorkArea();
   mainWindow.show();
 
   mainWindow.on('maximize', notifyWindowZoomState);

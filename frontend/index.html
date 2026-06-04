@@ -85,7 +85,7 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 button,input,textarea,select{font-family:inherit}
 html,body{height:100%;overflow:hidden}
-body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-webkit-font-smoothing:antialiased;min-height:100%;overflow:hidden;font-size:var(--content-font-size)}
+body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-webkit-font-smoothing:antialiased;overflow:hidden;font-size:var(--content-font-size)}
 ::selection{background:var(--t3);color:#fff}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:var(--r1)}::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-hover)}
 
@@ -161,7 +161,7 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 body.electron .topbar{-webkit-app-region:drag}
 body.electron.electron-platform-win32 .topbar{padding-right:138px}
 body.electron.electron-platform-darwin .topbar{padding-left:78px;padding-right:12px}
-body.electron .topbar-location,body.electron .topbar-status,body.electron .topbar-actions,body.electron .task-queue-wrap,body.electron .topbar-btn,body.electron .topbar-back,body.electron .win-controls{margin-top:0;-webkit-app-region:no-drag}
+body.electron .topbar-location,body.electron .topbar-status,body.electron .topbar-actions,body.electron .task-queue-wrap,body.electron .topbar-btn,body.electron .topbar-back,body.electron .topbar-chapter-slot,body.electron .topbar-ch-title,body.electron .win-controls{margin-top:0;-webkit-app-region:no-drag}
 /* device name bar - subtle slide-down */
 .device-name-bar{position:fixed;top:0;left:0;right:0;height:36px;background:var(--surface);border-bottom:1px solid var(--panel-border);display:flex;align-items:center;gap:6px;padding:0 14px;z-index:50;transform:translateY(-100%);transition:0s}
 .device-name-bar.show{transform:translateY(0)}
@@ -404,6 +404,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .theme-card .th-name{font-weight:600;color:var(--t1);margin-bottom:4px}
 .theme-card .th-swatches{display:flex;gap:6px;margin:6px 0}
 .theme-card .th-swatch{width:28px;height:28px;border-radius:var(--r1);border:1.5px solid var(--border)}
+#aiThemeSwatches .th-swatch{width:28px;height:28px;border-radius:var(--r1);border:1.5px solid var(--border)}
 .theme-card .th-apply{padding:3px 10px;border-radius:var(--r1);font-size:10px;font-weight:600;cursor:pointer;background:var(--accent-a12);border:1px solid var(--accent-a20);color:var(--accent);transition:0s}
 .theme-card .th-apply:hover{background:var(--accent-a25)}
 .theme-card .th-apply.th-undo{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
@@ -466,6 +467,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .bottom-tabs-wrap:not(.flyout-mode) .bottom-tabs-inline{display:flex}
 
 #aiInputZone{width:280px;flex:none;display:flex;align-items:stretch;margin-left:0;position:relative;overflow:visible}
+.bottom-panel:not(.collapsed) #aiInputZone{display:none!important}
 .luca-popup{position:absolute;bottom:100%;left:0;right:0;max-height:50vh;display:none;flex-direction:column;background:rgba(30,30,30,.45);backdrop-filter:blur(12px) saturate(130%);-webkit-backdrop-filter:blur(12px) saturate(130%);border:none;border-radius:var(--r2) var(--r2) 0 0;overflow:hidden;z-index:calc(var(--z-chapter-overlay) + 10)}
 [data-theme-mode="light"] .luca-popup{background:rgba(245,245,245,.5)}
 .luca-popup.open{display:flex}
@@ -1435,6 +1437,14 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
   <div class="mg" style="margin-top:16px"><label style="font-weight:700;color:var(--accent)">自定义颜色</label></div>
    <div class="mg"><label>页面背景</label><div class="lw-cp-wrap" id="cpPageBg" data-var="--bg" data-key="page_bg"></div></div>
    <div class="mg"><label>强调色</label><div class="lw-cp-wrap" id="cpAccent" data-var="--accent" data-key="accent"></div></div>
+   <div class="mg" style="margin-top:16px">
+    <button class="topbar-btn accent" id="aiThemeGenBtn" onclick="aiGenerateTheme()" style="width:100%">✨ AI 生成主题</button>
+   </div>
+   <div id="aiThemeResult" style="display:none;margin-top:8px;padding:8px 10px;background:var(--surface2);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5">
+    <div style="font-weight:600;color:var(--t1);margin-bottom:4px">🎨 已生成主题</div>
+    <div class="th-swatches" id="aiThemeSwatches" style="display:flex;gap:6px;margin:6px 0"></div>
+    <button class="th-apply th-undo" id="aiThemeUndoBtn" onclick="undoAIGeneratedTheme()" style="width:100%;text-align:center">撤销</button>
+   </div>
 </div>
 <div class="ma">
  <button class="prompt-cancel" onclick="saveSettings();closeModal('settingsModal')">关闭设置</button>
@@ -1640,8 +1650,9 @@ var currentChatSessionId='';
 var chatSessionList=[];
 var currentChapter=null;
 var currentBottomTab='summary';
-function _appHeight(){var a=$('app'),tb=$('topbar');var tbh=tb?tb.offsetHeight:38;return(a?a.clientHeight:window.innerHeight)-tbh}
+function _appHeight(){var tb=$('topbar');var tbh=tb?tb.offsetHeight:38;return window.innerHeight-tbh}
 function _syncBpMaxHeight(){var a=$('app');if(a)a.style.setProperty('--bp-max-h',_appHeight()+'px')}
+function _onWindowResize(){scheduleChapterSidebarWidthSync();var panel=$('bottomPanel');if(!panel||panel.classList.contains('collapsed'))return;var maxH=_appHeight();var curH=panel.offsetHeight;if(curH>maxH){panel.style.height=maxH+'px';bottomPanelHeight=maxH;savedBottomPanelHeight=maxH;localStorage.setItem('lw_bottom_panel_h',maxH);_syncSidebarBottom(maxH)}}
 var bottomPanelOpen=false;
 var _collapseTimer=null;
 var bottomPanelHeight=_appHeight();
@@ -1676,6 +1687,18 @@ var _lastNavPoint=null;
 
 document.addEventListener('pointerdown',function(e){
  _lastNavPoint={x:e.clientX,y:e.clientY,t:Date.now()};
+},true);
+
+// 全局点击聚焦安全网：某些情况下（如 Electron -webkit-app-region 干扰、DOM 重渲染竞态），
+// 点击 input/textarea 后浏览器可能不自动给予焦点。此 handler 在捕获阶段主动聚焦被点击的输入元素。
+document.addEventListener('mousedown',function(e){
+ var target=e.target;
+ if(target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA')&&document.activeElement!==target){
+  // 避免在拖拽手柄、滚动条等场景误聚焦
+  if(!target.disabled&&!target.readOnly){
+   target.focus();
+  }
+ }
 },true);
 
 /* === AI 活跃连接指示 === */
@@ -1908,7 +1931,7 @@ function setWritingViewActive(on){
  }
 }
 
-function init(){initAllCS();loadSettings();loadThemedIcon();_startAIActivity();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();window.addEventListener('resize',scheduleChapterSidebarWidthSync);document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
+function init(){initAllCS();loadSettings();loadThemedIcon();_startAIActivity();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();window.addEventListener('resize',_onWindowResize);document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
 
 function setupModals(){
  document.querySelectorAll('.modal-bg,.confirm-bg,.prompt-bg').forEach(function(bg){
@@ -2575,14 +2598,14 @@ function loadAIMessages(){
 
 function _checkPendingChat(){
  var last=aiMessages[aiMessages.length-1];
- if(last&&last.type==='ai'&&last._pending&&last.task_id){
- _startChatPoll(last.task_id);
+ if(last&&last.type==='ai'&&last._pending&&(last.task_id||last._pollTid)){
+ _startChatPoll(last.task_id||last._pollTid);
  return;
  }
  for(var i=aiMessages.length-1;i>=0;i--){
  var m=aiMessages[i];
- if(m.type==='ai'&&m._pending&&m.task_id){
- _startChatPoll(m.task_id);
+ if(m.type==='ai'&&m._pending&&(m.task_id||m._pollTid)){
+ _startChatPoll(m.task_id||m._pollTid);
  return;
  }
  }
@@ -2597,6 +2620,9 @@ function _startChatPoll(taskId){
  if(!st||!st.status){_stopChatPoll();return;}
  if(st.status==='done'||st.status==='error'){
  _stopChatPoll();
+ // 如果消息已有 theme_data_list，说明 _doSendAI 已完成处理，不再覆盖
+ var msg=_startChatPoll_checkMsg(taskId);
+ if(msg&&msg.theme_data_list&&msg.theme_data_list.length){return;}
  if(st.status==='done'&&st.inspirations_changed){loadInspirations();}
  _flashAIResponse(st.status==='done'?st.result||'':'');
  loadAIMessages();
@@ -2652,6 +2678,13 @@ function _syncThinkingRotation(){
 }
 
 function _stopChatPoll(){if(_chatPollTimer){clearInterval(_chatPollTimer);_chatPollTimer=null;}}
+function _startChatPoll_checkMsg(taskId){
+ for(var i=aiMessages.length-1;i>=0;i--){
+  var m=aiMessages[i];
+  if(m.type==='ai'&&m._pending&&(m.task_id===taskId||!m.task_id))return m;
+ }
+ return null;
+}
 
 function saveAIMessages(){
  if(!currentChatSessionId)return;
@@ -2775,25 +2808,14 @@ function _appendAIMsgCards(c,m,d){
   kbShowProposalModal(m.kb_proposals);
   }
   }
-  // 旧版单主题（仅在无 theme_data_list 时渲染，避免重复）
-  if(m.type==='ai' && m.theme_data && !(m.theme_data_list && m.theme_data_list.length)){
-  var td=m.theme_data;
-  var card=document.createElement('div');
-  card.className='theme-card';
-  var colors=td.colors||{};
-  var swatches='';
-  if(colors.bg)swatches+='<div class="th-swatch" style="background:'+colors.bg+'" title="bg: '+colors.bg+'"></div>';
-  if(colors.accent)swatches+='<div class="th-swatch" style="background:'+colors.accent+'" title="accent: '+colors.accent+'"></div>';
-  var applied=(m._appliedThemeIdx===0);
-  card.innerHTML='<div class="th-name">🎨 '+esc(td.name||'新主题')+'</div><div class="th-swatches">'+swatches+'</div><button class="th-apply'+(applied?' th-undo':'')+'" onclick="applyThemeSuggestion(\''+esc(colors.bg||'')+'\',\''+esc(colors.accent||'')+'\',this)">'+(applied?'撤销':'应用')+'</button>';
-  c.appendChild(card);
-  }
-  // theme_data_list: 多主题支持（新）
-  if(m.type==='ai' && m.theme_data_list && m.theme_data_list.length){
-   m.theme_data_list.forEach(function(td,tdIdx){
-    var card=document.createElement('div');
-    card.className='theme-card';
-    var colors=td.colors||{};
+  // theme 渲染：AI 只生成候选主题，用户点击"应用"后才真正换色
+  var themeList=m.theme_data_list||(m.theme_data?[m.theme_data]:[]);
+  if(m.type==='ai' && themeList.length){
+   themeList.forEach(function(td,tdIdx){
+     var card=document.createElement('div');
+     card.className='theme-card';
+     card.setAttribute('data-theme-idx',tdIdx);
+     var colors=td.colors||{};
     var swatches='';
     if(colors.bg)swatches+='<div class="th-swatch" style="background:'+colors.bg+'" title="bg: '+colors.bg+'"></div>';
     if(colors.accent)swatches+='<div class="th-swatch" style="background:'+colors.accent+'" title="accent: '+colors.accent+'"></div>';
@@ -3112,6 +3134,13 @@ function _doSendAI(text){
 
  var msgIdx=aiMessages.length-1;
 
+ // 自动检测主题相关消息，注入 [THEME] 格式指令
+ var themeKeywords=/主题|配色|颜色|换肤|色系|色调/i;
+ if(themeKeywords.test(text) && !text.includes('[THEME]')){
+  text = text + '\n\n（请使用 [THEME]bg:背景色十六进制,accent:强调色十六进制|主题名[/THEME] 格式输出配色，不要只描述颜色。例如：[THEME]bg:#031122,accent:#F9AACC|玫瑰之夜[/THEME]）';
+ }
+ // 停止后台轮询，避免 _startChatPoll 的 loadAIMessages 覆盖本地更新
+ _stopChatPoll();
  // 
  api('POST','/api/book/'+bookId+'/comment',{text:text,history:history,session_id:currentChatSessionId},function(d,s){
  if(s!==200||!d.task_id){
@@ -3120,16 +3149,23 @@ function _doSendAI(text){
  return;
  }
  var tid=d.task_id;
-    // 把 task_id 记录到 pending 消息里，方便刷新后恢复
- var m=aiMessages[msgIdx];if(m)m.task_id=tid;
+    // 不设 task_id，避免 _checkPendingChat 启动第二个轮询覆盖 theme_data_list
+    // 任务完成后再补设 task_id 用于页面刷新恢复
+ var m=aiMessages[msgIdx];if(m)m._pollTid=tid;
  var pollTimer=setInterval(function(){
  api('GET','/api/book/'+bookId+'/task/status?task_id='+tid,undefined,function(st){
  if(!st||!st.status){clearInterval(pollTimer);return;}
  var m=aiMessages[msgIdx];
  if(st.status==='done'){
  clearInterval(pollTimer);
-  if(m){m._pending=false;m.pending_browse=null;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;m.kb_reread_started=st.kb_reread_started;m.inspirations_changed=st.inspirations_changed;m.kb_citations=st.kb_citations||[];m.kb_proposals=st.kb_proposals||[];m.theme_data=st.theme_data;m.theme_data_list=st.theme_data_list||(st.theme_data?[st.theme_data]:[]);}
+  if(m){m._pending=false;m.task_id=m._pollTid;m.pending_browse=null;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;m.kb_reread_started=st.kb_reread_started;m.inspirations_changed=st.inspirations_changed;m.kb_citations=st.kb_citations||[];m.kb_proposals=st.kb_proposals||[];m.theme_data=st.theme_data;m.theme_data_list=st.theme_data_list||(st.theme_data?[st.theme_data]:[]);}
+ if(st.theme_data_list&&st.theme_data_list.length){
+  var tb=$('aiThemeGenBtn');
+  if(tb){tb.disabled=false;tb.textContent='✨ AI 生成主题';}
+  toast('主题已生成，点击卡片应用','success');
+ }
  renderAIMessages();saveAIMessages();
+ // 后台轮询已由 _stopChatPoll 停止，无需重启（避免 loadAIMessages 覆盖本地 theme_data_list）
  _flashAIResponse(st.result||'');
  if(st.annotations_changed){loadAnnotations();}
  if(st.inspirations_changed){loadInspirations();}
@@ -3870,7 +3906,33 @@ function initColorPicker(wrap,settingKey,defaultColor){
 var _colorSettings={};
 var _colorSaveTimer=null;
 function _saveColorSettings(){
- api('POST','/api/settings',{custom_colors:_colorSettings},function(){});
+ var colors={};
+ var src=_colorSettings||{};
+ for(var k in src){if(Object.prototype.hasOwnProperty.call(src,k))colors[k]=src[k];}
+ _colorSettings=colors;
+ settings.custom_colors=colors;
+ api('POST','/api/settings',{custom_colors:colors},function(r,s){
+  if(s===200&&r){
+   settings=r;
+   providerPresets=r.provider_presets||providerPresets;
+   if(typeof r.active_provider_idx==='number')currentPresetIdx=r.active_provider_idx;
+  }
+ });
+}
+function _themeMessageElementFromCard(card){
+ var msgEl=card?card.previousElementSibling:null;
+ while(msgEl&&!msgEl.classList.contains('ai-msg'))msgEl=msgEl.previousElementSibling;
+ return msgEl||null;
+}
+function _themeCardsForCard(card){
+ var msgEl=_themeMessageElementFromCard(card);
+ var cards=[];
+ var node=msgEl?msgEl.nextElementSibling:null;
+ while(node&&!node.classList.contains('ai-msg')){
+  if(node.classList&&node.classList.contains('theme-card'))cards.push(node);
+  node=node.nextElementSibling;
+ }
+ return cards;
 }
 function applyThemeSuggestion(bg,accent,btnEl){
  // 判断当前是应用还是撤销：看按钮文字
@@ -3887,14 +3949,14 @@ function applyThemeSuggestion(bg,accent,btnEl){
    if(msg){msg._appliedThemeIdx=-1;msg._savedColors=null;saveAIMessages();}
   }
   // 刷新所有按钮为"应用"
-  if(btnEl){
-   var card=btnEl.closest('.theme-card');
-   if(card){
-    var container=card.parentElement;
-    var btns=container.querySelectorAll('.th-apply,.th-undo');
-    for(var i=0;i<btns.length;i++){btns[i].textContent='应用';btns[i].className='th-apply';}
+   if(btnEl){
+    var card=btnEl.closest('.theme-card');
+    var cards=_themeCardsForCard(card);
+    for(var i=0;i<cards.length;i++){
+     var b=cards[i].querySelector('.th-apply,.th-undo');
+     if(b){b.textContent='应用';b.className='th-apply';}
+    }
    }
-  }
   toast('已撤销主题','success');
   return;
  }
@@ -3937,25 +3999,22 @@ function applyThemeSuggestion(bg,accent,btnEl){
  if(btnEl){
   var msg=_findMsgFromBtn(btnEl);
   if(msg){
-   var card=btnEl.closest('.theme-card');
-   var tdIdx=-1;
-   if(card){
-    var container=card.parentElement;
-    var allCards=container.querySelectorAll('.theme-card');
-    for(var j=0;j<allCards.length;j++){if(allCards[j]===card){tdIdx=j;break;}}
-   }
+    var card=btnEl.closest('.theme-card');
+    var cards=card?_themeCardsForCard(card):[];
+    var tdIdx=card?parseInt(card.getAttribute('data-theme-idx')||'-1',10):-1;
+    if(isNaN(tdIdx)||tdIdx<0){
+     for(var j=0;j<cards.length;j++){if(cards[j]===card){tdIdx=j;break;}}
+    }
    msg._appliedThemeIdx=tdIdx;
    msg._savedColors=savedColors;
    saveAIMessages();
    // 刷新：当前按钮变"撤销"，其他变"应用"
-   if(card){
-    var container=card.parentElement;
-    var allCards=container.querySelectorAll('.theme-card');
-    for(var k=0;k<allCards.length;k++){
-     var b=allCards[k].querySelector('.th-apply,.th-undo');
-     if(b){
-      if(k===tdIdx){b.textContent='撤销';b.className='th-apply th-undo';}
-      else{b.textContent='应用';b.className='th-apply';}
+    if(card){
+     for(var k=0;k<cards.length;k++){
+      var b=cards[k].querySelector('.th-apply,.th-undo');
+      if(b){
+       if(k===tdIdx){b.textContent='撤销';b.className='th-apply th-undo';}
+       else{b.textContent='应用';b.className='th-apply';}
      }
     }
    }
@@ -3963,15 +4022,138 @@ function applyThemeSuggestion(bg,accent,btnEl){
  }
  toast('已应用主题','success');
 }
+
+// AI 生成主题 — 只生成候选主题，用户点击"应用"后才换色
+var _aiThemeSavedColors=null;
+function aiGenerateTheme(){
+ var btn=$('aiThemeGenBtn');
+ if(!btn||btn.disabled)return;
+ if(!bookId){toast('请先打开一本书','error');return;}
+ btn.disabled=true;btn.textContent='⏳ 正在生成…';
+ // 关闭设置弹窗，让用户看到 AI 回复
+ closeModal('settingsModal');
+ // 发送生成主题的消息
+ var aiInput=$('aiInput');
+ if(aiInput)setTimeout(function(){aiInput.focus()},100);
+ _doSendAI('请为我生成UI配色主题。你必须使用[THEME]标签格式输出，不要只描述颜色。\n\n示例：[THEME]bg:#031122,accent:#F9AACC|玫瑰之夜[/THEME]\n\n约束：bg必须深暗（每两位≤3），accent必须亮（每两位≥9）。一次输出1-2个主题。');
+ // 3 分钟后恢复按钮
+ setTimeout(function(){
+  var b=$('aiThemeGenBtn');
+  if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
+ },180000);
+}
+function _loadAiThemeUndoFromSettings(){
+ var cs=(_colorSettings&&Object.keys(_colorSettings).length)?_colorSettings:(settings.custom_colors||{});
+ if(cs._aiThemeUndoBg||cs._aiThemeUndoAccent){
+  _aiThemeSavedColors={};
+  if(cs._aiThemeUndoBg)_aiThemeSavedColors.page_bg=cs._aiThemeUndoBg;
+  if(cs._aiThemeUndoAccent)_aiThemeSavedColors.accent=cs._aiThemeUndoAccent;
+  _showAiThemeResultInSettings();
+ }
+}
+function _saveAiThemeUndoToSettings(){
+ var cs=_colorSettings||{};
+ cs._aiThemeUndoBg=_aiThemeSavedColors?.page_bg||'';
+ cs._aiThemeUndoAccent=_aiThemeSavedColors?.accent||'';
+ _saveColorSettings();
+}
+function _clearAiThemeUndoFromSettings(){
+ var cs=_colorSettings||{};
+ delete cs._aiThemeUndoBg;
+ delete cs._aiThemeUndoAccent;
+ _saveColorSettings();
+}
+function _showAiThemeResultInSettings(){
+ var r=$('aiThemeResult');
+ if(!r)return;
+ r.style.display='block';
+ var sw=$('aiThemeSwatches');
+ if(sw){
+  sw.innerHTML='';
+  if(_aiThemeSavedColors?.page_bg)sw.innerHTML+='<div class="th-swatch" style="background:'+_aiThemeSavedColors.page_bg+'" title="bg: '+_aiThemeSavedColors.page_bg+'"></div>';
+  if(_aiThemeSavedColors?.accent)sw.innerHTML+='<div class="th-swatch" style="background:'+_aiThemeSavedColors.accent+'" title="accent: '+_aiThemeSavedColors.accent+'"></div>';
+ }
+ var b=$('aiThemeGenBtn');
+ if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
+}
+function undoAIGeneratedTheme(){
+ if(!_aiThemeSavedColors)return;
+ if(_aiThemeSavedColors.page_bg)_cpApplyColor(_aiThemeSavedColors.page_bg,'--bg');
+ if(_aiThemeSavedColors.accent)_cpApplyColor(_aiThemeSavedColors.accent,'--accent');
+ _colorSettings={};
+ if(_aiThemeSavedColors.page_bg)_colorSettings.page_bg=_aiThemeSavedColors.page_bg;
+ if(_aiThemeSavedColors.accent)_colorSettings.accent=_aiThemeSavedColors.accent;
+ _saveColorSettings();
+ _clearAiThemeUndoFromSettings();
+ // 更新颜色选择器
+ var picks=document.querySelectorAll('.lw-cp-wrap');
+ for(var i=0;i<picks.length;i++){
+  var w=picks[i];
+  var key=w.getAttribute('data-key');
+  if(key&&_aiThemeSavedColors[key]){
+   var inp=w.querySelector('.lw-cp-hex');
+   if(inp)inp.value=_aiThemeSavedColors[key];
+   var prev=w.querySelector('.lw-cp-preview');
+   if(prev)prev.style.background=_aiThemeSavedColors[key];
+  }
+ }
+ // 隐藏结果区
+ var r=$('aiThemeResult');
+ if(r)r.style.display='none';
+ var b=$('aiThemeGenBtn');
+ if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
+ _aiThemeSavedColors=null;
+ toast('已撤销主题颜色','success');
+ // 重新渲染 AI 消息（恢复"应用"按钮）
+ renderAIMessages();
+}
+function _autoApplyTheme(themeDataList){
+ if(!themeDataList||!themeDataList.length)return;
+ var td=themeDataList[0];
+ var colors=td.colors||{};
+ if(!colors.bg&&!colors.accent)return;
+ // 保存当前颜色用于撤销（跟 applyThemeSuggestion 完全一致）
+ if(!_aiThemeSavedColors){
+  var saved={};
+  var cs=_colorSettings||{};
+  if(cs.page_bg)saved.page_bg=cs.page_bg;
+  if(cs.accent)saved.accent=cs.accent;
+  if(!saved.page_bg){
+   var root=document.documentElement;
+   var cb=root.style.getPropertyValue('--bg')||getComputedStyle(root).getPropertyValue('--bg');
+   if(cb&&cb.trim())saved.page_bg=cb.trim();
+  }
+  if(!saved.accent){
+   var root=document.documentElement;
+   var ca=root.style.getPropertyValue('--accent')||getComputedStyle(root).getPropertyValue('--accent');
+   if(ca&&ca.trim())saved.accent=ca.trim();
+  }
+  _aiThemeSavedColors=saved;
+ }
+ // 直接调用 applyThemeSuggestion 来应用颜色（跟手动点击"应用"按钮完全一样）
+ applyThemeSuggestion(colors.bg, colors.accent, null);
+ // 在设置弹窗中显示结果
+ var r=$('aiThemeResult');
+ if(r){
+  r.style.display='block';
+  var sw=$('aiThemeSwatches');
+  if(sw){
+   sw.innerHTML='';
+   if(colors.bg)sw.innerHTML+='<div class="th-swatch" style="background:'+colors.bg+'" title="bg: '+colors.bg+'"></div>';
+   if(colors.accent)sw.innerHTML+='<div class="th-swatch" style="background:'+colors.accent+'" title="accent: '+colors.accent+'"></div>';
+  }
+ }
+ _saveAiThemeUndoToSettings();
+ var b=$('aiThemeGenBtn');
+ if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
+ }
+
 function _findMsgFromBtn(btnEl){
  // 从按钮找到所属的 ai-msg 元素，再找到 aiMessages 中的消息对象
  if(!btnEl)return null;
  var card=btnEl.closest('.theme-card');
  if(!card)return null;
- // DOM 顺序：ai-msg → theme-card1 → theme-card2 → ... → 下一个 ai-msg
- // 向前找到最近的 ai-msg
- var msgEl=card.previousElementSibling;
- while(msgEl&&!msgEl.classList.contains('ai-msg'))msgEl=msgEl.previousElementSibling;
+ var msgEl=_themeMessageElementFromCard(card);
  if(msgEl){
   var idx=parseInt(msgEl.dataset.idx);
   if(idx>=0&&idx<aiMessages.length)return aiMessages[idx];
@@ -4052,6 +4234,8 @@ function openSettings(){
   // init color pickers once
   if(!$('cpPageBg').querySelector('.lw-cp-sv'))initColorPicker($('cpPageBg'),'page_bg','#191919');
    if(!$('cpAccent').querySelector('.lw-cp-sv'))initColorPicker($('cpAccent'),'accent','#d6d6d3');
+  // 恢复 AI 生成主题的撤销状态
+  _loadAiThemeUndoFromSettings();
   // 获取检测到的本地模型名 + 硬件能力检测（决定推荐档位）
   api('GET','/api/local-llm/detected-model',undefined,function(d,s){
     var modelDetected=(s===200&&d.model);
@@ -4151,8 +4335,6 @@ function useProvider(idx,done,opts){
  opts=opts||{};
  if(idx<0||idx>=providerPresets.length)return;
  if(idx===currentPresetIdx)return;
- // 保存当前正在编辑的预设字段到本地数组
- try{saveFormToPreset(currentPresetIdx);}catch(e){}
  // 立刻更新 UI
  currentPresetIdx=idx;
  _selectedPresetIdx=idx;
@@ -4171,6 +4353,7 @@ function useProvider(idx,done,opts){
 function useLocalLLM(){
  var idx=_findLocalLLMIdx();
  if(idx<0){toast('未找到本地 Llama.cpp 预设','error');return;}
+ try{saveFormToPreset(currentPresetIdx);}catch(e){}
  useProvider(idx);
 }
 
@@ -4494,6 +4677,7 @@ function toggleLocalLLM(){
  var localIdx=_findLocalLLMIdx();
  var activeIdx=(settings&&typeof settings.active_provider_idx==='number')?settings.active_provider_idx:-1;
  if(localIdx>=0&&activeIdx!==localIdx){
+  try{saveFormToPreset(currentPresetIdx);}catch(e){}
   useProvider(localIdx,function(ok){
    if(ok){_startLocalLLMRequest(tbtn);}
    else{tbtn.disabled=false;refreshLocalLLMProgress();}
@@ -4538,10 +4722,14 @@ function _refreshApplyBtn(){
  btn.classList.toggle('visible',show);
 }
 
+ function _isIdxLocalPreset(idx){
+  var p=providerPresets[idx];
+  return !!(p && p.name && p.name.toLowerCase().indexOf('llama.cpp')>=0);
+ }
  function loadPresetToForm(idx){
   var p=providerPresets[idx];
   if(!p)return;
-  if(isLocalPreset()){
+  if(_isIdxLocalPreset(idx)){
   // URL 由后端 _sync_local_provider_url 在 _start_local_llm 时自动写入，前端只读
   $('sUrl').value=p.base_url||'http://127.0.0.1:?/v1';
   $('sUrl').readOnly=true;
@@ -4574,7 +4762,7 @@ function _refreshApplyBtn(){
 function saveFormToPreset(idx){
   var p=providerPresets[idx];
   if(!p)return;
-  if(isLocalPreset()){
+  if(_isIdxLocalPreset(idx)){
   p.base_url=$('sUrl').value||p.base_url||'';
   p.api_key='';
   p.use_custom_json=false;
@@ -4670,6 +4858,15 @@ function applyZoom(z,btn){
 function switchSTab(btn,id){btn.parentElement.querySelectorAll('.tab-b').forEach(function(b){b.classList.remove('active')});btn.classList.add('active');btn.closest('.modal').querySelectorAll('[id^="st"]').forEach(function(t){t.style.display='none'});$(id).style.display='block'}
 
 var _settingsAutosaveTimer=null;
+function _saveApiKeyImmediate(){
+ var keyEl=$('sKey');
+ if(!keyEl)return;
+ var p=providerPresets[_selectedPresetIdx];
+ if(!p)return;
+ p.api_key=keyEl.value;
+ clearTimeout(_settingsAutosaveTimer);
+ saveSettings({silent:true,autosave:true});
+}
 function scheduleSettingsAutosave(){
  clearTimeout(_settingsAutosaveTimer);
  _settingsAutosaveTimer=setTimeout(function(){saveSettings({silent:true,autosave:true})},350);
@@ -4683,11 +4880,24 @@ function setupSettingsAutosaveHandlers(){
   el.addEventListener('input',scheduleSettingsAutosave);
   el.addEventListener('change',scheduleSettingsAutosave);
  });
+ // API Key 输入框离开焦点时立即保存，避免点击"获取模型"或"应用"时因 350ms 防抖尚未触发而丢失
+ var keyEl=$('sKey');
+ if(keyEl)keyEl.addEventListener('blur',_saveApiKeyImmediate);
+ // 上下文长度变化时，如果是本地预设则关闭本地模型（下次启动会使用新值）
+ var ctxEl=$('sPresetCtxLen');
+ if(ctxEl)ctxEl.addEventListener('change',function(){
+  if(isLocalPreset()){
+   fetch('/api/local-llm/stop',{method:'POST'}).catch(function(e){console.error('stop local llm error',e)});
+  }
+ });
 }
 
 function saveSettings(opts){
  opts=opts||{};
- saveFormToPreset(currentPresetIdx);
+ // 用 _selectedPresetIdx 而非 currentPresetIdx：当用户在设置弹窗中切换到另一个
+ // 预设但未点击"应用"时，表单显示的是 _selectedPresetIdx 的数据，用 currentPresetIdx
+ // 会误将新预设的数据存到旧预设上，导致旧预设的 api_key 被覆盖清空。
+ saveFormToPreset(_selectedPresetIdx);
  var oldScope=(settings.access_scope==='0.0.0.0')?'0.0.0.0':'127.0.0.1';
  var newScope=$('sAccessScope')?$('sAccessScope').value:'127.0.0.1';
  var d={

@@ -1,3 +1,23 @@
+# LucaWriter v1.2.3
+
+发布日期：2026-06-01
+
+## 🐛 通读崩溃修复
+
+- **修复 chromadb.api.rust 模块缺失**：PyInstaller 打包后通读时崩溃（`No module named 'chromadb.api.rust'`）。chromadb 通过 `importlib.import_module` 在运行时动态导入该模块，PyInstaller 静态分析检测不到。修复方案：源代码添加静态 import、`--hidden-import`、`--additional-hooks-dir` hook 完整子模块枚举、`find_chromadb_paths.py` 辅助脚本 + `--add-data` 强制包含 chromadb 和 chromadb_rust_bindings 原生二进制
+
+## 🛠 设置面板 UI 改进
+
+- **预设切换改为"选中+应用"模式**：点击 provider 块只选中（黄点），显示"✓ 应用"按钮，点击后才正式切换。避免误触导致当前表单内容丢失
+- **本地模型文件夹按钮**：设置面板内置模型区域新增 📂 按钮（`openLocalModelsDir`），点击打开 `local_llm/models/` 文件夹
+- **DeepSeek 预设默认上下文长度**：从 0 改为 1048576（1M tokens），匹配 deepseek-v4-flash 实际能力
+- **上下文长度占位符**：从"如 128000"改为"65536"，更贴近常见模型配置
+
+## 🔧 其他修复
+
+- **chromadb telemetry 配置修复**：使用 `_ChromaSettings` 构造函数显式禁用 telemetry，替代有副作用的 `os.environ` 方式
+- **gitignore 修复**：`builtin/` 目录下的内置书本不再被 `*LUCA_Legend*` 规则误排除
+
 # LucaWriter v1.1.0
 
 发布日期：2026-05-16
