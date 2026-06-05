@@ -84,6 +84,7 @@
  }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 button,input,textarea,select{font-family:inherit}
+input,textarea{-webkit-user-select:text;user-select:text}
 html,body{height:100%;overflow:hidden}
 body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-webkit-font-smoothing:antialiased;overflow:hidden;font-size:var(--content-font-size)}
 ::selection{background:var(--t3);color:#fff}
@@ -162,6 +163,20 @@ body.electron .topbar{-webkit-app-region:drag}
 body.electron.electron-platform-win32 .topbar{padding-right:138px}
 body.electron.electron-platform-darwin .topbar{padding-left:78px;padding-right:12px}
 body.electron .topbar-location,body.electron .topbar-status,body.electron .topbar-actions,body.electron .task-queue-wrap,body.electron .topbar-btn,body.electron .topbar-back,body.electron .topbar-chapter-slot,body.electron .topbar-ch-title,body.electron .win-controls{margin-top:0;-webkit-app-region:no-drag}
+body.electron .main,
+body.electron .main-row,
+body.electron .editor-area,
+body.electron .editor-body,
+body.electron .bottom-panel,
+body.electron .left-sidebar,
+body.electron .sidebar-trigger,
+body.electron .modal-bg,
+body.electron .confirm-bg,
+body.electron .prompt-bg,
+body.electron button,
+body.electron input,
+body.electron textarea,
+body.electron select{-webkit-app-region:no-drag}
 /* device name bar - subtle slide-down */
 .device-name-bar{position:fixed;top:0;left:0;right:0;height:36px;background:var(--surface);border-bottom:1px solid var(--panel-border);display:flex;align-items:center;gap:6px;padding:0 14px;z-index:50;transform:translateY(-100%);transition:0s}
 .device-name-bar.show{transform:translateY(0)}
@@ -401,15 +416,10 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .kb-proposal-card{margin-top:6px;padding:8px 10px;background:var(--surface2);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5}
 .kb-proposal-card .prop-title{font-weight:600;color:var(--t1);margin-bottom:4px}
 .kb-proposal-card .prop-reason{color:var(--t3);font-size:10px;margin-bottom:6px}
-.theme-card{margin-top:6px;padding:8px 10px;background:var(--surface2);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5}
-.theme-card .th-name{font-weight:600;color:var(--t1);margin-bottom:4px}
-.theme-card .th-swatches{display:flex;gap:6px;margin:6px 0}
-.theme-card .th-swatch{width:28px;height:28px;border-radius:var(--r1);border:1.5px solid var(--border)}
-#aiThemeSwatches .th-swatch{width:28px;height:28px;border-radius:var(--r1);border:1.5px solid var(--border)}
-.theme-card .th-apply{padding:3px 10px;border-radius:var(--r1);font-size:10px;font-weight:600;cursor:pointer;background:var(--accent-a12);border:1px solid var(--accent-a20);color:var(--accent);transition:0s}
-.theme-card .th-apply:hover{background:var(--accent-a25)}
-.theme-card .th-apply.th-undo{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
-.theme-card .th-apply.th-undo:hover{background:var(--accent2)}
+
+/* theme-bloom animation from coobox */
+.theme-bloom{position:fixed;left:var(--theme-x,50vw);top:var(--theme-y,0);width:24vmax;height:24vmax;border-radius:50%;background:radial-gradient(circle,var(--theme-bloom) 0 35%,transparent 72%);opacity:.34;pointer-events:none;z-index:999;transform:translate(-50%,-50%) scale(0);animation:theme-bloom .58s ease-out forwards;will-change:transform,opacity}
+@keyframes theme-bloom{to{transform:translate(-50%,-50%) scale(9);opacity:0}}
 .kb-proposal-card .prop-diff{font-family:ui-monospace,SFMono-Regular,monospace;font-size:10px;background:var(--surface);padding:6px 8px;border-radius:var(--r1);margin-bottom:6px;white-space:pre-wrap;word-break:break-all}
 .kb-proposal-card .prop-diff .old{color:var(--danger);text-decoration:line-through}
 .kb-proposal-card .prop-diff .new{color:var(--accent)}
@@ -1058,7 +1068,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  <span class="bc-chapter" id="bcChapter">LucaWriter</span>
  </div>
  </div>
- <div class="topbar-center-logo" id="topbarCenterLogo">
+ <div class="topbar-center-logo" id="topbarCenterLogo" onclick="randomTheme(event)" style="cursor:pointer;pointer-events:auto">
  <img src="logo-white.png" alt="LW">
  </div>
  <div class="topbar-chapter-slot" id="topbarChapterSlot">
@@ -1454,17 +1464,6 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
   <div class="mg" style="margin-top:16px"><label style="font-weight:700;color:var(--accent)">自定义颜色</label></div>
    <div class="mg"><label>页面背景</label><div class="lw-cp-wrap" id="cpPageBg" data-var="--bg" data-key="page_bg"></div></div>
    <div class="mg"><label>强调色</label><div class="lw-cp-wrap" id="cpAccent" data-var="--accent" data-key="accent"></div></div>
-   <div class="mg" style="margin-top:16px">
-    <button class="topbar-btn accent" id="aiThemeGenBtn" onclick="aiGenerateTheme()" style="width:100%">✨ AI 生成主题</button>
-   </div>
-   <div id="aiThemeResult" style="display:none;margin-top:8px;padding:8px 10px;background:var(--surface2);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5">
-    <div style="font-weight:600;color:var(--t1);margin-bottom:4px">🎨 主题候选</div>
-    <div id="aiThemeCandidateList"></div>
-    <div id="aiThemeUndoWrap" style="display:none;margin-top:8px">
-     <div class="th-swatches" id="aiThemeSwatches" style="display:flex;gap:6px;margin:6px 0"></div>
-     <button class="th-apply th-undo" id="aiThemeUndoBtn" onclick="undoAIGeneratedTheme()" style="width:100%;text-align:center">撤销</button>
-    </div>
-   </div>
 </div>
 <div class="ma">
  <button class="prompt-cancel" onclick="saveSettings();closeModal('settingsModal')">关闭设置</button>
@@ -1688,8 +1687,65 @@ var _timelineOrderRange={min:0,max:1000};
 var _timelineLayout={pad:72,rowGap:96,minLane:-2,maxLane:2,minOrder:0,maxOrder:1000};
 var _lastNavPoint=null;
 
+function _isTextInputEl(el){
+ if(!el||el.nodeType!==1)return false;
+ var tag=el.tagName;
+ if(tag==='TEXTAREA')return true;
+ if(tag!=='INPUT')return false;
+ var type=String(el.type||'text').toLowerCase();
+ return ['text','search','password','email','url','tel','number',''].indexOf(type)>=0;
+}
+function _isVisibleEl(el){
+ if(!el||el.nodeType!==1)return false;
+ var r=el.getBoundingClientRect();
+ if(r.width<=0||r.height<=0)return false;
+ var st=getComputedStyle(el);
+ return st.display!=='none'&&st.visibility!=='hidden';
+}
+function _activeModalContains(el){
+ var modal=document.querySelector('.modal-bg.open,.confirm-bg.open,.prompt-bg.open');
+ return !!(modal&&el&&modal.contains(el));
+}
+function _findInputAtPoint(e){
+ var target=e.target;
+ if(_isTextInputEl(target))return target;
+ if(_activeModalContains(target))return null;
+ var stack=[];
+ if(document.elementsFromPoint)stack=document.elementsFromPoint(e.clientX,e.clientY)||[];
+ else{
+  var at=document.elementFromPoint(e.clientX,e.clientY);
+  if(at)stack=[at];
+ }
+ for(var i=0;i<stack.length;i++){
+  var el=stack[i];
+  if(_activeModalContains(el)&&!_isTextInputEl(el))return null;
+  if(_isTextInputEl(el)&&_isVisibleEl(el))return el;
+  if(el&&el.querySelector){
+   var nested=el.querySelector('input,textarea');
+   if(_isTextInputEl(nested)&&_isVisibleEl(nested))return nested;
+  }
+ }
+ return null;
+}
+function _focusInputEl(el){
+ if(!el||el.disabled||el.readOnly)return false;
+ if(document.activeElement!==el){
+  try{el.focus({preventScroll:true})}catch(_){try{el.focus()}catch(__){}}
+ }
+ return document.activeElement===el;
+}
+function _guardInputFocus(e){
+ var input=_findInputAtPoint(e);
+ if(!input)return;
+ _focusInputEl(input);
+ setTimeout(function(){
+  if(document.activeElement!==input)_focusInputEl(input);
+ },0);
+}
+
 document.addEventListener('pointerdown',function(e){
  _lastNavPoint={x:e.clientX,y:e.clientY,t:Date.now()};
+ _guardInputFocus(e);
 },true);
 
 // 全局点击聚焦安全网：某些情况下（如 Electron -webkit-app-region 干扰、DOM 重渲染竞态），
@@ -1703,6 +1759,8 @@ document.addEventListener('mousedown',function(e){
   }
  }
 },true);
+document.addEventListener('mousedown',_guardInputFocus,true);
+document.addEventListener('click',_guardInputFocus,true);
 
 /* === AI 活跃连接指示 === */
 var _aiActivityES=null;
@@ -2626,10 +2684,7 @@ function _startChatPoll(taskId){
  if(!st||!st.status){_stopChatPoll();return;}
  if(st.status==='done'||st.status==='error'){
  _stopChatPoll();
- // 如果消息已有 theme_data_list，说明 _doSendAI 已完成处理，不再覆盖
- var msg=_startChatPoll_checkMsg(taskId);
- if(msg&&msg.theme_data_list&&msg.theme_data_list.length){return;}
- if(st.status==='done'&&st.inspirations_changed){loadInspirations();}
+  if(st.status==='done'&&st.inspirations_changed){loadInspirations();}
  _flashAIResponse(st.status==='done'?st.result||'':'');
  loadAIMessages();
  }else if(st.status==='running'){
@@ -2814,22 +2869,7 @@ function _appendAIMsgCards(c,m,d){
   kbShowProposalModal(m.kb_proposals);
   }
   }
-  // theme 渲染：AI 只生成候选主题，用户点击"应用"后才真正换色
-  var themeList=m.theme_data_list||(m.theme_data?[m.theme_data]:[]);
-  if(m.type==='ai' && themeList.length){
-   themeList.forEach(function(td,tdIdx){
-     var card=document.createElement('div');
-     card.className='theme-card';
-     card.setAttribute('data-theme-idx',tdIdx);
-     var colors=td.colors||{};
-    var swatches='';
-    if(colors.bg)swatches+='<div class="th-swatch" style="background:'+colors.bg+'" title="bg: '+colors.bg+'"></div>';
-    if(colors.accent)swatches+='<div class="th-swatch" style="background:'+colors.accent+'" title="accent: '+colors.accent+'"></div>';
-    var applied=(m._appliedThemeIdx===tdIdx);
-    card.innerHTML='<div class="th-name">🎨 '+esc(td.name||'新主题')+'</div><div class="th-swatches">'+swatches+'</div><button class="th-apply'+(applied?' th-undo':'')+'" onclick="applyThemeSuggestion(\''+esc(colors.bg||'')+'\',\''+esc(colors.accent||'')+'\',this)">'+(applied?'撤销':'应用')+'</button>';
-    c.appendChild(card);
-   });
-  }
+
  }
 
 function _updateLiveAIMessage(msgIdx){
@@ -3140,11 +3180,6 @@ function _doSendAI(text){
 
  var msgIdx=aiMessages.length-1;
 
- // 自动检测主题相关消息，注入 [THEME] 格式指令
- var themeKeywords=/主题|配色|颜色|换肤|色系|色调/i;
- if(themeKeywords.test(text) && !text.includes('[THEME]')){
-  text = text + '\n\n（请使用 [THEME]bg:背景色十六进制,accent:强调色十六进制|主题名[/THEME] 格式输出配色，不要只描述颜色。例如：[THEME]bg:#031122,accent:#F9AACC|玫瑰之夜[/THEME]）';
- }
  // 停止后台轮询，避免 _startChatPoll 的 loadAIMessages 覆盖本地更新
  _stopChatPoll();
  // 
@@ -3155,7 +3190,7 @@ function _doSendAI(text){
  return;
  }
  var tid=d.task_id;
-    // 不设 task_id，避免 _checkPendingChat 启动第二个轮询覆盖 theme_data_list
+    // 不设 task_id，避免 _checkPendingChat 启动第二个轮询
     // 任务完成后再补设 task_id 用于页面刷新恢复
  var m=aiMessages[msgIdx];if(m)m._pollTid=tid;
  var pollTimer=setInterval(function(){
@@ -3164,14 +3199,9 @@ function _doSendAI(text){
  var m=aiMessages[msgIdx];
  if(st.status==='done'){
  clearInterval(pollTimer);
-  if(m){m._pending=false;m.task_id=m._pollTid;m.pending_browse=null;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;m.kb_reread_started=st.kb_reread_started;m.inspirations_changed=st.inspirations_changed;m.kb_citations=st.kb_citations||[];m.kb_proposals=st.kb_proposals||[];m.theme_data=st.theme_data;m.theme_data_list=st.theme_data_list||(st.theme_data?[st.theme_data]:[]);}
- if(st.theme_data_list&&st.theme_data_list.length){
-  var tb=$('aiThemeGenBtn');
-  if(tb){tb.disabled=false;tb.textContent='✨ AI 生成主题';}
-  toast('主题已生成，点击卡片应用','success');
- }
+  if(m){m._pending=false;m.task_id=m._pollTid;m.pending_browse=null;m.text=st.result||'';m.reasoning=st.reasoning||'';m.needs_summary=st.needs_summary;m.annotations_changed=st.annotations_changed;m.kb_reread_started=st.kb_reread_started;m.inspirations_changed=st.inspirations_changed;m.kb_citations=st.kb_citations||[];m.kb_proposals=st.kb_proposals||[];}
  renderAIMessages();saveAIMessages();
- // 后台轮询已由 _stopChatPoll 停止，无需重启（避免 loadAIMessages 覆盖本地 theme_data_list）
+  // 后台轮询已由 _stopChatPoll 停止，无需重启
  _flashAIResponse(st.result||'');
  if(st.annotations_changed){loadAnnotations();}
  if(st.inspirations_changed){loadInspirations();}
@@ -3930,9 +3960,9 @@ function _saveColorSettings(){
  if(colors.accent)settings.theme_accent=colors.accent;
  var payload={
   custom_colors:colors,
-  theme_accent:colors.accent||settings.theme_accent||'#E8CC7A',
-  theme_mode:settings.theme_mode||document.documentElement.getAttribute('data-theme-mode')||'dark'
- };
+   theme_accent:colors.accent||settings.theme_accent||'#E8CC7A',
+   theme_mode:'dark'
+  };
  api('POST','/api/settings',payload,function(r,s){
   if(s===200&&r){
    settings=r;
@@ -3942,303 +3972,7 @@ function _saveColorSettings(){
   }
  });
 }
-function _themeMessageElementFromCard(card){
- var msgEl=card?card.previousElementSibling:null;
- while(msgEl&&!msgEl.classList.contains('ai-msg'))msgEl=msgEl.previousElementSibling;
- return msgEl||null;
-}
-function _themeCardsForCard(card){
- var msgEl=_themeMessageElementFromCard(card);
- var cards=[];
- var node=msgEl?msgEl.nextElementSibling:null;
- while(node&&!node.classList.contains('ai-msg')){
-  if(node.classList&&node.classList.contains('theme-card'))cards.push(node);
-  node=node.nextElementSibling;
- }
- return cards;
-}
-function applyThemeSuggestion(bg,accent,btnEl){
- // 判断当前是应用还是撤销：看按钮文字
- var isUndo=btnEl&&btnEl.textContent==='撤销';
- if(isUndo){
-  // 找到所属消息的 _savedColors
-  var msg=_findMsgFromBtn(btnEl);
-  var saved=msg?msg._savedColors:null;
-  if(saved){
-   if(saved.page_bg)_cpApplyColor(saved.page_bg,'--bg');
-   if(saved.accent)_cpApplyColor(saved.accent,'--accent');
-   _colorSettings=saved;
-   _saveColorSettings();
-   if(msg){msg._appliedThemeIdx=-1;msg._savedColors=null;saveAIMessages();}
-  }
-  // 刷新所有按钮为"应用"
-   if(btnEl){
-    var card=btnEl.closest('.theme-card');
-    var cards=_themeCardsForCard(card);
-    for(var i=0;i<cards.length;i++){
-     var b=cards[i].querySelector('.th-apply,.th-undo');
-     if(b){b.textContent='应用';b.className='th-apply';}
-    }
-   }
-  toast('已撤销主题','success');
-  return;
- }
- // === 应用新主题 ===
- // 保存当前颜色用于撤销
- var savedColors={};
- var cs=_colorSettings||{};
- if(cs.page_bg)savedColors.page_bg=cs.page_bg;
- if(cs.accent)savedColors.accent=cs.accent;
- // 回退到当前 CSS 变量值
- if(!savedColors.page_bg){
-  var root=document.documentElement;
-  var cb=root.style.getPropertyValue('--bg')||getComputedStyle(root).getPropertyValue('--bg');
-  if(cb&&cb.trim())savedColors.page_bg=cb.trim();
- }
- if(!savedColors.accent){
-  var root=document.documentElement;
-  var ca=root.style.getPropertyValue('--accent')||getComputedStyle(root).getPropertyValue('--accent');
-  if(ca&&ca.trim())savedColors.accent=ca.trim();
- }
- // 应用新颜色
- var colors={};
- if(bg){colors.page_bg=bg;_cpApplyColor(bg,'--bg');}
- if(accent){colors.accent=accent;_cpApplyColor(accent,'--accent');}
- _colorSettings=colors;
- _saveColorSettings();
- // 更新颜色选择器
- var picks=document.querySelectorAll('.lw-cp-wrap');
- for(var i=0;i<picks.length;i++){
-  var w=picks[i];
-  var key=w.getAttribute('data-key');
-  if(key&&colors[key]){
-   var inp=w.querySelector('.lw-cp-hex');
-   if(inp)inp.value=colors[key];
-   var prev=w.querySelector('.lw-cp-preview');
-   if(prev)prev.style.background=colors[key];
-  }
- }
- // 记录到消息对象
- if(btnEl){
-  var msg=_findMsgFromBtn(btnEl);
-  if(msg){
-    var card=btnEl.closest('.theme-card');
-    var cards=card?_themeCardsForCard(card):[];
-    var tdIdx=card?parseInt(card.getAttribute('data-theme-idx')||'-1',10):-1;
-    if(isNaN(tdIdx)||tdIdx<0){
-     for(var j=0;j<cards.length;j++){if(cards[j]===card){tdIdx=j;break;}}
-    }
-   msg._appliedThemeIdx=tdIdx;
-   msg._savedColors=savedColors;
-   saveAIMessages();
-   // 刷新：当前按钮变"撤销"，其他变"应用"
-    if(card){
-     for(var k=0;k<cards.length;k++){
-      var b=cards[k].querySelector('.th-apply,.th-undo');
-      if(b){
-       if(k===tdIdx){b.textContent='撤销';b.className='th-apply th-undo';}
-       else{b.textContent='应用';b.className='th-apply';}
-     }
-    }
-   }
-  }
- }
- toast('已应用主题','success');
-}
 
-// AI 生成主题 — 只生成候选主题，用户点击"应用"后才换色
-var _aiThemeSavedColors=null;
-function _saveCurrentThemeForUndo(){
- var saved={};
- var cs=_colorSettings||{};
- if(cs.page_bg)saved.page_bg=cs.page_bg;
- if(cs.accent)saved.accent=cs.accent;
- if(!saved.page_bg){
-  var root=document.documentElement;
-  var cb=root.style.getPropertyValue('--bg')||getComputedStyle(root).getPropertyValue('--bg');
-  if(cb&&cb.trim())saved.page_bg=cb.trim();
- }
- if(!saved.accent){
-  var root=document.documentElement;
-  var ca=root.style.getPropertyValue('--accent')||getComputedStyle(root).getPropertyValue('--accent');
-  if(ca&&ca.trim())saved.accent=ca.trim();
- }
- _aiThemeSavedColors=saved;
-}
-function _setThemeUndoVisible(on){
- var w=$('aiThemeUndoWrap');
- if(w)w.style.display=on?'block':'none';
-}
-function _renderAiThemeCandidates(themeDataList){
- var r=$('aiThemeResult');
- var listEl=$('aiThemeCandidateList');
- if(!r||!listEl)return;
- r.style.display='block';
- listEl.innerHTML='';
- (themeDataList||[]).forEach(function(td,idx){
-  var colors=td.colors||{};
-  var bg=esc(colors.bg||'');
-  var accent=esc(colors.accent||'');
-  var card=document.createElement('div');
-  card.className='theme-card';
-  card.innerHTML='<div class="th-name">🎨 '+esc(td.name||('主题 '+(idx+1)))+'</div><div class="th-swatches">'+
-   (bg?'<div class="th-swatch" style="background:'+bg+'" title="bg: '+bg+'"></div>':'')+
-   (accent?'<div class="th-swatch" style="background:'+accent+'" title="accent: '+accent+'"></div>':'')+
-   '</div><button class="th-apply" onclick="applyGeneratedTheme(\''+bg+'\',\''+accent+'\',this)">应用</button>';
-  listEl.appendChild(card);
- });
- _setThemeUndoVisible(!!_aiThemeSavedColors);
-}
-function applyGeneratedTheme(bg,accent,btnEl){
- if(!_aiThemeSavedColors)_saveCurrentThemeForUndo();
- applyThemeSuggestion(bg,accent,null);
- _saveAiThemeUndoToSettings();
- _setThemeUndoVisible(true);
- if(btnEl){
-  var wrap=$('aiThemeCandidateList');
-  if(wrap){
-   wrap.querySelectorAll('.th-apply').forEach(function(b){b.textContent='应用';b.className='th-apply'});
-  }
-  btnEl.textContent='已应用';
-  btnEl.className='th-apply th-undo';
- }
- _showAiThemeResultInSettings();
-}
-function aiGenerateTheme(){
- var btn=$('aiThemeGenBtn');
- if(!btn||btn.disabled)return;
- btn.disabled=true;btn.textContent='⏳ 正在生成…';
- var prompt='请为 LucaWriter 小说写作软件生成 1-2 个舒适、耐看的深色 UI 配色主题。';
- api('POST','/api/theme-generate',{prompt:prompt},function(d,s){
-  btn.disabled=false;btn.textContent='✨ AI 生成主题';
-  if(s===200&&d&&d.theme_data_list&&d.theme_data_list.length){
-   _renderAiThemeCandidates(d.theme_data_list);
-   toast(d.source==='fallback'?'已生成候选主题（本地兜底）':'主题已生成，点击应用','success');
-  }else{
-   toast((d&&d.error)||'生成失败','error');
-  }
- });
-}
-function _loadAiThemeUndoFromSettings(){
- var cs=(_colorSettings&&Object.keys(_colorSettings).length)?_colorSettings:(settings.custom_colors||{});
- if(cs._aiThemeUndoBg||cs._aiThemeUndoAccent){
-  _aiThemeSavedColors={};
-  if(cs._aiThemeUndoBg)_aiThemeSavedColors.page_bg=cs._aiThemeUndoBg;
-  if(cs._aiThemeUndoAccent)_aiThemeSavedColors.accent=cs._aiThemeUndoAccent;
-  _showAiThemeResultInSettings();
- }
-}
-function _saveAiThemeUndoToSettings(){
- var cs=_colorSettings||{};
- cs._aiThemeUndoBg=_aiThemeSavedColors?.page_bg||'';
- cs._aiThemeUndoAccent=_aiThemeSavedColors?.accent||'';
- _saveColorSettings();
-}
-function _clearAiThemeUndoFromSettings(){
- var cs=_colorSettings||{};
- delete cs._aiThemeUndoBg;
- delete cs._aiThemeUndoAccent;
- _saveColorSettings();
-}
-function _showAiThemeResultInSettings(){
- var r=$('aiThemeResult');
- if(!r)return;
- r.style.display='block';
- _setThemeUndoVisible(!!_aiThemeSavedColors);
- var sw=$('aiThemeSwatches');
- if(sw){
-  sw.innerHTML='';
-  if(_aiThemeSavedColors?.page_bg)sw.innerHTML+='<div class="th-swatch" style="background:'+_aiThemeSavedColors.page_bg+'" title="bg: '+_aiThemeSavedColors.page_bg+'"></div>';
-  if(_aiThemeSavedColors?.accent)sw.innerHTML+='<div class="th-swatch" style="background:'+_aiThemeSavedColors.accent+'" title="accent: '+_aiThemeSavedColors.accent+'"></div>';
- }
- var b=$('aiThemeGenBtn');
- if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
-}
-function undoAIGeneratedTheme(){
- if(!_aiThemeSavedColors)return;
- if(_aiThemeSavedColors.page_bg)_cpApplyColor(_aiThemeSavedColors.page_bg,'--bg');
- if(_aiThemeSavedColors.accent)_cpApplyColor(_aiThemeSavedColors.accent,'--accent');
- _colorSettings={};
- if(_aiThemeSavedColors.page_bg)_colorSettings.page_bg=_aiThemeSavedColors.page_bg;
- if(_aiThemeSavedColors.accent)_colorSettings.accent=_aiThemeSavedColors.accent;
- _saveColorSettings();
- _clearAiThemeUndoFromSettings();
- // 更新颜色选择器
- var picks=document.querySelectorAll('.lw-cp-wrap');
- for(var i=0;i<picks.length;i++){
-  var w=picks[i];
-  var key=w.getAttribute('data-key');
-  if(key&&_aiThemeSavedColors[key]){
-   var inp=w.querySelector('.lw-cp-hex');
-   if(inp)inp.value=_aiThemeSavedColors[key];
-   var prev=w.querySelector('.lw-cp-preview');
-   if(prev)prev.style.background=_aiThemeSavedColors[key];
-  }
- }
- // 隐藏结果区
- var r=$('aiThemeResult');
- if(r&&(!$('aiThemeCandidateList')||!$('aiThemeCandidateList').children.length))r.style.display='none';
- _setThemeUndoVisible(false);
- var b=$('aiThemeGenBtn');
- if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
- _aiThemeSavedColors=null;
- toast('已撤销主题颜色','success');
- // 重新渲染 AI 消息（恢复"应用"按钮）
- renderAIMessages();
-}
-function _autoApplyTheme(themeDataList){
- if(!themeDataList||!themeDataList.length)return;
- var td=themeDataList[0];
- var colors=td.colors||{};
- if(!colors.bg&&!colors.accent)return;
- // 保存当前颜色用于撤销（跟 applyThemeSuggestion 完全一致）
- if(!_aiThemeSavedColors){
-  var saved={};
-  var cs=_colorSettings||{};
-  if(cs.page_bg)saved.page_bg=cs.page_bg;
-  if(cs.accent)saved.accent=cs.accent;
-  if(!saved.page_bg){
-   var root=document.documentElement;
-   var cb=root.style.getPropertyValue('--bg')||getComputedStyle(root).getPropertyValue('--bg');
-   if(cb&&cb.trim())saved.page_bg=cb.trim();
-  }
-  if(!saved.accent){
-   var root=document.documentElement;
-   var ca=root.style.getPropertyValue('--accent')||getComputedStyle(root).getPropertyValue('--accent');
-   if(ca&&ca.trim())saved.accent=ca.trim();
-  }
-  _aiThemeSavedColors=saved;
- }
- // 直接调用 applyThemeSuggestion 来应用颜色（跟手动点击"应用"按钮完全一样）
- applyThemeSuggestion(colors.bg, colors.accent, null);
- // 在设置弹窗中显示结果
- var r=$('aiThemeResult');
- if(r){
-  r.style.display='block';
-  var sw=$('aiThemeSwatches');
-  if(sw){
-   sw.innerHTML='';
-   if(colors.bg)sw.innerHTML+='<div class="th-swatch" style="background:'+colors.bg+'" title="bg: '+colors.bg+'"></div>';
-   if(colors.accent)sw.innerHTML+='<div class="th-swatch" style="background:'+colors.accent+'" title="accent: '+colors.accent+'"></div>';
-  }
- }
- _saveAiThemeUndoToSettings();
- var b=$('aiThemeGenBtn');
- if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
- }
-
-function _findMsgFromBtn(btnEl){
- // 从按钮找到所属的 ai-msg 元素，再找到 aiMessages 中的消息对象
- if(!btnEl)return null;
- var card=btnEl.closest('.theme-card');
- if(!card)return null;
- var msgEl=_themeMessageElementFromCard(card);
- if(msgEl){
-  var idx=parseInt(msgEl.dataset.idx);
-  if(idx>=0&&idx<aiMessages.length)return aiMessages[idx];
- }
- return null;
-}
 function _loadColorSettings(settings){
  var cs=settings.custom_colors||{};
  if(_isLegacyMixedTheme(cs))cs={};
@@ -4258,12 +3992,48 @@ function _loadColorSettings(settings){
 
 function applyThemeMode(mode){
  var root=document.documentElement;
- var m=mode||settings.theme_mode||root.getAttribute('data-theme-mode')||'dark';
- m=(m==='light')?'light':'dark';
- settings.theme_mode=m;
- root.setAttribute('data-theme-mode',m);
+ settings.theme_mode='dark';
+ root.setAttribute('data-theme-mode','dark');
  var centerLogo=document.querySelector('.topbar-center-logo img');
- if(centerLogo)centerLogo.src=m==='light'?'logo-black.png':'logo-white.png';
+ if(centerLogo)centerLogo.src='logo-white.png';
+}
+
+var _THEMES=[
+ {bg:'#0e0c14',accent:'#e8b88a'}, // 琥珀夜
+ {bg:'#0a1210',accent:'#7dd4a8'}, // 翡翠潭
+ {bg:'#120c14',accent:'#e898c0'}, // 玫瑰暗
+ {bg:'#0a0e18',accent:'#7ab8e0'}, // 钴蓝潮
+ {bg:'#14100a',accent:'#d4b06a'}, // 铜绿卷
+ {bg:'#0e0a18',accent:'#b898e0'}, // 紫晶矿
+ {bg:'#120e0a',accent:'#e8b86a'}, // 枫糖暮
+ {bg:'#0a0a14',accent:'#80b8e0'}, // 银河尘
+ {bg:'#140a0a',accent:'#e08888'}, // 朱砂印
+ {bg:'#0a140e',accent:'#78c490'}, // 松烟墨
+];
+var _themeIdx=-1;
+
+function randomTheme(evt){
+ _themeIdx=(_themeIdx+1)%_THEMES.length;
+ var t=_THEMES[_themeIdx];
+ var bg=t.bg,accent=t.accent;
+ _cpApplyColor(bg,'--bg');
+ _cpApplyColor(accent,'--accent');
+ _colorSettings={page_bg:bg,accent:accent};
+ _saveColorSettings();
+ _bloom(accent,evt);
+}
+
+function _bloom(color,evt){
+ if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ var x=evt&&typeof evt.clientX==='number'?evt.clientX:window.innerWidth/2;
+ var y=evt&&typeof evt.clientY==='number'?evt.clientY:window.innerHeight/2;
+ var el=document.createElement('span');
+ el.className='theme-bloom';
+ el.style.setProperty('--theme-x',x+'px');
+ el.style.setProperty('--theme-y',y+'px');
+ el.style.setProperty('--theme-bloom',color);
+ document.body.appendChild(el);
+ setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);},700);
 }
 
 var _origAccessScope='127.0.0.1';
@@ -4316,8 +4086,6 @@ function openSettings(){
   // init color pickers once
   if(!$('cpPageBg').querySelector('.lw-cp-sv'))initColorPicker($('cpPageBg'),'page_bg','#191919');
    if(!$('cpAccent').querySelector('.lw-cp-sv'))initColorPicker($('cpAccent'),'accent','#d6d6d3');
-  // 恢复 AI 生成主题的撤销状态
-  _loadAiThemeUndoFromSettings();
   // 获取检测到的本地模型名 + 硬件能力检测（决定推荐档位）
   api('GET','/api/local-llm/detected-model',undefined,function(d,s){
     var modelDetected=(s===200&&d.model);
@@ -4998,7 +4766,7 @@ function saveSettings(opts){
     browser_enabled:true,
     custom_colors:_colorSettings||settings.custom_colors||{},
     theme_accent:((_colorSettings||{}).accent)||settings.theme_accent||'#E8CC7A',
-    theme_mode:settings.theme_mode||document.documentElement.getAttribute('data-theme-mode')||'dark',
+    theme_mode:'dark',
     content_font_size:_currentFontSize,
     editor_font_weight:_currentEditorFontWeight,
     editor_font_preset_id:_currentEditorFontPresetId,
@@ -6513,6 +6281,29 @@ function doUploadCover(){
 function setupBottomPanelDrag(){
  var handle=$('bottomHandle'),panel=$('bottomPanel');
  var dragging=false,didDrag=false,startY=0,startH=0;
+ function finishBottomDrag(commit){
+  if(startY===0&&!dragging)return;
+  var wasDragging=dragging;
+  dragging=false;
+  startY=0;
+  document.body.style.cursor='';
+  document.body.style.userSelect='';
+  panel.style.transition='';
+  if(!wasDragging||!commit)return;
+  var minH=handle.offsetHeight||30;
+  if(panel.offsetHeight<=38){
+   closeBottomPanel();
+  }else{
+   savedBottomPanelHeight=bottomPanelHeight;
+   localStorage.setItem('lw_bottom_panel_h',bottomPanelHeight);
+  }
+  if(currentBottomTab==='timeline'&&_timelineData)setTimeout(function(){renderTimelineRiver(_timelineData)},40);
+ }
+
+ handle.addEventListener('pointerdown',function(e){
+  if(e.target.closest('.bottom-tabs-wrap')||e.target.closest('.bottom-toggle')||e.target.closest('#aiInputZone'))return;
+  try{handle.setPointerCapture(e.pointerId)}catch(_){}
+ });
 
  handle.addEventListener('mousedown',function(e){
   if(e.target.closest('.bottom-tabs-wrap')||e.target.closest('.bottom-toggle')||e.target.closest('#aiInputZone'))return;
@@ -6557,24 +6348,11 @@ function setupBottomPanelDrag(){
   _syncLucaPopupPos();
  });
 
- document.addEventListener('mouseup',function(){
-  if(startY===0)return;
-  if(dragging){
-   dragging=false;
-   document.body.style.cursor='';
-   document.body.style.userSelect='';
-   panel.style.transition='';
-   var minH=handle.offsetHeight||30;
-   if(panel.offsetHeight<=38){
-    closeBottomPanel();
-	   }else{
-	    savedBottomPanelHeight=bottomPanelHeight;
-	    localStorage.setItem('lw_bottom_panel_h',bottomPanelHeight);
-	   }
-	   if(currentBottomTab==='timeline'&&_timelineData)setTimeout(function(){renderTimelineRiver(_timelineData)},40);
-	  }
-	  startY=0;
-	 });
+ document.addEventListener('mouseup',function(){finishBottomDrag(true)});
+ document.addEventListener('pointerup',function(){finishBottomDrag(true)});
+ document.addEventListener('pointercancel',function(){finishBottomDrag(false)});
+ window.addEventListener('blur',function(){finishBottomDrag(false)});
+ document.addEventListener('visibilitychange',function(){if(document.hidden)finishBottomDrag(false)});
 }
 
 var _lucaPopupOpen=false;
@@ -6653,6 +6431,16 @@ var _lucaGripDragging=false;
  var popup=$('lucaPopup');
  if(!grip||!popup)return;
  var startY=0,startH=0;
+ function finishLucaGripDrag(){
+  if(!_lucaGripDragging)return;
+  _lucaGripDragging=false;
+  startY=0;
+  document.body.style.cursor='';
+  document.body.style.userSelect='';
+ }
+ grip.addEventListener('pointerdown',function(e){
+  try{grip.setPointerCapture(e.pointerId)}catch(_){}
+ });
  grip.addEventListener('mousedown',function(e){
   e.preventDefault();e.stopPropagation();
   clearTimeout(_lucaPopupCloseTimer);
@@ -6672,12 +6460,11 @@ var _lucaGripDragging=false;
   popup.style.maxHeight=nh+'px';
   _clampHistoryHeight();
  });
- document.addEventListener('mouseup',function(){
-  if(!_lucaGripDragging)return;
-  _lucaGripDragging=false;
-  document.body.style.cursor='';
-  document.body.style.userSelect='';
- });
+ document.addEventListener('mouseup',finishLucaGripDrag);
+ document.addEventListener('pointerup',finishLucaGripDrag);
+ document.addEventListener('pointercancel',finishLucaGripDrag);
+ window.addEventListener('blur',finishLucaGripDrag);
+ document.addEventListener('visibilitychange',function(){if(document.hidden)finishLucaGripDrag()});
 })();
 
 	window.addEventListener('resize',function(){
