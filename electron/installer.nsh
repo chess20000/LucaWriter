@@ -21,16 +21,16 @@
 
 !macro customInstall
   WriteRegStr HKCU "Software\LucaWriter" "InstallPath" "$INSTDIR"
-  # 恢复备份的模型文件
+  # 恢复备份的模型文件到用户数据目录；不要再写回安装目录，避免下次更新覆盖
   ${If} ${FileExists} "$TEMP\LucaWriter\ModelsBackup\*.*"
-    CreateDirectory "$INSTDIR\resources\local_llm\models"
-    CopyFiles /SILENT "$TEMP\LucaWriter\ModelsBackup\*.*" "$INSTDIR\resources\local_llm\models"
+    CreateDirectory "$APPDATA\LucaWriter\data\local_llm\models"
+    CopyFiles /SILENT "$TEMP\LucaWriter\ModelsBackup\*.*" "$APPDATA\LucaWriter\data\local_llm\models"
     RMDir /r "$TEMP\LucaWriter\ModelsBackup"
   ${EndIf}
-  # 恢复备份的 usrdata
+  # 恢复旧版安装目录里的 usrdata 到当前桌面版用户数据目录
   ${If} ${FileExists} "$TEMP\LucaWriter\UsrdataBackup\*.*"
-    CreateDirectory "$INSTDIR\usrdata"
-    CopyFiles /SILENT "$TEMP\LucaWriter\UsrdataBackup\*.*" "$INSTDIR\usrdata"
+    CreateDirectory "$APPDATA\LucaWriter\data"
+    CopyFiles /SILENT "$TEMP\LucaWriter\UsrdataBackup\*.*" "$APPDATA\LucaWriter\data"
     RMDir /r "$TEMP\LucaWriter\UsrdataBackup"
   ${EndIf}
 !macroend

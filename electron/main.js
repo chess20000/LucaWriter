@@ -53,6 +53,69 @@ function getBuiltinPath() {
   return path.join(__dirname, '..', 'builtin');
 }
 
+function getRuntimeLocalLlmPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'local_llm');
+  }
+  return path.join(__dirname, '..', 'local_llm');
+}
+
+function getUserLocalLlmPath(dataDir) {
+  if (app.isPackaged) {
+    return path.join(dataDir, 'local_llm');
+  }
+  return path.join(__dirname, '..', 'local_llm');
+}
+
+function copyDirContentsIfMissing(src, dest) {
+  if (!src || !dest || !fs.existsSync(src)) return;
+  fs.mkdirSync(dest, { recursive: true });
+  fs.readdirSync(src, { withFileTypes: true }).forEach(function(entry) {
+    var from = path.join(src, entry.name);
+    var to = path.join(dest, entry.name);
+    try {
+      if (entry.isDirectory()) {
+        copyDirContentsIfMissing(from, to);
+      } else if (entry.isFile()) {
+        var shouldCopy = !fs.existsSync(to);
+        if (!shouldCopy) {
+          var a = fs.statSync(from);
+          var b = fs.statSync(to);
+          shouldCopy = a.size !== b.size;
+        }
+        if (shouldCopy) fs.copyFileSync(from, to);
+      }
+    } catch (e) {
+      console.warn('Failed to migrate file:', from, e.message);
+    }
+  });
+}
+
+function migrateLegacyUserData(dataDir) {
+  if (!app.isPackaged) return;
+  var legacyDataDir = path.normalize(path.join(process.resourcesPath, '..', 'usrdata'));
+  if (!fs.existsSync(legacyDataDir)) return;
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.readdirSync(legacyDataDir, { withFileTypes: true }).forEach(function(entry) {
+    var from = path.join(legacyDataDir, entry.name);
+    var to = path.join(dataDir, entry.name);
+    if (fs.existsSync(to)) return;
+    try {
+      if (entry.isDirectory()) copyDirContentsIfMissing(from, to);
+      else if (entry.isFile()) fs.copyFileSync(from, to);
+    } catch (e) {
+      console.warn('Failed to migrate legacy user data:', from, e.message);
+    }
+  });
+}
+
+function migrateLegacyLocalModels(userLocalLlmDir, runtimeLocalLlmDir) {
+  var userModels = path.join(userLocalLlmDir, 'models');
+  var runtimeModels = path.join(runtimeLocalLlmDir, 'models');
+  fs.mkdirSync(userModels, { recursive: true });
+  copyDirContentsIfMissing(runtimeModels, userModels);
+}
+
 function getSettingsPath() {
   return path.join(getUserDataPath(), 'settings.json');
 }
@@ -82,6 +145,12 @@ function readAccessScope() {
 function startBackend() {
   const dataDir = getUserDataPath();
   fs.mkdirSync(dataDir, { recursive: true });
+  migrateLegacyUserData(dataDir);
+
+  const runtimeLocalLlmDir = getRuntimeLocalLlmPath();
+  const userLocalLlmDir = getUserLocalLlmPath(dataDir);
+  fs.mkdirSync(userLocalLlmDir, { recursive: true });
+  migrateLegacyLocalModels(userLocalLlmDir, runtimeLocalLlmDir);
 
   browserCtrlToken = crypto.randomBytes(32).toString('hex');
 
@@ -89,7 +158,10 @@ function startBackend() {
     DATA_DIR: dataDir,
     FRONTEND_DIR: getFrontendPath(),
     BUILTIN_BOOKS_DIR: getBuiltinPath(),
-    LOCAL_LLM_DIR: app.isPackaged ? path.join(process.resourcesPath, 'local_llm') : path.join(__dirname, '..', 'local_llm'),
+    LOCAL_LLM_DIR: userLocalLlmDir,
+    LOCAL_LLM_DATA_DIR: userLocalLlmDir,
+    LOCAL_LLM_MODELS_DIR: path.join(userLocalLlmDir, 'models'),
+    LOCAL_LLM_RUNTIME_DIR: runtimeLocalLlmDir,
     BROWSER_DEBUG_PORT: String(BROWSER_DEBUG_PORT),
     BROWSER_CTRL_PORT: String(BROWSER_CTRL_PORT),
     BROWSER_CTRL_TOKEN: browserCtrlToken,

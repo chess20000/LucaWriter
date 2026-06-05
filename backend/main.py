@@ -50,6 +50,12 @@ import numpy as np
 
 import kb_pipeline
 import kb_storage
+try:
+    import coo_provenance
+    HAS_COO_PROVENANCE = True
+except Exception:
+    coo_provenance = None
+    HAS_COO_PROVENANCE = False
 
 _default_ssl_context = None
 def _get_ssl_context():
@@ -347,121 +353,564 @@ def _lw_is_encrypted(raw):
     return len(raw) >= 3 and raw[:3] == LW_MAGIC
 
 
-def _build_lucawrite_zip(bid):
+def _coo_safe_name(value, fallback):
+    value = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(value or '')).strip('._')
+    return (value[:120] or fallback)
+
+
+def _coo_cover_arcname(raw):
+    if raw[:4] == b'RIFF' and raw[8:12] == b'WEBP':
+        return 'assets/cover.webp'
+    if raw[:2] == b'\xff\xd8':
+        return 'assets/cover.jpg'
+    if raw[:8] == b'\x89PNG\r\n\x1a\n':
+        return 'assets/cover.png'
+    if raw[:3] == b'GIF':
+        return 'assets/cover.gif'
+    return 'assets/cover'
+
+
+def _coo_add_file(zf, path, arcname):
+    if os.path.isfile(path):
+        zf.write(path, arcname)
+        return True
+    return False
+
+
+def _coo_add_dir(zf, src_dir, arc_prefix):
+    if not os.path.isdir(src_dir):
+        return False
+    added = False
+    for root, dirs, files in os.walk(src_dir):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
+        for fn in files:
+            if fn.startswith('.') or fn.endswith('.tmp') or fn.endswith('.pyc'):
+                continue
+            fp = os.path.join(root, fn)
+            rel = os.path.relpath(fp, src_dir).replace('\\', '/')
+            zf.write(fp, f'{arc_prefix.rstrip("/")}/{rel}')
+            added = True
+    return added
+
+
+def _ensure_coo_book_uid(bid, meta, bd):
+    uid = meta.get('coo_book_uid') or meta.get('book_uid') or ''
+    if not isinstance(uid, str) or len(uid) < 40:
+        uid = 'coo_' + secrets.token_hex(48)
+        meta['coo_book_uid'] = uid
+        try:
+            save_json(os.path.join(bd, 'meta.json'), meta)
+        except Exception:
+            pass
+    return uid
+
+
+KB_ARCHIVE_TEXT_FILES = ('source.md', 'outline.md', 'core_memory.md', 'timeline.md', 'prediction.md')
+
+
+def _kb_archive_dir(book_id):
+    return os.path.join(get_book_dir(book_id), 'kb_archives')
+
+
+def _hash_file_into(h, label, path):
+    h.update(f'file:{label}\n'.encode('utf-8'))
+    if not os.path.isfile(path):
+        h.update(b'missing\n')
+        return
+    h.update(b'present\n')
+    with open(path, 'rb') as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    h.update(b'\n')
+
+
+def _hash_dir_into(h, label, path):
+    h.update(f'dir:{label}\n'.encode('utf-8'))
+    if not os.path.isdir(path):
+        h.update(b'missing\n')
+        return
+    files = []
+    for root, dirs, names in os.walk(path):
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
+        for name in names:
+            if name.startswith('.') or name.endswith('.tmp') or name.endswith('.pyc'):
+                continue
+            fp = os.path.join(root, name)
+            rel = os.path.relpath(fp, path).replace('\\', '/')
+            files.append((rel, fp))
+    h.update(f'count:{len(files)}\n'.encode('utf-8'))
+    for rel, fp in sorted(files):
+        _hash_file_into(h, f'{label}/{rel}', fp)
+
+
+def _kb_snapshot_fingerprint(root, vector_name):
+    kb_path = os.path.join(root, 'kb.db')
+    if not os.path.isfile(kb_path):
+        return ''
+    h = hashlib.sha256()
+    _hash_file_into(h, 'kb.db', kb_path)
+    _hash_dir_into(h, 'vector_db', os.path.join(root, vector_name))
+    for name in KB_ARCHIVE_TEXT_FILES:
+        _hash_file_into(h, name, os.path.join(root, name))
+    return h.hexdigest()
+
+
+def _current_kb_fingerprint(book_id):
+    return _kb_snapshot_fingerprint(get_book_dir(book_id), '.vector_db')
+
+
+def _kb_archive_index_path(book_id):
+    return os.path.join(_kb_archive_dir(book_id), 'index.json')
+
+
+def _safe_archive_rel(value):
+    rel = str(value or '').replace('\\', '/').strip('/')
+    if not rel or rel.startswith('/') or '..' in rel.split('/'):
+        return ''
+    return rel
+
+
+def _kb_archive_snapshot_dir(book_id, entry):
+    root = _kb_archive_dir(book_id)
+    rel = _safe_archive_rel(entry.get('dir') or '')
+    if rel:
+        return os.path.join(root, rel)
+    rel_file = _safe_archive_rel(entry.get('kb_file') or entry.get('file') or '')
+    if '/' in rel_file:
+        return os.path.dirname(os.path.join(root, rel_file))
+    return root
+
+
+def _kb_archive_kb_path(book_id, entry):
+    root = _kb_archive_dir(book_id)
+    rel = _safe_archive_rel(entry.get('kb_file') or entry.get('file') or '')
+    if rel:
+        return os.path.join(root, rel)
+    snap = _kb_archive_snapshot_dir(book_id, entry)
+    return os.path.join(snap, 'kb.db')
+
+
+def _kb_archive_fingerprint(book_id, entry):
+    fp = str(entry.get('fingerprint') or '')
+    if fp:
+        return fp
+    snap = _kb_archive_snapshot_dir(book_id, entry)
+    if os.path.basename(snap) == 'kb_archives':
+        # 兼容早期单文件归档：只有 kb_*.db，没有向量和文本快照。
+        kb_path = _kb_archive_kb_path(book_id, entry)
+        if not os.path.isfile(kb_path):
+            return ''
+        h = hashlib.sha256()
+        _hash_file_into(h, 'kb.db', kb_path)
+        _hash_dir_into(h, 'vector_db', '')
+        for name in KB_ARCHIVE_TEXT_FILES:
+            _hash_file_into(h, name, '')
+        return h.hexdigest()
+    return _kb_snapshot_fingerprint(snap, 'vector_db')
+
+
+def _load_kb_archive_entries(book_id):
+    index_path = _kb_archive_index_path(book_id)
+    entries = []
+    if os.path.isfile(index_path):
+        try:
+            with open(index_path, 'r', encoding='utf-8') as f:
+                entries = json.load(f)
+        except Exception:
+            entries = []
+    if not isinstance(entries, list):
+        entries = []
+    return entries
+
+
+def _save_kb_archive_entries(book_id, entries):
+    archives_dir = _kb_archive_dir(book_id)
+    os.makedirs(archives_dir, exist_ok=True)
+    entries.sort(key=lambda e: e.get('timestamp', 0), reverse=True)
+    with open(_kb_archive_index_path(book_id), 'w', encoding='utf-8') as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2)
+
+
+def _find_current_kb_archive(book_id, entries=None):
+    current_fp = _current_kb_fingerprint(book_id)
+    if not current_fp:
+        return ''
+    entries = entries if entries is not None else _load_kb_archive_entries(book_id)
+    changed = False
+    for entry in entries:
+        fp = _kb_archive_fingerprint(book_id, entry)
+        if fp and not entry.get('fingerprint'):
+            entry['fingerprint'] = fp
+            changed = True
+        if fp and fp == current_fp:
+            if changed:
+                _save_kb_archive_entries(book_id, entries)
+            return str(entry.get('id') or '')
+    if changed:
+        _save_kb_archive_entries(book_id, entries)
+    return ''
+
+
+def _restore_kb_archive(book_id, archive_id):
+    entries = _load_kb_archive_entries(book_id)
+    entry = None
+    for item in entries:
+        if str(item.get('id') or '') == str(archive_id or ''):
+            entry = item
+            break
+    if not entry:
+        raise ValueError('历史版本不存在')
+    kb_src = _kb_archive_kb_path(book_id, entry)
+    if not os.path.isfile(kb_src):
+        raise ValueError('历史版本缺少 kb.db')
+
+    bd = get_book_dir(book_id)
+    tmp_db = os.path.join(bd, f'kb.restore.{secrets.token_hex(8)}.tmp')
+    tmp_vector = os.path.join(bd, f'.vector_restore_{secrets.token_hex(8)}')
+    snap = _kb_archive_snapshot_dir(book_id, entry)
+    vector_src = os.path.join(snap, 'vector_db')
+    try:
+        shutil.copy2(kb_src, tmp_db)
+        if os.path.isdir(vector_src):
+            shutil.copytree(vector_src, tmp_vector)
+        try:
+            lock = getattr(kb_storage, '_chroma_clients_lock', None)
+            clients = getattr(kb_storage, '_chroma_clients', None)
+            if lock is not None and isinstance(clients, dict):
+                with lock:
+                    clients.pop(book_id, None)
+            elif isinstance(clients, dict):
+                clients.pop(book_id, None)
+        except Exception:
+            pass
+        os.replace(tmp_db, os.path.join(bd, 'kb.db'))
+        vector_dest = os.path.join(bd, '.vector_db')
+        shutil.rmtree(vector_dest, ignore_errors=True)
+        if os.path.isdir(tmp_vector):
+            if os.path.exists(vector_dest):
+                shutil.copytree(tmp_vector, vector_dest, dirs_exist_ok=True)
+                shutil.rmtree(tmp_vector, ignore_errors=True)
+            else:
+                shutil.move(tmp_vector, vector_dest)
+        for name in KB_ARCHIVE_TEXT_FILES:
+            src = os.path.join(snap, name)
+            dest = os.path.join(bd, name)
+            if os.path.isfile(src):
+                shutil.copy2(src, dest)
+            elif os.path.exists(dest):
+                os.remove(dest)
+        return entry
+    finally:
+        if os.path.isfile(tmp_db):
+            try:
+                os.remove(tmp_db)
+            except Exception:
+                pass
+        if os.path.isdir(tmp_vector):
+            shutil.rmtree(tmp_vector, ignore_errors=True)
+
+
+def _archive_kb_db(book_id, settings):
+    """归档重来前，将当前聊天检索数据库快照归档到 kb_archives/ 目录。"""
+    bd = get_book_dir(book_id)
+    kb_path = os.path.join(bd, 'kb.db')
+    if not os.path.isfile(kb_path):
+        return False
+    archives_dir = os.path.join(bd, 'kb_archives')
+    os.makedirs(archives_dir, exist_ok=True)
+    # 获取当前使用的模型名
+    presets = settings.get('provider_presets', []) if settings else []
+    idx = settings.get('active_provider_idx', 0) if settings else 0
+    model_name = settings.get('model', '') or ''
+    if not model_name and presets and 0 <= idx < len(presets):
+        model_name = presets[idx].get('model', '') or ''
+    model_label = model_name.strip() or 'unknown-model'
+    ts = time.time()
+    base_id = datetime.fromtimestamp(ts).strftime('%Y%m%d_%H%M%S')
+    archive_id = base_id
+    snapshot_dir = os.path.join(archives_dir, archive_id)
+    n = 1
+    while os.path.exists(snapshot_dir):
+        archive_id = f'{base_id}_{n}'
+        snapshot_dir = os.path.join(archives_dir, archive_id)
+        n += 1
+
+    os.makedirs(snapshot_dir, exist_ok=False)
+    kb_file = os.path.join(snapshot_dir, 'kb.db')
+    shutil.copy2(kb_path, kb_file)
+
+    vector_dir = ''
+    vector_src = os.path.join(bd, '.vector_db')
+    if os.path.isdir(vector_src):
+        try:
+            shutil.copytree(vector_src, os.path.join(snapshot_dir, 'vector_db'))
+            vector_dir = f'{archive_id}/vector_db'
+        except Exception as e:
+            log_action('KB_ARCHIVE_VECTOR_ERR', str(e)[:120])
+
+    text_files = []
+    for name in KB_ARCHIVE_TEXT_FILES:
+        src = os.path.join(bd, name)
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(snapshot_dir, name))
+            text_files.append(name)
+
+    fingerprint = _kb_snapshot_fingerprint(snapshot_dir, 'vector_db')
+
+    # 更新索引
+    entries = _load_kb_archive_entries(book_id)
+    entries.append({
+        'id': archive_id,
+        'timestamp': ts,
+        'dir': archive_id,
+        'file': f'{archive_id}/kb.db',
+        'kb_file': f'{archive_id}/kb.db',
+        'vector_dir': vector_dir,
+        'text_files': text_files,
+        'fingerprint': fingerprint,
+        'model': model_label,
+        'note': model_label,
+    })
+    _save_kb_archive_entries(book_id, entries)
+    return True
+
+
+def _build_coo_zip(bid, pen_name=''):
     bd = get_book_dir(bid)
     if not os.path.isdir(bd):
         raise FileNotFoundError(f'书本目录不存在: {bid}')
     meta = get_book_meta(bid) or {}
+    pen_name = str(pen_name or '').strip()
+    coo_uid = _ensure_coo_book_uid(bid, meta, bd)
+    ch_dir = os.path.join(bd, 'chapters')
+    all_chapters = {}
+    if os.path.isdir(ch_dir):
+        for fn in os.listdir(ch_dir):
+            if not fn.endswith('.json') or fn.startswith('.'):
+                continue
+            try:
+                with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                    ch = json.load(f)
+                cid = str(ch.get('id') or fn[:-5])
+                all_chapters[cid] = ch
+            except Exception:
+                continue
+    order = [cid for cid in meta.get('chapter_order', []) if cid in all_chapters]
+    order.extend([cid for cid in all_chapters.keys() if cid not in order])
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        chapters_manifest = []
+        for idx, cid in enumerate(order, start=1):
+            ch = all_chapters.get(cid) or {}
+            safe = _coo_safe_name(cid, f'ch_{idx:05d}')
+            chapter_arc = f'chapters/{idx:05d}_{safe}.json'
+            content = ch.get('content', '')
+            chapter_payload = {
+                'id': cid,
+                'title': ch.get('title', '') or f'第 {idx} 章',
+                'content': content,
+                'updated': ch.get('updated', meta.get('updated', 0)),
+            }
+            zf.writestr(chapter_arc, json.dumps(chapter_payload, ensure_ascii=False, indent=2))
+            summary_arc = ''
+            summary_path = os.path.join(bd, 'chapter_summaries', f'{cid}.md')
+            if os.path.isfile(summary_path):
+                summary_arc = f'ai/chapter_summaries/{idx:05d}_{safe}.md'
+                _coo_add_file(zf, summary_path, summary_arc)
+            chapters_manifest.append({
+                'id': cid,
+                'title': chapter_payload['title'],
+                'order': idx,
+                'path': chapter_arc,
+                'summary_path': summary_arc,
+                'word_count': len(content or ''),
+                'updated': chapter_payload['updated'],
+            })
+
+        cover_arc = ''
+        cover_path = os.path.join(bd, 'cover')
+        if os.path.isfile(cover_path):
+            try:
+                with open(cover_path, 'rb') as f:
+                    cover_raw = f.read()
+                if cover_raw:
+                    cover_arc = _coo_cover_arcname(cover_raw)
+                    zf.writestr(cover_arc, cover_raw)
+            except Exception:
+                cover_arc = ''
+
+        source_added = _coo_add_file(zf, os.path.join(bd, 'source.md'), 'ai/source.md')
+        outline_added = _coo_add_file(zf, os.path.join(bd, 'outline.md'), 'ai/outline.md')
+        core_added = _coo_add_file(zf, os.path.join(bd, 'core_memory.md'), 'ai/core_memory.md')
+        kb_added = _coo_add_file(zf, os.path.join(bd, 'kb.db'), 'ai/kb.db')
+        volume_added = _coo_add_dir(zf, os.path.join(bd, 'volume_summaries'), 'ai/volume_summaries')
+        vector_added = _coo_add_dir(zf, os.path.join(bd, '.vector_db'), 'vector_db')
         manifest = {
             'format_version': 1,
-            'format_name': 'lucawrite',
-            'app_name': 'LucaWriter',
+            'format_name': 'coo',
+            'book_uid': coo_uid,
             'exported_at': time.time(),
+            'producer': {
+                'app_name': 'LucaWriter',
+                'app_version': '1.2.3',
+            },
             'book': {
                 'id': meta.get('id', bid),
                 'title': meta.get('title', ''),
-                'author': '',
-                'description': '',
+                'author': pen_name or '佚名',
+                'description': meta.get('description', ''),
+                'language': meta.get('language', 'zh-CN'),
                 'created': meta.get('created', 0),
                 'updated': meta.get('updated', 0),
+                'cover_file': cover_arc,
             },
-            'encrypted': False,
+            'chapters': chapters_manifest,
+            'ai': {
+                'source_path': 'ai/source.md' if source_added else '',
+                'outline_path': 'ai/outline.md' if outline_added else '',
+                'core_memory_path': 'ai/core_memory.md' if core_added else '',
+                'kb_path': 'ai/kb.db' if kb_added else '',
+                'vector_db_path': 'vector_db/' if vector_added else '',
+            },
+            'contains': {
+                'chapters': True,
+                'summaries': bool(source_added or outline_added or core_added or volume_added or any(c.get('summary_path') for c in chapters_manifest)),
+                'knowledge_db': bool(kb_added),
+                'vector_db': bool(vector_added),
+                'chat_history': False,
+                'personal_settings': False,
+            },
+            'provenance': {
+                'history_path': 'META-INF/coo-history.jsonl',
+                'keys_path': 'META-INF/coo-keys.json',
+                'signature_alg': 'Ed25519',
+            },
         }
-        if os.path.exists(os.path.join(bd, 'cover')):
-            manifest['book']['cover_file'] = 'cover'
         zf.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
-        for root, dirs, files in os.walk(bd):
-            for fn in files:
-                if fn.startswith('.') or fn.endswith('.tmp'):
-                    continue
-                fp = os.path.join(root, fn)
-                arcname = os.path.relpath(fp, bd).replace('\\', '/')
-                try:
-                    with open(fp, 'rb') as f:
-                        zf.writestr(arcname, f.read())
-                except Exception:
-                    continue
-    return buf.getvalue()
+    raw = buf.getvalue()
+    if not HAS_COO_PROVENANCE:
+        raise RuntimeError('缺少 COO 签名模块或 cryptography 依赖')
+    identity = coo_provenance.load_or_create_identity(
+        os.path.join(DATA_DIR, 'coo_identity.json'),
+        client_name='LucaWriter',
+        client_version='1.2.3',
+        client_id_prefix='lucawriter',
+        user_name=pen_name or '佚名',
+    )
+    return coo_provenance.sign_coo_bytes(raw, identity, event_type='export')
 
 
-def _import_lucawrite_zip(raw, password=None):
-    if _lw_is_encrypted(raw):
-        if not password:
-            raise ValueError('该文件已加密，请输入密码')
-        raw = _lw_decrypt(raw, password)
+def _import_coo_zip(raw):
     try:
         zf = zipfile.ZipFile(io.BytesIO(raw), 'r')
     except zipfile.BadZipFile:
-        raise ValueError('无效的 .lucawrite 文件（无法解压）')
+        raise ValueError('无效的 .coo 文件（无法解压）')
     try:
         _validate_zip_archive(zf)
         manifest_str = _zip_read_limited(zf, 'manifest.json', EPUB_MAX_META_BYTES).decode('utf-8')
         manifest = json.loads(manifest_str)
     except Exception:
-        raise ValueError('无效的 .lucawrite 文件（缺少 manifest.json）')
-    if manifest.get('format_name') != 'lucawrite':
-        raise ValueError('不是有效的 .lucawrite 文件')
+        raise ValueError('无效的 .coo 文件（缺少 manifest.json）')
+    if manifest.get('format_name') != 'coo':
+        raise ValueError('不是有效的 .coo 文件')
     bid = 'book_' + str(int(time.time() * 1000))
     bd = get_book_dir(bid)
     os.makedirs(bd, exist_ok=True)
-    # zip bomb 防护：单文件 100MB，总解压 500MB；逐 chunk 流式写避免一次性 RAM
-    _MAX_PER_ENTRY = 100 * 1024 * 1024
-    _MAX_TOTAL = 500 * 1024 * 1024
-    _CHUNK = 256 * 1024
-    total_written = 0
-    for info in zf.infolist():
-        if info.filename == 'manifest.json':
+    ch_dir = os.path.join(bd, 'chapters')
+    os.makedirs(ch_dir, exist_ok=True)
+    ch_order = []
+    used_ids = set()
+    for idx, ch_meta in enumerate(manifest.get('chapters', []), start=1):
+        ch_path = (ch_meta.get('path') or '').replace('\\', '/')
+        if not ch_path or ch_path.startswith('/') or '..' in ch_path.split('/'):
             continue
-        if info.is_dir():
-            os.makedirs(os.path.join(bd, info.filename), exist_ok=True)
-            continue
-        safe_name = info.filename.replace('\\', '/')
-        if safe_name.startswith('/') or '..' in safe_name.split('/'):
-            continue
-        if info.file_size > _MAX_PER_ENTRY:
-            log_action('LW_IMPORT_SKIP_BIG', f'{safe_name} size={info.file_size}')
-            continue
-        if total_written + info.file_size > _MAX_TOTAL:
-            raise ValueError(f'.lucawrite 解压超过 {_MAX_TOTAL // 1024 // 1024}MB 上限')
-        fp = os.path.join(bd, safe_name)
-        if not os.path.realpath(fp).startswith(os.path.realpath(bd)):
-            continue
-        os.makedirs(os.path.dirname(fp), exist_ok=True)
         try:
-            written_this = 0
-            with zf.open(info.filename) as src, open(fp, 'wb') as dst:
-                while True:
-                    chunk = src.read(_CHUNK)
-                    if not chunk: break
-                    written_this += len(chunk)
-                    if written_this > _MAX_PER_ENTRY:
-                        # 压缩比异常，提前中止
-                        raise ValueError(f'{safe_name} 解压超过单文件上限')
-                    dst.write(chunk)
-            total_written += written_this
-        except ValueError:
-            raise
+            ch = json.loads(_zip_read_limited(zf, ch_path, 80 * 1024 * 1024).decode('utf-8'))
         except Exception:
             continue
+        cid = str(ch.get('id') or ch_meta.get('id') or f'ch_{idx}')
+        if not is_valid_id(cid) or cid in used_ids:
+            cid = f'ch_{int(time.time() * 1000)}_{idx}'
+        used_ids.add(cid)
+        ch_order.append(cid)
+        save_json(os.path.join(ch_dir, f'{cid}.json'), {
+            'id': cid,
+            'title': str(ch.get('title') or ch_meta.get('title') or f'第 {idx} 章')[:200],
+            'content': ch.get('content', ''),
+            'updated': ch.get('updated') or ch_meta.get('updated') or time.time(),
+        })
+        summary_path = (ch_meta.get('summary_path') or '').replace('\\', '/')
+        if summary_path and not summary_path.startswith('/') and '..' not in summary_path.split('/'):
+            try:
+                summary = _zip_read_limited(zf, summary_path, 10 * 1024 * 1024).decode('utf-8')
+                os.makedirs(os.path.join(bd, 'chapter_summaries'), exist_ok=True)
+                with open(os.path.join(bd, 'chapter_summaries', f'{cid}.md'), 'w', encoding='utf-8') as f:
+                    f.write(summary)
+            except Exception:
+                pass
     meta = get_book_meta(bid) or {}
     book_info = manifest.get('book', {})
-    if book_info.get('author'):
-        meta['author'] = book_info['author']
-    if book_info.get('description'):
-        meta['description'] = book_info['description']
     meta['id'] = bid
-    if not meta.get('title'):
-        meta['title'] = book_info.get('title', '导入的书本')
+    meta['title'] = book_info.get('title', '导入的书本')
+    meta['author'] = book_info.get('author', '')
+    meta['description'] = book_info.get('description', '')
+    meta['language'] = book_info.get('language', 'zh-CN')
+    meta['created'] = time.time()
+    meta['updated'] = time.time()
+    meta['chapter_order'] = ch_order
+    meta['current_chapter_id'] = ch_order[0] if ch_order else ''
+    meta['coo_book_uid'] = manifest.get('book_uid') or ('coo_' + secrets.token_hex(48))
     save_json(os.path.join(bd, 'meta.json'), meta)
-    cover_file = book_info.get('cover_file', '')
-    if cover_file and os.path.exists(os.path.join(bd, cover_file)):
+
+    ai = manifest.get('ai') or {}
+    ai_map = {
+        ai.get('source_path') or 'ai/source.md': 'source.md',
+        ai.get('outline_path') or 'ai/outline.md': 'outline.md',
+        ai.get('core_memory_path') or 'ai/core_memory.md': 'core_memory.md',
+        ai.get('kb_path') or 'ai/kb.db': 'kb.db',
+    }
+    for src, dest in ai_map.items():
+        src = (src or '').replace('\\', '/')
+        if not src or src.startswith('/') or '..' in src.split('/'):
+            continue
         try:
-            with open(os.path.join(bd, cover_file), 'rb') as f:
-                cover_data = f.read()
+            raw_file = _zip_read_limited(zf, src, 200 * 1024 * 1024)
+            with open(os.path.join(bd, dest), 'wb') as f:
+                f.write(raw_file)
+        except Exception:
+            pass
+    for info in zf.infolist():
+        name = info.filename.replace('\\', '/')
+        if info.is_dir() or name.startswith('/') or '..' in name.split('/'):
+            continue
+        if name.startswith('ai/volume_summaries/'):
+            rel = name[len('ai/volume_summaries/'):]
+            if rel:
+                fp = os.path.join(bd, 'volume_summaries', rel)
+                os.makedirs(os.path.dirname(fp), exist_ok=True)
+                try:
+                    with open(fp, 'wb') as f:
+                        f.write(_zip_read_limited(zf, name, 50 * 1024 * 1024))
+                except Exception:
+                    pass
+        elif name.startswith('vector_db/'):
+            rel = name[len('vector_db/'):]
+            if rel:
+                fp = os.path.join(bd, '.vector_db', rel)
+                os.makedirs(os.path.dirname(fp), exist_ok=True)
+                try:
+                    with open(fp, 'wb') as f:
+                        f.write(_zip_read_limited(zf, name, 200 * 1024 * 1024))
+                except Exception:
+                    pass
+    cover_file = (book_info.get('cover_file') or '').replace('\\', '/')
+    if cover_file and not cover_file.startswith('/') and '..' not in cover_file.split('/'):
+        try:
             with open(os.path.join(bd, 'cover'), 'wb') as f:
-                f.write(cover_data)
+                f.write(_zip_read_limited(zf, cover_file, EPUB_MAX_COVER_BYTES))
         except Exception:
             pass
     zf.close()
@@ -880,6 +1329,44 @@ def _fallback_theme_data_list(seed_text, max_items=2):
     return out
 
 
+def _generate_theme_data_list(prompt_text='', settings=None, max_items=2):
+    """Generate UI theme candidates with an AI provider when available, fallback locally."""
+    prompt_text = (prompt_text or '').strip()
+    settings = settings or get_settings()
+    raw = ''
+    err = ''
+    source = 'fallback'
+    theme_data_list = []
+    if settings.get('base_url') and settings.get('model'):
+        msgs = [
+            {
+                'role': 'system',
+                'content': (
+                    '你是 LucaWriter 的 UI 配色助手。只输出 1-2 个 [THEME] 标签，'
+                    '不要解释，不要 Markdown。格式：[THEME]bg:#031122,accent:#F9AACC|玫瑰之夜[/THEME]。'
+                    'bg 必须是深色背景，accent 必须是明亮强调色，颜色必须为 #RRGGBB。'
+                ),
+            },
+            {
+                'role': 'user',
+                'content': prompt_text or '请为长文本小说写作软件生成舒适、耐看的深色 UI 主题。',
+            },
+        ]
+        try:
+            raw, err = call_ai(settings, msgs, 400, 0.8, timeout=45)
+            if not err:
+                theme_data_list = _extract_theme_data_list(raw, allow_hex_fallback=True, max_items=max_items)
+                if theme_data_list:
+                    source = 'ai'
+        except Exception as e:
+            err = str(e)
+    if not theme_data_list:
+        seed = '\n'.join([prompt_text, raw or '', err or ''])
+        theme_data_list = _fallback_theme_data_list(seed, max_items=max_items)
+        source = 'fallback'
+    return theme_data_list[:max_items], raw, err, source
+
+
 def _resolve_chapter_id(raw_id, chapter_order):
     """解析 AI 给的 chapter_id。AI 经常把'第N章'的 N 当 ID，做兜底映射。
     返回真实存在于 chapter_order 中的 ID，找不到返回 None。
@@ -1034,6 +1521,14 @@ def get_settings():
         selected_font = ''
     if selected_font != s.get('editor_font_preset_id', ''):
         s['editor_font_preset_id'] = selected_font
+        changed = True
+    if s.get('theme_mode') not in ('dark', 'light'):
+        s['theme_mode'] = 'dark'
+        changed = True
+    custom_colors = s.get('custom_colors') if isinstance(s.get('custom_colors'), dict) else {}
+    accent_color = str(custom_colors.get('accent', '') or '').strip().upper()
+    if accent_color and re.match(r'^#[0-9A-F]{6}$', accent_color) and s.get('theme_accent') != accent_color:
+        s['theme_accent'] = accent_color
         changed = True
     # 迁移：旧版本 max_tokens 默认 80，对长上下文+推理模型不够，自动提升
     if s.get('ai_max_tokens', 0) < 200:
@@ -2847,6 +3342,17 @@ class Handler(BaseHTTPRequestHandler):
             o['memory'] = get_core_memory(bid)
             self.json_resp(200, o); return
 
+        if path.startswith('/api/book/') and path.endswith('/kb-archives'):
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            entries = _load_kb_archive_entries(bid)
+            current_id = _find_current_kb_archive(bid, entries)
+            for entry in entries:
+                entry['is_current'] = bool(current_id and str(entry.get('id') or '') == current_id)
+            self.json_resp(200, entries); return
+
         if path.startswith('/api/book/') and path.endswith('/chapter-kb'):
             parts = path.split('/')
             bid = unquote(parts[3]) if len(parts) > 3 else ''
@@ -3035,7 +3541,7 @@ class Handler(BaseHTTPRequestHandler):
             self.json_resp(200, {'hardware': hw, 'strategy': strategy}); return
 
         if path == '/api/local-llm/models-dir':
-            models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+            models_dir = _LOCAL_LLM_MODELS_DIR
             self.json_resp(200, {'path': os.path.abspath(models_dir)}); return
 
 
@@ -3605,31 +4111,28 @@ class Handler(BaseHTTPRequestHandler):
             log_action('IMPORT', f'{bid}: {len(chapters)} chapters from {filename}')
             self.json_resp(200, {'book': meta, 'imported': len(chapters)}); return
 
-        if path == '/api/books/import-lucawrite':
+        if path == '/api/books/import-coo':
             file_b64 = data.get('data', '')
-            password = data.get('password', '')
             if not file_b64:
                 self.json_resp(400, {'error': '缺少文件'}); return
             try:
                 raw = base64.b64decode(file_b64)
             except Exception:
                 self.json_resp(400, {'error': '文件数据无效'}); return
-            if _lw_is_encrypted(raw) and not password:
-                self.json_resp(200, {'need_password': True}); return
             try:
-                bid, meta, manifest = _import_lucawrite_zip(raw, password if password else None)
+                bid, meta, manifest = _import_coo_zip(raw)
             except ValueError as e:
                 self.json_resp(400, {'error': str(e)}); return
             except Exception as e:
                 self.json_resp(500, {'error': f'导入失败: {str(e)[:100]}'}); return
-            log_action('IMPORT_LUCAWRITE', bid)
+            log_action('IMPORT_COO', bid)
             ch_dir = os.path.join(get_book_dir(bid), 'chapters')
             ch_count = 0
             if os.path.isdir(ch_dir):
                 ch_count = len([f for f in os.listdir(ch_dir) if f.endswith('.json')])
-            self.json_resp(200, {'book_id': bid, 'title': meta.get('title', ''), 'imported': ch_count, 'need_password': False}); return
+            self.json_resp(200, {'book_id': bid, 'title': meta.get('title', ''), 'imported': ch_count}); return
 
-        if path == '/api/books/check-lucawrite':
+        if path == '/api/books/check-coo':
             file_b64 = data.get('data', '')
             if not file_b64:
                 self.json_resp(400, {'error': '缺少文件'}); return
@@ -3637,8 +4140,13 @@ class Handler(BaseHTTPRequestHandler):
                 raw = base64.b64decode(file_b64)
             except Exception:
                 self.json_resp(400, {'error': '文件数据无效'}); return
-            encrypted = _lw_is_encrypted(raw)
-            self.json_resp(200, {'encrypted': encrypted}); return
+            try:
+                zf = zipfile.ZipFile(io.BytesIO(raw), 'r')
+                manifest = json.loads(_zip_read_limited(zf, 'manifest.json', EPUB_MAX_META_BYTES).decode('utf-8'))
+                zf.close()
+            except Exception:
+                self.json_resp(400, {'error': '无效的 .coo 文件'}); return
+            self.json_resp(200, {'valid': manifest.get('format_name') == 'coo'}); return
 
         if path == '/api/books/rename':
             bid = data.get('book_id', '')
@@ -3702,6 +4210,30 @@ class Handler(BaseHTTPRequestHandler):
                 close_all_ai_connections()
                 self.json_resp(200, {'status': 'stopping'}); return
             self.json_resp(400, {'error': '未知操作'}); return
+
+        if path.startswith('/api/book/') and path.endswith('/export-coo'):
+            parts = path.split('/')
+            bid = parts[3] if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            log_action('EXPORT_COO_REQUEST', f'book={bid}')
+            pen_name = str(data.get('pen_name') or data.get('author') or '').strip()
+            try:
+                output = _build_coo_zip(bid, pen_name)
+            except Exception as e:
+                self.json_resp(500, {'error': f'打包失败: {str(e)[:100]}'}); return
+            meta = get_book_meta(bid) or {}
+            safe_title = re.sub(r'[^\w\u4e00-\u9fff.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
+            utf8_fn = quote(safe_title + '.coo', safe='')
+            log_action('EXPORT_COO', f'book={bid} size={len(output)}')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/vnd.coobox.coo+zip')
+            self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
+            self.send_header('Content-Length', str(len(output)))
+            self.send_header('Connection', 'close')
+            self.send_cors(); self.end_headers()
+            self.wfile.write(output)
+            return
 
         if path == '/api/books/delete':
             bid = data.get('book_id', '')
@@ -4109,35 +4641,6 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(200, {'status': 'ok', 'title': new_title}); return
                 except Exception as e:
                     self.json_resp(500, {'error': str(e)[:200]}); return
-
-            if action == 'export-lucawrite':
-                log_action('EXPORT_LUCAWRITE_REQUEST', f'book={bid}')
-                password = data.get('password', '')
-                try:
-                    zip_bytes = _build_lucawrite_zip(bid)
-                except Exception as e:
-                    self.json_resp(500, {'error': f'打包失败: {str(e)[:100]}'}); return
-                if password:
-                    if not HAS_CRYPTO:
-                        self.json_resp(400, {'error': '加密需要 cryptography 库，请执行 pip install cryptography 后重启'}); return
-                    try:
-                        output = _lw_encrypt(zip_bytes, password)
-                    except Exception as e:
-                        self.json_resp(500, {'error': f'加密失败: {str(e)[:100]}'}); return
-                else:
-                    output = zip_bytes
-                meta = get_book_meta(bid) or {}
-                safe_title = re.sub(r'[^\w\u4e00-\u9fff.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
-                utf8_fn = quote(safe_title + '.lucawrite', safe='')
-                log_action('EXPORT_LUCAWRITE', f'book={bid} encrypted={bool(password)} size={len(output)}')
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/x-lucawrite')
-                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
-                self.send_header('Content-Length', str(len(output)))
-                self.send_header('Connection', 'close')
-                self.send_cors(); self.end_headers()
-                self.wfile.write(output)
-                return
 
             if action == 'export-epub':
                 log_action('EXPORT_EPUB_REQUEST', f'book={bid}')
@@ -5648,6 +6151,20 @@ class Handler(BaseHTTPRequestHandler):
                 'books': books_data,
             }); return
 
+        if path == '/api/theme-generate':
+            if not self.is_authed():
+                self.json_resp(401, {'error': '未登录'}); return
+            prompt = str(data.get('prompt', '') or '')
+            settings = get_settings()
+            theme_data_list, raw, err, source = _generate_theme_data_list(prompt, settings=settings, max_items=2)
+            self.json_resp(200, {
+                'ok': True,
+                'theme_data_list': theme_data_list,
+                'theme_data': theme_data_list[0] if theme_data_list else None,
+                'source': source,
+                'error': err or '',
+            }); return
+
         if path == '/api/settings':
             if not self.is_authed():
                 self.json_resp(401, {'error': '未登录'}); return
@@ -5671,6 +6188,21 @@ class Handler(BaseHTTPRequestHandler):
                     elif k == 'network_search':
                         if v not in ('off', 'on', 'auto'):
                             continue
+                    elif k == 'theme_mode':
+                        v = 'light' if v == 'light' else 'dark'
+                    elif k == 'theme_accent':
+                        v = str(v or '').strip().upper()
+                        if not re.match(r'^#[0-9A-F]{6}$', v):
+                            continue
+                    elif k == 'custom_colors':
+                        if not isinstance(v, dict):
+                            continue
+                        clean_colors = {}
+                        for ck in ('page_bg', 'accent', '_aiThemeUndoBg', '_aiThemeUndoAccent'):
+                            cv = str(v.get(ck, '') or '').strip().upper()
+                            if cv and re.match(r'^#[0-9A-F]{6}$', cv):
+                                clean_colors[ck] = cv
+                        v = clean_colors
                     elif k == 'active_provider_idx':
                         try: v = int(v)
                         except: continue
@@ -5709,6 +6241,8 @@ class Handler(BaseHTTPRequestHandler):
             settings['editor_font_preset_id'] = selected_font
             settings['ai_auto_comment'] = True
             settings['ai_temperature'] = None
+            if isinstance(settings.get('custom_colors'), dict) and settings['custom_colors'].get('accent'):
+                settings['theme_accent'] = settings['custom_colors']['accent']
             try:
                 settings['editor_font_weight'] = max(100, min(900, int(settings.get('editor_font_weight') or 200)))
             except Exception:
@@ -5785,7 +6319,7 @@ class Handler(BaseHTTPRequestHandler):
             self.json_resp(200, {'ok': True}); return
 
         if path == '/api/local-llm/open-models-dir':
-            models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+            models_dir = _LOCAL_LLM_MODELS_DIR
             os.makedirs(models_dir, exist_ok=True)
             try:
                 if sys.platform == 'win32':
@@ -5892,6 +6426,40 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(404, {'error': '书本不存在'}); return
             _save_chat_history(bid, [])
             self.json_resp(200, {'ok': True}); return
+
+        if path.startswith('/api/book/') and path.endswith('/kb-archives/restore'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            st = kb_storage.get_rt_state(bid)
+            if st and st.get('status') == 'running':
+                self.json_resp(400, {'error': '通读正在进行中，不能恢复历史版本'}); return
+            archive_id = str(data.get('archive_id') or '').strip()
+            if not archive_id:
+                self.json_resp(400, {'error': '缺少历史版本 ID'}); return
+            settings = get_settings()
+            cfg = get_readthrough_config(bid)
+            if cfg.get('model'): settings['model'] = cfg['model']
+            try:
+                current_archive_id = _find_current_kb_archive(bid)
+                archived_current = False if current_archive_id else _archive_kb_db(bid, settings)
+            except Exception as e:
+                log_action('KB_ARCHIVE_BEFORE_RESTORE_ERR', str(e)[:120])
+                self.json_resp(500, {'error': '恢复前归档当前数据库失败，未恢复'}); return
+            try:
+                entry = _restore_kb_archive(bid, archive_id)
+            except ValueError as e:
+                self.json_resp(400, {'error': str(e)}); return
+            except Exception as e:
+                log_action('KB_ARCHIVE_RESTORE_ERR', str(e)[:120])
+                self.json_resp(500, {'error': '恢复历史版本失败'}); return
+            self.json_resp(200, {
+                'status': 'ok',
+                'archive_id': entry.get('id'),
+                'archived_current': bool(archived_current),
+                'current_already_archived': bool(current_archive_id),
+            }); return
 
         if path == '/api/fetch-models':
             base_url = data.get('base_url', '')
@@ -6100,6 +6668,18 @@ class Handler(BaseHTTPRequestHandler):
                                  name=f'kb_readthrough_{bid}', daemon=True).start()
                 self.json_resp(200, {'status': 'started'}); return
             if path.endswith('/reset') or path.endswith('/readthrough/reset') or path.endswith('/clear') or path.endswith('/readthrough/clear'):
+                st = kb_storage.get_rt_state(bid)
+                if st and st.get('status') == 'running':
+                    self.json_resp(400, {'error': '通读正在进行中，不能归档重来'}); return
+                settings = get_settings()
+                cfg = get_readthrough_config(bid)
+                if cfg.get('model'): settings['model'] = cfg['model']
+                try:
+                    already_archived = _find_current_kb_archive(bid)
+                    archived = False if already_archived else _archive_kb_db(bid, settings)
+                except Exception as e:
+                    log_action('KB_ARCHIVE_BEFORE_RESET_ERR', str(e)[:120])
+                    self.json_resp(500, {'error': '归档失败，未清空旧数据库'}); return
                 kb_storage.embed_clear(bid)
                 kb_storage.reset_book_kb(bid)
                 save_source(bid, '')
@@ -6112,7 +6692,7 @@ class Handler(BaseHTTPRequestHandler):
                 kb_storage.set_rt_state(bid, status='idle', phase='已重置', current_idx=-1, total=0,
                                         active_start_idx=-1, active_end_idx=-1,
                                         error='', pause_requested=0, stream_buffer='')
-                self.json_resp(200, {'status': 'ok'}); return
+                self.json_resp(200, {'status': 'ok', 'archived': archived, 'already_archived': bool(already_archived)}); return
             if path.endswith('/redo') or path.endswith('/readthrough/redo'):
                 chapter_id = qs.get('chapter_id', [''])[0] or parts[7] if len(parts) > 7 else ''
                 if not chapter_id:
@@ -7652,8 +8232,11 @@ def get_ai_providers():
 AI_PROVIDERS_FILE = os.path.join(DATA_DIR, 'ai_providers.json')
 
 # ===== 本地 Llama.cpp 服务器控制 =====
-_LOCAL_LLM_DIR = os.environ.get('LOCAL_LLM_DIR') or os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'local_llm'))
-os.makedirs(os.path.join(_LOCAL_LLM_DIR, 'models'), exist_ok=True)
+_LOCAL_LLM_RUNTIME_DIR = os.environ.get('LOCAL_LLM_RUNTIME_DIR') or os.environ.get('LOCAL_LLM_DIR') or os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'local_llm'))
+_LOCAL_LLM_DATA_DIR = os.environ.get('LOCAL_LLM_DATA_DIR') or os.environ.get('LOCAL_LLM_DIR') or _LOCAL_LLM_RUNTIME_DIR
+_LOCAL_LLM_MODELS_DIR = os.environ.get('LOCAL_LLM_MODELS_DIR') or os.path.join(_LOCAL_LLM_DATA_DIR, 'models')
+os.makedirs(_LOCAL_LLM_MODELS_DIR, exist_ok=True)
+os.makedirs(_LOCAL_LLM_DATA_DIR, exist_ok=True)
 _LOCAL_LLM_LOCK = threading.Lock()
 _LOCAL_LLM_PROC = None
 _LOCAL_LLM_STATE = {'status': 'idle', 'progress': 0, 'error': '', 'updated': 0}
@@ -7720,7 +8303,7 @@ def _download_model_task(preset_key):
         _download_set(status='error', error=f'未知模型预设: {preset_key}')
         return
 
-    models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+    models_dir = _LOCAL_LLM_MODELS_DIR
     os.makedirs(models_dir, exist_ok=True)
     dest_path = os.path.join(models_dir, preset['file'])
 
@@ -7810,7 +8393,7 @@ def _download_with_url(url, dest_path, total_size=0):
 
 def _detect_local_model():
     """自动检测 local_llm/models/ 目录下最新的 .gguf 模型文件（按修改时间排序）"""
-    models_dir = os.path.join(_LOCAL_LLM_DIR, 'models')
+    models_dir = _LOCAL_LLM_MODELS_DIR
     if not os.path.isdir(models_dir):
         return None
     ggufs = [f for f in os.listdir(models_dir) if f.lower().endswith('.gguf')]
@@ -7820,7 +8403,7 @@ def _detect_local_model():
     return os.path.join(models_dir, ggufs[0])
 
 
-_LOCAL_LLM_MODEL = _detect_local_model() or os.path.join(_LOCAL_LLM_DIR, 'models', 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf')
+_LOCAL_LLM_MODEL = _detect_local_model() or os.path.join(_LOCAL_LLM_MODELS_DIR, 'NVIDIA-Nemotron-3-Nano-4B-Q4_K_M.gguf')
 
 def _sync_local_provider_url(port):
     """把"本地 Llama.cpp" provider preset 的 base_url 同步到真实端口。
@@ -7964,7 +8547,7 @@ def _monitor_local_llm(proc):
             if proc.poll() is not None:
                 exit_code = proc.returncode
                 # 读 stderr.log 获取崩溃信息
-                stderr_path = os.path.join(_LOCAL_LLM_DIR, 'stderr.log')
+                stderr_path = os.path.join(_LOCAL_LLM_DATA_DIR, 'stderr.log')
                 crash_info = ''
                 if os.path.exists(stderr_path):
                     try:
@@ -7978,7 +8561,7 @@ def _monitor_local_llm(proc):
                 _local_llm_set(status='error', progress=_LOCAL_LLM_STATE.get('progress', 5), error=msg)
                 return
             # 通过日志文件判断进度
-            log_path = os.path.join(_LOCAL_LLM_DIR, 'server.log')
+            log_path = os.path.join(_LOCAL_LLM_DATA_DIR, 'server.log')
             if os.path.exists(log_path):
                 try:
                     with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -8011,7 +8594,7 @@ def _monitor_local_llm(proc):
 
 def _start_local_llm():
     global _LOCAL_LLM_PROC, _LOCAL_LLM_MODEL
-    exe = os.path.join(_LOCAL_LLM_DIR, 'llama-server.exe')
+    exe = os.path.join(_LOCAL_LLM_RUNTIME_DIR, 'llama-server.exe')
     if not os.path.exists(exe):
         return False, '找不到 llama-server.exe'
     # 每次启动前重新检测模型
@@ -8028,8 +8611,8 @@ def _start_local_llm():
         if _LOCAL_LLM_STATE.get('status') in ('starting', 'loading'):
             return True, '正在启动中'
     try:
-        log_path = os.path.join(_LOCAL_LLM_DIR, 'server.log')
-        stderr_path = os.path.join(_LOCAL_LLM_DIR, 'stderr.log')
+        log_path = os.path.join(_LOCAL_LLM_DATA_DIR, 'server.log')
+        stderr_path = os.path.join(_LOCAL_LLM_DATA_DIR, 'stderr.log')
         # 清空旧日志
         open(log_path, 'w').close()
         open(stderr_path, 'w').close()
@@ -8047,7 +8630,7 @@ def _start_local_llm():
         cmd = [exe, '-m', _LOCAL_LLM_MODEL, '--log-file', log_path, '--log-colors', 'off'] + _build_llm_args(strategy, context_length=ctx_len)
         stderr_fp = open(stderr_path, 'a', encoding='utf-8', errors='ignore')
         try:
-            _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_DIR,
+            _LOCAL_LLM_PROC = subprocess.Popen(cmd, cwd=_LOCAL_LLM_RUNTIME_DIR,
                                                stdout=subprocess.DEVNULL,
                                                stderr=stderr_fp,
                                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)

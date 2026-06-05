@@ -48,6 +48,23 @@
 - CORS：仅对 localhost/127.0.0.1/::1 回显 Origin
 - 知识库必须向后兼容：已有 `kb.db` 是用户花大量时间通读得到的核心资产。新增知识库能力时只做增量迁移和兼容查询，不要求重通读，不自动清空旧表 / 旧索引 / 旧 `source.md`。只有用户明确点击重通读或清空知识库时，才允许重建。
 
+## COO 格式与 Coobox 联动
+
+LucaWriter 是 `.coo` 电子书的**生产端**，Coobox（`~/Documents/Coobox`）是**消费端/阅读器**。两端共享同一份 `.coo` 契约——**改格式必须三处同步**：`backend/main.py`（`_build_coo_zip` / `_import_coo_zip`）、`cooverter.py`、以及 Coobox 的解析+验签逻辑。格式权威定义在 `backend/coo_provenance.py` 和 `COO.md`。
+
+- **`.coo` = ZIP 包**：一本书 + AI 数据 + Ed25519 签名溯源。扩展名 `.coo`，MIME `application/vnd.coobox.coo+zip`。
+- **包内结构**：
+  - `manifest.json`（必需，`format_name:"coo"`，`format_version:1`）
+  - `chapters/NNNNN_<safe>.json` → `{id,title,content,updated}`
+  - `ai/source.md`、`ai/outline.md`、`ai/core_memory.md`、`ai/kb.db`、`ai/chapter_summaries/`、`ai/volume_summaries/`、`vector_db/`（Chroma）——全部可选，看 `manifest.contains` / `manifest.ai`
+  - 封面：`manifest.book.cover_file` 指向
+  - `META-INF/coo-history.jsonl` + `META-INF/coo-keys.json`：溯源链（控制文件）
+- **溯源（`coo-provenance-v1`）**：每次导出/转换向 `coo-history.jsonl` **追加**一条 Ed25519 签名事件（`changed_files[{path,sha256,size}]` / `previous_event_hash` / `event_hash` / `signature` / `public_key_id`）。规范化 JSON 用 `ensure_ascii=False, sort_keys=True, separators=(",",":")`、UTF-8；`event_hash=sha256(unsigned)`，签名对 unsigned 字节。控制文件**不计入** `changed_files`；`public_key_id = "key_"+sha256(pubkey)[:32]`。
+- **校验**：逐条验哈希 + 链衔接 + 签名，且**最后一条 `changed_files` 必须与当前包内文件哈希完全一致**。任何对章节/封面/manifest/kb.db/向量库的无签名改动都会让 `cooverter expose` 和 Coobox 报篡改失败。
+- **身份/私钥**：LucaWriter 用 `DATA_DIR/coo_identity.json`（client `lucawriter`），cooverter 用 `~/.cooverter/identity.json`（client `cooverter`）。Ed25519 私钥**不入库、不导出、不进 `.coo`**。
+- **cooverter**：独立 CLI，复用 `main.IMPORT_PARSERS` 把 TXT/MD/DOCX/PDF/EPUB 转 `.coo`。`cooverter <path>` 转换，`cooverter expose <path.coo>` 验签。
+- **向后兼容**：导入端对 `ai.*` 缺省路径回落默认位置、未知/缺字段容错、所有路径防 `..`/绝对路径、`_zip_read_limited` 限大小。
+
 ## 预览
 
 - 调用 preview 工具时，使用 `http://localhost:10000`（前端开发服务器固定端口），不要自己起 dev server。

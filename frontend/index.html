@@ -312,7 +312,8 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .book-card-menu{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.5);border:none;color:var(--t3);width:24px;height:24px;border-radius:var(--r1);font-size:12px;cursor:pointer;display:none;align-items:center;justify-content:center;backdrop-filter:blur(4px);letter-spacing:1px;line-height:1;z-index:10}
 .book-card:hover .book-card-menu{display:flex}
 .book-card-menu:hover{color:var(--t1);background:var(--accent-a15)}
-.book-menu-dropdown{position:absolute;top:34px;right:8px;background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--r2);padding:4px 0;min-width:120px;z-index:999;display:none;backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur)}
+.book-menu-dropdown{position:absolute;top:34px;right:8px;background:rgba(30,30,30,.82);border:1px solid var(--glass-border);border-radius:var(--r2);padding:4px 0;min-width:120px;z-index:999;display:none;backdrop-filter:blur(12px) saturate(160%);-webkit-backdrop-filter:blur(12px) saturate(160%)}
+[data-theme-mode="light"] .book-menu-dropdown{background:rgba(255,255,255,.78)}
 .book-menu-dropdown.show{display:block}
 .book-menu-dropdown button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--t-on-surface-weak);font-size:13px;padding:8px 14px;cursor:pointer;transition:0s}
 .book-menu-dropdown button:hover{color:var(--t-on-surface);background:var(--accent-a12)}
@@ -720,6 +721,15 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .rt-db-section.notes{flex:1;min-height:110px;display:flex;flex-direction:column}
 .rt-db-section-head{height:24px;padding:0 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--t2)}
 .rt-db-section-body{padding:7px 10px;font-size:12px;line-height:1.5;color:var(--t2)}
+.rt-archive-item{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px;line-height:1.3}
+.rt-archive-item:last-child{border-bottom:none}
+.rt-archive-date{color:var(--t2);white-space:nowrap}
+.rt-archive-main{min-width:0;display:flex;flex-direction:column;gap:2px}
+.rt-archive-model{color:var(--t3);font-size:10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt-archive-actions{display:flex;align-items:center;gap:6px;margin-left:8px;flex-shrink:0}
+.rt-archive-current{font-size:10px;color:var(--accent)}
+.rt-archive-restore{padding:3px 8px;border:1px solid var(--border2);background:var(--surface2);color:var(--t2);border-radius:var(--r1);font-size:10px;cursor:pointer}
+.rt-archive-restore:disabled{opacity:.5;cursor:default}
 .rt-db-section.notes .rt-db-section-body{flex:1;min-height:0;padding:0}
 .rt-current-title{font-size:13px;font-weight:700;color:var(--t1)}
 .rt-current-meta{color:var(--t3)}
@@ -1277,6 +1287,13 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
                   <div class="rt-db-section-head"><span>当前状态</span><span id="rtCurrentBadge"></span></div>
                   <div class="rt-db-section-body" id="rtCurrentInfo">等待通读任务</div>
                  </div>
+                 <div class="rt-db-section archives">
+                  <div class="rt-db-section-head">
+                   <span>历史版本</span>
+                   <span class="rt-archive-toggle" id="rtArchiveToggle" onclick="toggleKbArchives()" style="cursor:pointer;font-size:10px;color:var(--accent)" data-count="0">展开 0</span>
+                  </div>
+                  <div class="rt-db-section-body" id="rtArchiveList" style="display:none"></div>
+                 </div>
                  <div class="rt-db-section notes">
                   <div class="rt-db-section-head"><span>笔记预览</span><span id="rtLatestBadge"></span></div>
                   <div class="rt-db-section-body" style="padding:0">
@@ -1301,7 +1318,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  <div class="rt-info" style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3)"><span id="rtPhase">准备中...</span><span id="rtChapters">0/0 章</span></div>
  </div>
             <button class="ai-send" onclick="startRT()" id="rtStartBtn">开始通读</button>
-            <button class="ai-send" onclick="resetRT()" id="rtClearBtn" style="display:none">重通读</button>
+            <button class="ai-send" onclick="resetRT()" id="rtClearBtn" style="display:none" title="归档当前数据库后重来">归档重来</button>
  </div>
  </div>
 
@@ -1441,9 +1458,12 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
     <button class="topbar-btn accent" id="aiThemeGenBtn" onclick="aiGenerateTheme()" style="width:100%">✨ AI 生成主题</button>
    </div>
    <div id="aiThemeResult" style="display:none;margin-top:8px;padding:8px 10px;background:var(--surface2);border:1px solid var(--accent-a20);border-radius:var(--r1);font-size:11px;line-height:1.5">
-    <div style="font-weight:600;color:var(--t1);margin-bottom:4px">🎨 已生成主题</div>
-    <div class="th-swatches" id="aiThemeSwatches" style="display:flex;gap:6px;margin:6px 0"></div>
-    <button class="th-apply th-undo" id="aiThemeUndoBtn" onclick="undoAIGeneratedTheme()" style="width:100%;text-align:center">撤销</button>
+    <div style="font-weight:600;color:var(--t1);margin-bottom:4px">🎨 主题候选</div>
+    <div id="aiThemeCandidateList"></div>
+    <div id="aiThemeUndoWrap" style="display:none;margin-top:8px">
+     <div class="th-swatches" id="aiThemeSwatches" style="display:flex;gap:6px;margin:6px 0"></div>
+     <button class="th-apply th-undo" id="aiThemeUndoBtn" onclick="undoAIGeneratedTheme()" style="width:100%;text-align:center">撤销</button>
+    </div>
    </div>
 </div>
 <div class="ma">
@@ -1454,8 +1474,8 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 <div class="modal-bg" id="importModal">
 <div class="modal">
 <h2>导入书本</h2>
-<p style="font-size:12px;color:var(--t2);margin-bottom:10px">支持 TXT / MD / DOCX / PDF / EPUB / LucaWrite</p>
- <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.lucawrite"></div>
+<p style="font-size:12px;color:var(--t2);margin-bottom:10px">支持 TXT / MD / DOCX / PDF / EPUB / COO</p>
+ <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.coo"></div>
  <div class="imp-progress-wrap" id="impProgressWrap" style="display:none">
  <div class="imp-progress-bar"><div class="imp-progress-fill" id="impProgressFill"></div></div>
     <div class="imp-progress-text" id="impProgressText">准备中...</div>
@@ -1517,35 +1537,17 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 </div>
 </div></div>
 
-<div class="modal-bg" id="lucawriteExportModal">
+<div class="modal-bg" id="cooExportModal">
 <div class="modal">
-<h2>导出 LucaWrite</h2>
-<p style="font-size:12px;color:var(--t2);margin-bottom:12px">LucaWrite 格式包含完整书本数据（章节、大纲、AI 对话、标注、笔记等），可无损还原。</p>
+<h2>导出 COO</h2>
+<p style="font-size:12px;color:var(--t2);margin-bottom:12px">带有完整章节、封面、摘要、知识库和向量数据，建议上传前运行一遍通读全书以确保数据库最新。</p>
 <div class="mg">
-<label>加密密码 <span style="font-weight:normal;color:var(--t3)">(留空则不加密)</span></label>
-  <input id="lwExportPassword" type="password" placeholder="可选，设置密码以加密文件">
-</div>
-<div class="mg">
-<label>确认密码</label>
-  <input id="lwExportPasswordConfirm" type="password" placeholder="再次输入密码">
+<label>笔名</label>
+  <input id="cooPenName" type="text" placeholder="写入 COO 文件的作者笔名">
 </div>
 <div class="ma">
-  <button class="prompt-ok" onclick="doExportLucawrite()">导出</button>
-  <button class="prompt-cancel" onclick="closeModal('lucawriteExportModal')">取消</button>
-</div>
-</div></div>
-
-<div class="modal-bg" id="lucawriteImportPasswordModal">
-<div class="modal">
-<h2>输入密码</h2>
-<p style="font-size:12px;color:var(--t2);margin-bottom:12px">该 .lucawrite 文件已加密，请输入密码以解密导入。</p>
-<div class="mg">
-<label>密码</label>
-  <input id="lwImportPassword" type="password" placeholder="输入加密密码">
-</div>
-<div class="ma">
-  <button class="prompt-ok" onclick="doImportLucawriteWithPassword()">解密并导入</button>
-  <button class="prompt-cancel" onclick="closeModal('lucawriteImportPasswordModal');openImportNew()">取消</button>
+  <button class="prompt-ok" onclick="doExportCoo()">导出</button>
+  <button class="prompt-cancel" onclick="closeModal('cooExportModal')">取消</button>
 </div>
 </div></div>
 
@@ -1672,6 +1674,7 @@ var dragSrcIndex=null;
 var coverUploadBookId=null;
 var rtLastDoneChapters=0;
 var rtLastStatus='idle';
+var _rtCurrentArchived=false;
 var bookAnnotations={};
 var _radarTimer=null;
 var _radarPending=false;
@@ -1831,7 +1834,7 @@ function _bindBookMenu(container,b,mode){
  bind(function(){doExportBook(b.id,'txt')});
  bind(function(){openEpubExport(b.id,b.title||'')});
  bind(function(){doExportBook(b.id,'zip')});
- bind(function(){openLucawriteExport(b.id,b.title||'')});
+ bind(function(){openCooExport(b.id,b.title||'')});
  if(mode==='series-item')bind(function(){removeFromSeries(b.id)});
  else bind(function(){delBook(b.id)});
 }
@@ -2030,7 +2033,7 @@ function _renderBookShelfCards(books){
  }else{
   metaHtml='<div class="book-card-meta"><span>'+(b.chapter_count||0)+' 章</span><span>&#8226;</span><span>'+_formatDate(b.updated)+'</span></div>';
  }
- card.innerHTML=coverHtml+'<div class="book-card-title">'+esc(b.title||'未命名')+'</div>'+metaHtml+'<button class="book-card-menu" onclick="event.stopPropagation();toggleBookMenu(\''+esc(b.id)+'\',this)">&#8943;</button><div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'"><button onclick="event.stopPropagation();openCoverUpload(\''+esc(b.id)+'\')">'+(b.has_cover?'更换封面':'上传封面')+'</button><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button>'+(isSeries?'':'<button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button onclick="event.stopPropagation();openLucawriteExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 LucaWrite</button>')+'<button class="danger-item" onclick="event.stopPropagation();delBook(\''+esc(b.id)+'\')">删除'+(isSeries?'系列':'书本')+'</button></div>';
+ card.innerHTML=coverHtml+'<div class="book-card-title">'+esc(b.title||'未命名')+'</div>'+metaHtml+'<button class="book-card-menu" onclick="event.stopPropagation();toggleBookMenu(\''+esc(b.id)+'\',this)">&#8943;</button><div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'"><button onclick="event.stopPropagation();openCoverUpload(\''+esc(b.id)+'\')">'+(b.has_cover?'更换封面':'上传封面')+'</button><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button>'+(isSeries?'':'<button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button onclick="event.stopPropagation();openCooExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 COO</button>')+'<button class="danger-item" onclick="event.stopPropagation();delBook(\''+esc(b.id)+'\')">删除'+(isSeries?'系列':'书本')+'</button></div>';
  _bindBookMenu(card,b,isSeries?'series-card':'book-card');
  if(isSeries){
   card.onclick=function(e){if(e.target.closest('.book-card-menu,.book-menu-dropdown'))return;openSeries(b.id,b.title)};
@@ -2109,6 +2112,7 @@ function openBook(id){
 	 $('predictionResultBody').innerHTML='<div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>';
   $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='准备中...';
   $('rtChapters').textContent='0/0 章';
+  _rtCurrentArchived=false;
   _setRTButtonUI('idle', -1);
  rtLastDoneChapters=0;
  rtLastChapterIdx=-1;
@@ -2122,6 +2126,8 @@ function openBook(id){
   loadSourceToRT();
   loadReadModeConfig();
   loadAnnotations();
+  pollRTStatus();
+  loadKbArchives();
  }
 
  function openBookChapter(bid,cid){
@@ -3698,6 +3704,15 @@ function hexToRgba(hex,alpha){
  var b=parseInt(hex.slice(5,7),16);
  return 'rgba('+r+','+g+','+b+','+alpha+')';
 }
+function _textOnColor(hex){
+ hex=_normHexColor(hex);
+ if(!hex)return '#191919';
+ var r=parseInt(hex.slice(1,3),16)/255;
+ var g=parseInt(hex.slice(3,5),16)/255;
+ var b=parseInt(hex.slice(5,7),16)/255;
+ var lum=.2126*r+.7152*g+.0722*b;
+ return lum>.56?'#191919':'#ffffff';
+}
 
 function _hexToHsl(hex){
  var r=parseInt(hex.slice(1,3),16)/255;
@@ -3779,6 +3794,7 @@ function _cpApplyColor(hex,varName){
  // ripple for accent
  if(varName==='--accent'){
   root.style.setProperty('--accent2',hex);
+  root.style.setProperty('--on-accent',_textOnColor(hex));
   root.style.setProperty('--accent-a03',hexToRgba(hex,.03));
   root.style.setProperty('--accent-a06',hexToRgba(hex,.06));
   root.style.setProperty('--accent-a08',hexToRgba(hex,.08));
@@ -3911,11 +3927,18 @@ function _saveColorSettings(){
  for(var k in src){if(Object.prototype.hasOwnProperty.call(src,k))colors[k]=src[k];}
  _colorSettings=colors;
  settings.custom_colors=colors;
- api('POST','/api/settings',{custom_colors:colors},function(r,s){
+ if(colors.accent)settings.theme_accent=colors.accent;
+ var payload={
+  custom_colors:colors,
+  theme_accent:colors.accent||settings.theme_accent||'#E8CC7A',
+  theme_mode:settings.theme_mode||document.documentElement.getAttribute('data-theme-mode')||'dark'
+ };
+ api('POST','/api/settings',payload,function(r,s){
   if(s===200&&r){
    settings=r;
    providerPresets=r.provider_presets||providerPresets;
    if(typeof r.active_provider_idx==='number')currentPresetIdx=r.active_provider_idx;
+   loadThemedIcon();
   }
  });
 }
@@ -4025,22 +4048,76 @@ function applyThemeSuggestion(bg,accent,btnEl){
 
 // AI 生成主题 — 只生成候选主题，用户点击"应用"后才换色
 var _aiThemeSavedColors=null;
+function _saveCurrentThemeForUndo(){
+ var saved={};
+ var cs=_colorSettings||{};
+ if(cs.page_bg)saved.page_bg=cs.page_bg;
+ if(cs.accent)saved.accent=cs.accent;
+ if(!saved.page_bg){
+  var root=document.documentElement;
+  var cb=root.style.getPropertyValue('--bg')||getComputedStyle(root).getPropertyValue('--bg');
+  if(cb&&cb.trim())saved.page_bg=cb.trim();
+ }
+ if(!saved.accent){
+  var root=document.documentElement;
+  var ca=root.style.getPropertyValue('--accent')||getComputedStyle(root).getPropertyValue('--accent');
+  if(ca&&ca.trim())saved.accent=ca.trim();
+ }
+ _aiThemeSavedColors=saved;
+}
+function _setThemeUndoVisible(on){
+ var w=$('aiThemeUndoWrap');
+ if(w)w.style.display=on?'block':'none';
+}
+function _renderAiThemeCandidates(themeDataList){
+ var r=$('aiThemeResult');
+ var listEl=$('aiThemeCandidateList');
+ if(!r||!listEl)return;
+ r.style.display='block';
+ listEl.innerHTML='';
+ (themeDataList||[]).forEach(function(td,idx){
+  var colors=td.colors||{};
+  var bg=esc(colors.bg||'');
+  var accent=esc(colors.accent||'');
+  var card=document.createElement('div');
+  card.className='theme-card';
+  card.innerHTML='<div class="th-name">🎨 '+esc(td.name||('主题 '+(idx+1)))+'</div><div class="th-swatches">'+
+   (bg?'<div class="th-swatch" style="background:'+bg+'" title="bg: '+bg+'"></div>':'')+
+   (accent?'<div class="th-swatch" style="background:'+accent+'" title="accent: '+accent+'"></div>':'')+
+   '</div><button class="th-apply" onclick="applyGeneratedTheme(\''+bg+'\',\''+accent+'\',this)">应用</button>';
+  listEl.appendChild(card);
+ });
+ _setThemeUndoVisible(!!_aiThemeSavedColors);
+}
+function applyGeneratedTheme(bg,accent,btnEl){
+ if(!_aiThemeSavedColors)_saveCurrentThemeForUndo();
+ applyThemeSuggestion(bg,accent,null);
+ _saveAiThemeUndoToSettings();
+ _setThemeUndoVisible(true);
+ if(btnEl){
+  var wrap=$('aiThemeCandidateList');
+  if(wrap){
+   wrap.querySelectorAll('.th-apply').forEach(function(b){b.textContent='应用';b.className='th-apply'});
+  }
+  btnEl.textContent='已应用';
+  btnEl.className='th-apply th-undo';
+ }
+ _showAiThemeResultInSettings();
+}
 function aiGenerateTheme(){
  var btn=$('aiThemeGenBtn');
  if(!btn||btn.disabled)return;
- if(!bookId){toast('请先打开一本书','error');return;}
  btn.disabled=true;btn.textContent='⏳ 正在生成…';
- // 关闭设置弹窗，让用户看到 AI 回复
- closeModal('settingsModal');
- // 发送生成主题的消息
- var aiInput=$('aiInput');
- if(aiInput)setTimeout(function(){aiInput.focus()},100);
- _doSendAI('请为我生成UI配色主题。你必须使用[THEME]标签格式输出，不要只描述颜色。\n\n示例：[THEME]bg:#031122,accent:#F9AACC|玫瑰之夜[/THEME]\n\n约束：bg必须深暗（每两位≤3），accent必须亮（每两位≥9）。一次输出1-2个主题。');
- // 3 分钟后恢复按钮
- setTimeout(function(){
-  var b=$('aiThemeGenBtn');
-  if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
- },180000);
+ var prompt='请为 LucaWriter 小说写作软件生成 1-2 个舒适、耐看的深色 UI 配色主题。';
+ api('POST','/api/theme-generate',{prompt:prompt},function(d,s){
+  btn.disabled=false;btn.textContent='✨ AI 生成主题';
+  if(s===200&&d&&d.theme_data_list&&d.theme_data_list.length){
+   _renderAiThemeCandidates(d.theme_data_list);
+   toast(d.source==='fallback'?'已生成候选主题（本地兜底）':'主题已生成，点击应用','success');
+  }else{
+   toast((d&&d.error)||'生成失败','error');
+  }
+ });
 }
 function _loadAiThemeUndoFromSettings(){
  var cs=(_colorSettings&&Object.keys(_colorSettings).length)?_colorSettings:(settings.custom_colors||{});
@@ -4067,6 +4144,7 @@ function _showAiThemeResultInSettings(){
  var r=$('aiThemeResult');
  if(!r)return;
  r.style.display='block';
+ _setThemeUndoVisible(!!_aiThemeSavedColors);
  var sw=$('aiThemeSwatches');
  if(sw){
   sw.innerHTML='';
@@ -4099,7 +4177,8 @@ function undoAIGeneratedTheme(){
  }
  // 隐藏结果区
  var r=$('aiThemeResult');
- if(r)r.style.display='none';
+ if(r&&(!$('aiThemeCandidateList')||!$('aiThemeCandidateList').children.length))r.style.display='none';
+ _setThemeUndoVisible(false);
  var b=$('aiThemeGenBtn');
  if(b){b.disabled=false;b.textContent='✨ AI 生成主题';}
  _aiThemeSavedColors=null;
@@ -4179,9 +4258,12 @@ function _loadColorSettings(settings){
 
 function applyThemeMode(mode){
  var root=document.documentElement;
- root.setAttribute('data-theme-mode','dark');
+ var m=mode||settings.theme_mode||root.getAttribute('data-theme-mode')||'dark';
+ m=(m==='light')?'light':'dark';
+ settings.theme_mode=m;
+ root.setAttribute('data-theme-mode',m);
  var centerLogo=document.querySelector('.topbar-center-logo img');
- if(centerLogo)centerLogo.src='logo-white.png';
+ if(centerLogo)centerLogo.src=m==='light'?'logo-black.png':'logo-white.png';
 }
 
 var _origAccessScope='127.0.0.1';
@@ -4914,6 +4996,9 @@ function saveSettings(opts){
     access_scope:(opts.autosave&&oldScope!==newScope)?oldScope:newScope,
     keep_background:$('sKeepBackground')?$('sKeepBackground').checked:false,
     browser_enabled:true,
+    custom_colors:_colorSettings||settings.custom_colors||{},
+    theme_accent:((_colorSettings||{}).accent)||settings.theme_accent||'#E8CC7A',
+    theme_mode:settings.theme_mode||document.documentElement.getAttribute('data-theme-mode')||'dark',
     content_font_size:_currentFontSize,
     editor_font_weight:_currentEditorFontWeight,
     editor_font_preset_id:_currentEditorFontPresetId,
@@ -5069,12 +5154,10 @@ var _epubExportBid=null;
 function openEpubExport(bid,title){_epubExportBid=bid;$('epubTitle').value=title||'';$('epubAuthor').value='';$('epubDesc').value='';$('epubCoverImg').style.display='none';$('epubCoverImg').src='';$('epubCoverPlaceholder').style.display='';openModal('epubExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
 function onEpubCoverChange(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){$('epubCoverImg').src=ev.target.result;$('epubCoverImg').style.display='block';$('epubCoverPlaceholder').style.display='none'};r.readAsDataURL(f)}
 function doExportEpub(){var bid=_epubExportBid;if(!bid)return;var title=$('epubTitle').value.trim()||'';var author=$('epubAuthor').value.trim();var desc=$('epubDesc').value.trim();var cover=$('epubCoverImg').src||'';if(cover&&cover.indexOf('data:image')!==0)cover='';var payload={title:title,author:author,description:desc,cover_base64:cover};closeModal('epubExportModal');_runExport(bid,'epub','epub','EPUB',true,payload)}
-var _lwExportBid=null;
-function openLucawriteExport(bid,title){_lwExportBid=bid;$('lwExportPassword').value='';$('lwExportPasswordConfirm').value='';openModal('lucawriteExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
-function doExportLucawrite(){var bid=_lwExportBid;if(!bid)return;var pw=$('lwExportPassword').value;var pw2=$('lwExportPasswordConfirm').value;if(pw&&pw!==pw2){toast('两次密码输入不一致','warn');return}closeModal('lucawriteExportModal');openExportModal('导出 LucaWrite');addExportLog('开始导出 LucaWrite 格式...');var x=new XMLHttpRequest();var url='/api/book/'+bid+'/export-lucawrite';x.open('POST',url,true);x.responseType='blob';x.setRequestHeader('Content-Type','application/json');x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn){var m2=disp.match(/filename="([^"]+)"/i);if(m2)fn=m2[1]}if(!fn)fn='book.lucawrite';setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');addExportLog(pw?'文件已加密':'文件未加密');_downloadBlob(blob,fn);addExportLog('下载已触发');toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'导出失败','error')}catch(e){addExportLog('HTTP '+x.status)}};r.readAsText(x.response);showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');toast('导出失败','error');showExportSaveBtn()};addExportLog('正在发送请求...');x.send(JSON.stringify({password:pw}))}
-var _lwImportB64=null;
-function doImportLucawriteWithPassword(){var pw=$('lwImportPassword').value;if(!pw){toast('请输入密码','warn');return}closeModal('lucawriteImportPasswordModal');setImportProgress(50,'解密导入中...');api('POST','/api/books/import-lucawrite',{data:_lwImportB64,password:pw},function(d,s){_lwImportB64=null;if(s===200&&d.need_password){openModal('lucawriteImportPasswordModal');return}if(s===200&&d.book_id){setImportProgress(100,'导入完成');$('impSt').textContent='已导入 '+(d.imported||0)+' 章';cachedBooks=null;currentBookTitle=d.title;openBook(d.book_id);setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200)}else{setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'}})}
-function openImportNew(){_lwImportB64=null;$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';openModal('importModal')}
+var _cooExportBid=null;
+function openCooExport(bid,title){_cooExportBid=bid;if($('cooPenName')){$('cooPenName').value=''}openModal('cooExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
+function doExportCoo(){var bid=_cooExportBid;if(!bid)return;var penName=$('cooPenName')?$('cooPenName').value.trim():'';closeModal('cooExportModal');openExportModal('导出 COO');addExportLog('开始导出 COO 格式...');addExportLog('笔名: '+(penName||'未填写'));var x=new XMLHttpRequest();var url='/api/book/'+bid+'/export-coo';x.open('POST',url,true);x.responseType='blob';x.setRequestHeader('Content-Type','application/json');x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn){var m2=disp.match(/filename="([^"]+)"/i);if(m2)fn=m2[1]}if(!fn)fn='book.coo';setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');_downloadBlob(blob,fn);addExportLog('下载已触发');toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'导出失败','error')}catch(e){addExportLog('HTTP '+x.status)}};r.readAsText(x.response);showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');toast('导出失败','error');showExportSaveBtn()};addExportLog('正在发送请求...');x.send(JSON.stringify({pen_name:penName}))}
+function openImportNew(){$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';openModal('importModal')}
 function openCreateBookModal(){openModal('createBookModal')}
 function doCreateBookFromModal(){closeModal('createBookModal');createBook()}
 function openImport(){openImportNew()}
@@ -5112,7 +5195,7 @@ function _pollImportTask(tid,startTime){
  },1500);
 }
 function doImport(file){
- if(file.size>100*1024*1024){$('impSt').textContent='文件超过 100MB，请拆分成 smaller 文件或压缩后重试';$('impSt').style.color='var(--danger)';return}
+ if(file.size>512*1024*1024){$('impSt').textContent='文件超过 512MB，请拆分或压缩后重试';$('impSt').style.color='var(--danger)';return}
  $('impDrop').style.display='none';
  $('impProgressWrap').style.display='';
  $('impSt').textContent='';$('impSt').style.color='';
@@ -5124,24 +5207,16 @@ function doImport(file){
  reader.onload=function(){
  setImportProgress(30,'编码中...');
  var b64=reader.result.split(',')[1];
- var isLW=file.name.toLowerCase().endsWith('.lucawrite');
- if(isLW){
-  setImportProgress(35,'检测 LucaWrite 格式...');
-  _lwImportB64=b64;
-  api('POST','/api/books/import-lucawrite',{data:b64,password:''},function(d,s){
-  if(s===200&&d.need_password){
-   $('lwImportPassword').value='';
-   openModal('lucawriteImportPasswordModal');
-   return;
-  }
+ var isCOO=file.name.toLowerCase().endsWith('.coo');
+ if(isCOO){
+  setImportProgress(35,'导入 COO 格式...');
+  api('POST','/api/books/import-coo',{data:b64},function(d,s){
   if(s===200&&d.book_id){
-   _lwImportB64=null;
    setImportProgress(100,'导入完成');
    $('impSt').textContent='已导入 '+(d.imported||0)+' 章';
    cachedBooks=null;currentBookTitle=d.title;openBook(d.book_id);
    setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
   }else{
-   _lwImportB64=null;
    setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'}
   });
   return;
@@ -5464,7 +5539,7 @@ function switchBottomTab(tab){
 	if(tab==='outline'){loadChapterOutline()}
 	if(tab==='prediction'){loadPredictionCurrent()}
 	if(tab==='inspiration'){loadInspirations();setTimeout(autoGrowInspirationInput,0)}
-	if(tab==='summary'){pollRTStatus()}
+	if(tab==='summary'){pollRTStatus();loadKbArchives()}
 }
 
 function clearAIChat(){aiMessages=[];renderAIMessages();saveAIMessages()}
@@ -5573,6 +5648,56 @@ function resetPrediction(){
  loadPredictionCurrent();
 }
 
+function loadKbArchives(){
+ if(!bookId)return;
+ api('GET','/api/book/'+bookId+'/kb-archives',undefined,function(d,s){
+  var toggle=$('rtArchiveToggle');var list=$('rtArchiveList');
+  if(!toggle||!list)return;
+  var items=(s===200&&Array.isArray(d))?d:[];
+  var count=items.length;
+  _rtCurrentArchived=items.some(function(e){return !!e.is_current});
+  toggle.dataset.count=String(count);
+  if(count===0){
+   toggle.textContent='展开 0';
+   list.style.display='none';list.innerHTML='';
+   _setRTButtonUI(rtLastStatus,rtLastChapterIdx,rtLastDoneChapters);
+   return;
+  }
+  toggle.textContent='展开 '+count;
+  list.innerHTML=items.map(function(e){
+   var dateStr='';
+   try{dateStr=new Date(e.timestamp*1000).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}catch(ex){dateStr=e.id||''}
+   var modelLabel=e.note||e.model||'';
+   var current=e.is_current?'<span class="rt-archive-current">当前</span>':'';
+   var action=e.is_current?'<button class="rt-archive-restore" disabled>当前</button>':'<button class="rt-archive-restore" onclick="restoreKbArchive('+jsq(e.id||'')+')">恢复</button>';
+   return '<div class="rt-archive-item"><div class="rt-archive-main"><span class="rt-archive-date">'+esc(dateStr)+'</span><span class="rt-archive-model">'+esc(modelLabel)+'</span></div><div class="rt-archive-actions">'+current+action+'</div></div>';
+  }).join('');
+  _setRTButtonUI(rtLastStatus,rtLastChapterIdx,rtLastDoneChapters);
+ });
+}
+function restoreKbArchive(id){
+ if(!bookId||!id)return;
+ if(!confirm('确定恢复这个历史版本？当前数据库会被覆盖。'))return;
+ api('POST','/api/book/'+bookId+'/kb-archives/restore',{archive_id:id},function(d,s){
+  if(s===200){
+   toast(d.archived_current?'当前版本已先归档，历史版本已恢复':'历史版本已恢复','success');
+   _rtCurrentArchived=true;
+   loadKbArchives();
+   loadSourceToRT();
+   pollRTStatus();
+  }else{
+   toast(d&&d.error?d.error:'恢复失败','error');
+  }
+ });
+}
+function toggleKbArchives(){
+ var list=$('rtArchiveList');var toggle=$('rtArchiveToggle');
+ if(!list)return;
+ var isHidden=list.style.display==='none';
+ var count=toggle?(toggle.dataset.count||document.querySelectorAll('#rtArchiveList .rt-archive-item').length||'0'):'0';
+ list.style.display=isHidden?'':'none';
+ if(toggle)toggle.textContent=isHidden?'收起 '+count :('展开 '+count);
+}
 function loadPredictionCurrent(){
  if(!bookId)return;
  api('GET','/api/book/'+bookId+'/prediction-current',undefined,function(d,s){
@@ -5778,7 +5903,7 @@ function _addSeriesBookItem(b,list,prepend){
   '<div class="sbi-info"><div class="sbi-title">'+esc(b.title||'未命名')+'</div><div class="sbi-meta"><span>'+(b.chapter_count||0)+' 章</span><span>&#8226;</span><span>'+_formatDate(b.updated)+'</span></div></div>'+
   chHtml+
   '<button class="sbi-menu-btn" onclick="event.stopPropagation();toggleBookMenu(\''+esc(b.id)+'\',this)">&#8943;</button>'+
-  '<div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'" style="top:32px;right:6px"><button onclick="event.stopPropagation();openCoverUpload(\''+esc(b.id)+'\')">'+(b.has_cover?'更换封面':'上传封面')+'</button><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button onclick="event.stopPropagation();openLucawriteExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 LucaWrite</button><button class="danger-item" onclick="event.stopPropagation();removeFromSeries(\''+esc(b.id)+'\')">移出系列</button></div>'+
+  '<div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'" style="top:32px;right:6px"><button onclick="event.stopPropagation();openCoverUpload(\''+esc(b.id)+'\')">'+(b.has_cover?'更换封面':'上传封面')+'</button><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button onclick="event.stopPropagation();openCooExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 COO</button><button class="danger-item" onclick="event.stopPropagation();removeFromSeries(\''+esc(b.id)+'\')">移出系列</button></div>'+
   '<div class="sbi-drag" draggable="true" title="拖拽排序">&#8942;&#8942;</div>';
  _bindBookMenu(item,b,'series-item');
  item.querySelector('.sbi-info').onclick=function(){currentBookTitle=b.title;openBook(b.id)};
@@ -6804,33 +6929,38 @@ function startRT(){
   });
  }
 }
+function _rtResetLabel(){return _rtCurrentArchived?'重来':'归档重来'}
+function _rtResetTitle(){return _rtCurrentArchived?'本版本仍可以在历史记录找到':'归档当前数据库后重来'}
 function resetRT(){
  if(!bookId)return;
- if(!confirm('确定清空所有摘要笔记并重新开始？'))return;
+ var msg=_rtCurrentArchived?'确定清空当前数据库并重新开始？本版本仍可以在历史记录找到。':'确定归档当前数据库，并清空摘要笔记重新开始？';
+ if(!confirm(msg))return;
  clearInterval(rtPollTimer);rtPollTimer=null;
  rtLastStatus='resetting';
  rtLastDoneChapters=0;
  rtLastChapterIdx=-1;
  rtLastNotifiedStatus='';
- $('rtStream').textContent='正在清空通读笔记和索引。';
- $('rtSystemLine').textContent='清空请求已发送';
+ $('rtStream').textContent=_rtCurrentArchived?'正在清空通读笔记和索引。':'正在归档当前数据库，并清空通读笔记和索引。';
+ $('rtSystemLine').textContent=_rtCurrentArchived?'重来请求已发送':'归档重来请求已发送';
  if($('rtThinking'))$('rtThinking').classList.add('active');
  $('rtLogs').textContent='';
  $('rtSource').value='';
- $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='清空中...';
+ $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent=_rtCurrentArchived?'清空中...':'归档中...';
  $('rtChapters').textContent='0/0 章';
  _setRTButtonUI('resetting',-1,0,0);
  api('POST','/api/book/'+bookId+'/readthrough/reset',{},function(d,s){
  if(s===200){
- $('rtStream').textContent='通读笔记已清空，可以重新开始。';
- $('rtSystemLine').textContent='已清空';
+ $('rtStream').textContent=d.archived?'旧数据库已归档，可以重新开始。':(d.already_archived?'本版本仍在历史记录中，可以重新开始。':'没有可归档的旧数据库，已清空。');
+ $('rtSystemLine').textContent=d.archived?'已归档':(d.already_archived?'已重来':'已清空');
  if($('rtThinking'))$('rtThinking').classList.remove('active');
  $('rtSource').value='';
- loadSourceToRT();
- $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='准备中...';
- $('rtChapters').textContent='0/0 章';
- _setRTButtonUI('idle',-1);
- toast('摘要笔记已清空','success');
+  loadSourceToRT();
+  $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='准备中...';
+  $('rtChapters').textContent='0/0 章';
+  _rtCurrentArchived=false;
+  _setRTButtonUI('idle',-1);
+  loadKbArchives();
+  toast(d.archived?'旧数据库已归档':(d.already_archived?'已重来':'摘要笔记已清空'),'success');
  rtLastStatus='idle';
  rtLastDoneChapters=0;
  rtLastChapterIdx=-1;
@@ -6849,8 +6979,10 @@ function _setRTButtonUI(status, currentIdx, doneCount, totalCount){
  b.disabled=false;c.disabled=false;
  b.onclick=function(){startRT()};
  b.style.background='';b.style.color='';b.style.border='';
+ b.title='';
  c.style.display='inline-block';
- c.textContent='重通读';
+ c.textContent=_rtResetLabel();
+ c.title=_rtResetTitle();
  c.onclick=function(){resetRT()};
  c.style.background='';c.style.color='';c.style.border='';
  if(status==='starting'){
@@ -6866,7 +6998,7 @@ function _setRTButtonUI(status, currentIdx, doneCount, totalCount){
   b.disabled=true;
   c.style.display='none';
  }else if(status==='resetting'){
-  b.textContent='清空中...';
+  b.textContent=_rtCurrentArchived?'清空中...':'归档中...';
   b.disabled=true;c.disabled=true;
   c.style.display='none';
  }else if(status==='running'){
@@ -6876,15 +7008,19 @@ function _setRTButtonUI(status, currentIdx, doneCount, totalCount){
  }else if(status==='paused'||(status==='idle' && currentIdx>=0)){
   b.textContent='继续 ('+Math.min(done,total)+'/'+total+')';
   b.onclick=function(){startRT()};
+  c.style.display='none';
  }else if(status==='done'){
-  b.textContent='重通读';
+  b.textContent=_rtResetLabel();
+  b.title=_rtResetTitle();
   b.onclick=function(){resetRT()};
   c.style.display='none';
  }else if(status==='error'){
   b.textContent='继续';
   b.onclick=function(){startRT()};
+  c.style.display='none';
  }else{
   b.textContent='开始通读';
+  b.title='';
   b.onclick=function(){startRT()};
   c.style.display='none';
  }
@@ -6939,7 +7075,7 @@ function updateRTUI(d,s){
  }else{
   clearInterval(rtPollTimer);rtPollTimer=null;
   _setRTButtonUI(st,ci,done,total);
-  if(st==='done'&&rtLastNotifiedStatus!=='done'){toast('通读完成！','success');rtLastNotifiedStatus='done'}
+  if(st==='done'&&rtLastNotifiedStatus!=='done'){toast('通读完成！','success');rtLastNotifiedStatus='done';loadKbArchives()}
   else if(st==='paused'&&rtLastNotifiedStatus!=='paused'){toast('已暂停','warn');rtLastNotifiedStatus='paused'}
   else if(st==='error'&&rtLastNotifiedStatus!=='error'){toast(d.error||'通读失败','error');rtLastNotifiedStatus='error'}
  }
