@@ -70,15 +70,20 @@ def _build_coo_from_source(path):
         raise ValueError("仅支持 TXT / MD / DOCX / PDF / EPUB")
     raw = path.read_bytes()
     chapters, book_title, cover_data = _normalize_parse_result(main.IMPORT_PARSERS[ext](raw, path.name), path.name)
+    work_uid = "coo_" + os.urandom(48).hex()
     book_uid = "coo_" + os.urandom(48).hex()
+    book_id = "01_" + _safe_name(book_title, "book")
     exported_at = time.time()
+
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # ── 子书目录: books/01_Title/chapters/ ──
+        book_dir = f"books/{book_id}/"
         chapter_items = []
         for idx, chapter in enumerate(chapters, start=1):
             cid = str(chapter.get("id") or f"ch_{idx:05d}")
             safe = _safe_name(cid, f"ch_{idx:05d}")
-            arc = f"chapters/{idx:05d}_{safe}.json"
+            arc = f"{book_dir}chapters/{idx:05d}_{safe}.json"
             title = str(chapter.get("title") or f"第 {idx} 章")
             content = str(chapter.get("content") or "")
             payload = {
@@ -88,32 +93,52 @@ def _build_coo_from_source(path):
                 "updated": exported_at,
             }
             zf.writestr(arc, json.dumps(payload, ensure_ascii=False, indent=2))
-            chapter_items.append(
-                {
-                    "id": cid,
-                    "title": title,
-                    "order": idx,
-                    "path": arc,
-                    "summary_path": "",
-                    "word_count": len(content),
-                    "updated": exported_at,
-                }
-            )
+            chapter_items.append({
+                "id": cid,
+                "title": title,
+                "order": idx,
+                "path": f"chapters/{idx:05d}_{safe}.json",
+                "summary_path": "",
+                "word_count": len(content),
+                "updated": exported_at,
+            })
+
+        # ── 子书 manifest: books/01_Title/manifest.json ──
+        sub_manifest = {
+            "book_uid": book_uid,
+            "title": book_title,
+            "author": PEN_NAME,
+            "description": "",
+            "order": 1,
+            "language": "zh-CN",
+            "created": exported_at,
+            "updated": exported_at,
+            "chapters": chapter_items,
+            "ai": {
+                "outline_path": "",
+                "volume_summary_path": "",
+            },
+        }
+        zf.writestr(f"{book_dir}manifest.json", json.dumps(sub_manifest, ensure_ascii=False, indent=2))
+
+        # ── 封面 ──
         cover_arc = ""
         if cover_data:
             cover_arc = _cover_arcname(cover_data)
-            zf.writestr(cover_arc, cover_data)
+            zf.writestr(f"assets/{cover_arc}", cover_data)
+            cover_arc = f"assets/{cover_arc}"
+
+        # ── 顶层 manifest.json (v2) ──
         manifest = {
-            "format_version": 1,
             "format_name": "coo",
-            "book_uid": book_uid,
+            "format_version": 2,
+            "work_uid": work_uid,
             "exported_at": exported_at,
             "producer": {
                 "app_name": "cooverter",
                 "app_version": VERSION,
             },
-            "book": {
-                "id": book_uid,
+            "work": {
                 "title": book_title,
                 "author": PEN_NAME,
                 "description": "",
@@ -122,16 +147,31 @@ def _build_coo_from_source(path):
                 "updated": exported_at,
                 "cover_file": cover_arc,
             },
-            "chapters": chapter_items,
-            "ai": {
-                "source_path": "",
-                "outline_path": "",
-                "core_memory_path": "",
-                "kb_path": "",
-                "vector_db_path": "",
+            "books": [
+                {
+                    "id": book_id,
+                    "title": book_title,
+                    "order": 1,
+                    "path": f"books/{book_id}/",
+                    "manifest_path": f"books/{book_id}/manifest.json",
+                }
+            ],
+            "lore": [],
+            "reading_order": [],
+            "shared": {
+                "ai": {
+                    "characters_path": "",
+                    "world_settings_path": "",
+                    "timeline_path": "",
+                    "core_memory_path": "",
+                    "kb_path": "",
+                    "vector_db_path": "",
+                }
             },
             "contains": {
-                "chapters": True,
+                "books": True,
+                "lore": False,
+                "reading_order": True,
                 "summaries": False,
                 "knowledge_db": False,
                 "vector_db": False,
@@ -140,12 +180,11 @@ def _build_coo_from_source(path):
             },
             "provenance": {
                 "history_path": coo_provenance.HISTORY_PATH,
-                "keys_path": coo_provenance.KEYS_PATH,
-                "signature_alg": "Ed25519",
             },
         }
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
-    return coo_provenance.sign_coo_bytes(buf.getvalue(), _identity(), event_type="convert")
+
+    return coo_provenance.write_coo_with_history(buf.getvalue(), _identity(), event_type="export")
 
 
 def convert(path):
@@ -169,7 +208,6 @@ def expose(path):
             "ok": report["ok"],
             "reason": report["reason"],
             "history": report.get("history", []),
-            "keys": report.get("keys", {}),
             "current_files": report.get("current_files", []),
         },
     }

@@ -1,4 +1,15 @@
-import base64
+"""COO v2 留名 + 防篡改校验。
+
+走 git 模型（详见 COO.md §7-§8）：
+- 留名 = 每条历史事件的 author 必填、自填、不验证、可重名。
+- 防偷改 = 哈希链：每条事件含前一条的 event_hash。
+- 不做签名：v2 已砍掉 Ed25519 与 META-INF/coo-keys.json。
+
+build_history_event(identity, changed_files, previous_event_hash, event_type) → event dict
+write_coo_with_history(raw_zip_bytes, identity, event_type) → new zip bytes
+verify_coo_bytes(raw) → report
+"""
+
 import hashlib
 import json
 import os
@@ -7,22 +18,11 @@ import time
 import zipfile
 from io import BytesIO
 
-from cryptography.hazmat.primitives.asymmetric import ed25519
-from cryptography.hazmat.primitives import serialization
-
 
 HISTORY_PATH = "META-INF/coo-history.jsonl"
-KEYS_PATH = "META-INF/coo-keys.json"
-CONTROL_PATHS = {HISTORY_PATH, KEYS_PATH}
-PROVENANCE_VERSION = "coo-provenance-v1"
-
-
-def _b64(data):
-    return base64.b64encode(data).decode("ascii")
-
-
-def _b64d(data):
-    return base64.b64decode(data.encode("ascii"))
+# v2 载荷比对时排除的控制路径只有历史链本身（v1 的 coo-keys.json 已废弃）。
+CONTROL_PATHS = {HISTORY_PATH}
+PROVENANCE_VERSION = "coo-provenance-v2"
 
 
 def _canonical(data):
@@ -33,14 +33,15 @@ def _sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def _event_unsigned(event):
+def _event_for_hash(event):
+    """返回去掉 event_hash 字段后的事件 dict，用于计算 event_hash（契约 §8.1）。"""
     clean = dict(event)
     clean.pop("event_hash", None)
-    clean.pop("signature", None)
     return clean
 
 
 def _payload_file_hashes(zf):
+    """返回包内所有载荷文件的 {path, sha256, size} 列表，按 path 升序。"""
     result = []
     for info in zf.infolist():
         name = info.filename.replace("\\", "/")
@@ -56,25 +57,12 @@ def _read_history(zf):
         raw = zf.read(HISTORY_PATH).decode("utf-8")
     except KeyError:
         return []
-    events = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if line:
-            events.append(json.loads(line))
-    return events
-
-
-def _read_keys(zf):
-    try:
-        return json.loads(zf.read(KEYS_PATH).decode("utf-8"))
-    except KeyError:
-        return {"keys": {}}
+    return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
 
 def default_user_name():
     return (
         os.environ.get("COO_USER_NAME")
-        or os.environ.get("COOBOX_USER_NAME")
         or os.environ.get("USERNAME")
         or os.environ.get("USER")
         or "unknown"
@@ -82,28 +70,20 @@ def default_user_name():
 
 
 def load_or_create_identity(path, client_name, client_version="", client_id_prefix="client", user_name=None):
+    """加载或创建客户端身份（v2：无需密钥，只需 client_id + author 名）。
+
+    返回 dict：{client_id, client_name, client_version, user_name, created_at}
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     else:
-        private_key = ed25519.Ed25519PrivateKey.generate()
-        private_raw = private_key.private_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PrivateFormat.Raw,
-            encryption_algorithm=serialization.NoEncryption(),
-        )
-        public_raw = private_key.public_key().public_bytes(
-            encoding=serialization.Encoding.Raw,
-            format=serialization.PublicFormat.Raw,
-        )
         data = {
             "client_id": f"{client_id_prefix}_{secrets.token_hex(16)}",
             "client_name": client_name,
             "client_version": client_version,
             "user_name": user_name or default_user_name(),
-            "private_key": _b64(private_raw),
-            "public_key": _b64(public_raw),
             "created_at": time.time(),
         }
         with open(path, "w", encoding="utf-8") as f:
@@ -112,47 +92,45 @@ def load_or_create_identity(path, client_name, client_version="", client_id_pref
         data["user_name"] = user_name
     data["client_name"] = client_name
     data["client_version"] = client_version
-    public_raw = _b64d(data["public_key"])
-    data["public_key_id"] = "key_" + _sha256(public_raw)[:32]
     return data
 
 
-def sign_coo_bytes(raw, identity, event_type="export"):
-    src = zipfile.ZipFile(BytesIO(raw), "r")
-    history = _read_history(src)
-    keys_doc = _read_keys(src)
-    keys = keys_doc.setdefault("keys", {})
-    changed_files = _payload_file_hashes(src)
-    previous_event_hash = history[-1].get("event_hash", "") if history else ""
+def build_history_event(identity, changed_files, previous_event_hash, event_type="export"):
+    """构建一条历史事件（不含 event_hash，由调用方计算后回填）。
 
-    private_key = ed25519.Ed25519PrivateKey.from_private_bytes(_b64d(identity["private_key"]))
-    public_key_id = identity["public_key_id"]
-    keys[public_key_id] = {
-        "public_key": identity["public_key"],
-        "client_id": identity.get("client_id", ""),
-        "client_name": identity.get("client_name", ""),
-        "client_version": identity.get("client_version", ""),
-        "user_name": identity.get("user_name", ""),
-        "created_at": identity.get("created_at", 0),
-    }
-
+    返回 (event, event_hash)。
+    """
     event = {
         "format_version": PROVENANCE_VERSION,
         "event_id": "evt_" + secrets.token_hex(16),
         "event_type": event_type,
-        "user_name": identity.get("user_name") or default_user_name(),
+        "author": identity.get("user_name") or default_user_name(),
         "client_name": identity.get("client_name", ""),
         "client_version": identity.get("client_version", ""),
         "client_id": identity.get("client_id", ""),
         "created_at": time.time(),
         "changed_files": changed_files,
         "previous_event_hash": previous_event_hash,
-        "signature_alg": "Ed25519",
-        "public_key_id": public_key_id,
     }
-    unsigned = _canonical(event)
-    event["event_hash"] = _sha256(unsigned)
-    event["signature"] = _b64(private_key.sign(unsigned))
+    canonical = _canonical(_event_for_hash(event))
+    event_hash = _sha256(canonical)
+    event["event_hash"] = event_hash
+    return event, event_hash
+
+
+def write_coo_with_history(raw_zip_bytes, identity, event_type="export"):
+    """给一个已打包好的 .coo ZIP 追加历史链并返回新 ZIP 字节。
+
+    raw_zip_bytes: 不含 META-INF/ 的干净 ZIP 内容。
+    identity: load_or_create_identity 返回的身份。
+    event_type: "export" / "edit" 等。
+    """
+    src = zipfile.ZipFile(BytesIO(raw_zip_bytes), "r")
+    history = _read_history(src)
+    changed_files = _payload_file_hashes(src)
+    previous_event_hash = history[-1].get("event_hash", "") if history else ""
+
+    event, _ = build_history_event(identity, changed_files, previous_event_hash, event_type)
     history.append(event)
 
     out = BytesIO()
@@ -165,8 +143,12 @@ def sign_coo_bytes(raw, identity, event_type="export"):
                 dst.writestr(name.rstrip("/") + "/", b"")
             else:
                 dst.writestr(name, src.read(info.filename))
-        dst.writestr(HISTORY_PATH, "\n".join(json.dumps(e, ensure_ascii=False, sort_keys=True) for e in history) + "\n")
-        dst.writestr(KEYS_PATH, json.dumps(keys_doc, ensure_ascii=False, sort_keys=True, indent=2))
+        # 写入历史链
+        history_text = "\n".join(
+            json.dumps(e, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            for e in history
+        ) + "\n"
+        dst.writestr(HISTORY_PATH, history_text)
     src.close()
     return out.getvalue()
 
@@ -176,7 +158,6 @@ def verify_coo_bytes(raw):
         "ok": False,
         "reason": "",
         "history": [],
-        "keys": {},
         "manifest": None,
         "current_files": [],
     }
@@ -186,6 +167,7 @@ def verify_coo_bytes(raw):
         report["reason"] = "不是有效 ZIP"
         return report
     try:
+        # 条件 1：manifest 存在、可解析、是 coo、版本为 2
         try:
             report["manifest"] = json.loads(zf.read("manifest.json").decode("utf-8"))
         except Exception:
@@ -194,40 +176,50 @@ def verify_coo_bytes(raw):
         if report["manifest"].get("format_name") != "coo":
             report["reason"] = "manifest.format_name 不是 coo"
             return report
+        try:
+            version = int(report["manifest"].get("format_version", 0))
+        except (TypeError, ValueError):
+            version = 0
+        if version != 2:
+            report["reason"] = "不支持的 COO 版本（仅支持 v2）"
+            return report
+
         history = _read_history(zf)
-        keys_doc = _read_keys(zf)
         report["history"] = history
-        report["keys"] = keys_doc.get("keys", {})
         report["current_files"] = _payload_file_hashes(zf)
+
+        # 条件 2：至少一条事件
         if not history:
             report["reason"] = "缺少 COO 修改历史"
             return report
+
         previous = ""
         for idx, event in enumerate(history):
-            unsigned = _canonical(_event_unsigned(event))
-            event_hash = _sha256(unsigned)
+            canonical = _canonical(_event_for_hash(event))
+            event_hash = _sha256(canonical)
+            # 条件 3：event_hash 与内容自洽
             if event.get("event_hash") != event_hash:
                 report["reason"] = f"第 {idx + 1} 条历史哈希不匹配"
                 return report
+            # 条件 4：previous_event_hash 链不断（首条为空）
             if event.get("previous_event_hash", "") != previous:
                 report["reason"] = f"第 {idx + 1} 条历史链断裂"
                 return report
-            key = report["keys"].get(event.get("public_key_id", ""))
-            if not key:
-                report["reason"] = f"第 {idx + 1} 条历史缺少公钥"
-                return report
-            try:
-                public_key = ed25519.Ed25519PublicKey.from_public_bytes(_b64d(key["public_key"]))
-                public_key.verify(_b64d(event.get("signature", "")), unsigned)
-            except Exception:
-                report["reason"] = f"第 {idx + 1} 条历史签名无效"
+            # 条件 5：author 必填（留名）
+            if not str(event.get("author", "")).strip():
+                report["reason"] = f"第 {idx + 1} 条历史缺少 author（必须留名）"
                 return report
             previous = event_hash
-        last_files = sorted(history[-1].get("changed_files", []), key=lambda item: item.get("path", ""))
-        current_files = report["current_files"]
-        if last_files != current_files:
-            report["reason"] = "当前文件和最后一条签名记录不一致"
+
+        # 条件 6：最后一条事件的 changed_files == 当前包实际载荷（排除控制路径）
+        last_files = sorted(
+            history[-1].get("changed_files", []),
+            key=lambda item: item.get("path", ""),
+        )
+        if last_files != report["current_files"]:
+            report["reason"] = "当前文件和最后一条历史记录不一致"
             return report
+
         report["ok"] = True
         report["reason"] = "通过篡改校验"
         return report

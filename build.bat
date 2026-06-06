@@ -3,7 +3,7 @@ chcp 936 >nul 2>&1
 setlocal enabledelayedexpansion
 
 echo ============================================
-echo   LucaWriter v1.2.3 Build Script
+echo   LucaWriter v1.2.4 Build Script
 echo ============================================
 echo.
 
@@ -41,7 +41,7 @@ echo [1/8] Cleaning old build files...
 if exist "%DIST_BACKEND%" rmdir /s /q "%DIST_BACKEND%"
 if exist "%DIST_BUILTIN%" rmdir /s /q "%DIST_BUILTIN%"
 if exist "%BUILD_TEMP%" rmdir /s /q "%BUILD_TEMP%"
-if exist "%ROOT_DIR%release\v1.2.3" rmdir /s /q "%ROOT_DIR%release\v1.2.3"
+if exist "%ROOT_DIR%release\v1.2.4" rmdir /s /q "%ROOT_DIR%release\v1.2.4"
 echo Clean done.
 echo.
 
@@ -70,7 +70,13 @@ if not exist "%VENV_PYTHON%" (
     )
     echo Clean build venv created.
 ) else (
-    echo Build venv already exists, skipping dependency install.
+    echo Build venv already exists, syncing dependencies.
+    "%VENV_PYTHON%" -m pip install -r "%ROOT_DIR%requirements.txt" --quiet
+    if errorlevel 1 (
+        echo [ERROR] Failed to sync Python dependencies
+        pause
+        exit /b 1
+    )
 )
 echo.
 
@@ -84,19 +90,6 @@ echo Icon done.
 echo.
 
 echo [4/8] Building backend with PyInstaller (using clean venv)...
-REM 查找 chromadb 安装路径（先调用辅助脚本避免批处理引号嵌套问题）
-for /f "tokens=1,* delims==" %%a in ('%VENV_PYTHON% "%ROOT_DIR%electron\find_chromadb_paths.py"') do (
-    if "%%a"=="chromadb" set "CHROMADB_DIR=%%b"
-    if "%%a"=="chromadb_rust_bindings" set "CHROMADB_RUST_DIR=%%b"
-)
-echo chromadb: %CHROMADB_DIR%
-echo chromadb_rust_bindings: %CHROMADB_RUST_DIR%
-if "%CHROMADB_DIR%"=="" (
-    echo [ERROR] 找不到 chromadb 路径，无法打包
-    pause
-    exit /b 1
-)
-
 %VENV_PYTHON% -m PyInstaller --onedir --noconsole ^
     --name LucaWriterBackend ^
     --distpath "%DIST_BACKEND%" ^
@@ -104,15 +97,10 @@ if "%CHROMADB_DIR%"=="" (
     --specpath "%BUILD_TEMP%" ^
     --noconfirm ^
     --hidden-import docx ^
-    --hidden-import PyPDF2 ^
+    --hidden-import pypdf ^
     --hidden-import ebooklib ^
     --hidden-import ebooklib.epub ^
-    --hidden-import chromadb.telemetry.product.posthog ^
-    --hidden-import chromadb.api.rust ^
-    --additional-hooks-dir "%ROOT_DIR%electron\hooks" ^
     --collect-all certifi ^
-    --add-data "%CHROMADB_DIR%;chromadb" ^
-    --add-data "%CHROMADB_RUST_DIR%;chromadb_rust_bindings" ^
     "%ROOT_DIR%backend\main.py"
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed
@@ -166,6 +154,6 @@ echo.
 
 echo ============================================
 echo   Build Success!
-echo   Output: release\v1.2.3\
+echo   Output: release\v1.2.4\
 echo ============================================
 pause

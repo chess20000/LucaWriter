@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "============================================"
-echo "  LucaWriter v1.1.0 macOS Build Script"
+echo "  LucaWriter v1.2.4 macOS Build Script"
 echo "============================================"
 echo ""
 
@@ -12,7 +12,7 @@ ELECTRON_DIR="$ROOT_DIR/electron"
 DIST_BACKEND="$ELECTRON_DIR/dist-backend"
 DIST_BUILTIN="$ELECTRON_DIR/dist-builtin"
 BUILD_TEMP="$ELECTRON_DIR/build-temp"
-RELEASE_DIR="$ROOT_DIR/release/v1.1.0"
+RELEASE_DIR="$ROOT_DIR/release/v1.2.4"
 VENV_DIR="$SCRIPT_DIR/venv"
 
 PYTHON_EXE="${PYTHON_EXE:-python3}"
@@ -95,10 +95,9 @@ $PYTHON_EXE -m PyInstaller --onedir \
     --specpath "$BUILD_TEMP" \
     --noconfirm \
     --hidden-import docx \
-    --hidden-import PyPDF2 \
+    --hidden-import pypdf \
     --hidden-import ebooklib \
     --hidden-import ebooklib.epub \
-    --hidden-import chromadb.telemetry.product.posthog \
     --collect-all certifi \
     "$ROOT_DIR/backend/main.py" || {
     echo "[ERROR] PyInstaller build failed"
@@ -120,7 +119,6 @@ echo ""
 echo "[8/9] Installing npm dependencies..."
 cd "$ELECTRON_DIR"
 export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
-export NODE_TLS_REJECT_UNAUTHORIZED=0
 npm install || {
     echo "[ERROR] npm install failed"
     exit 1

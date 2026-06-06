@@ -1,10 +1,9 @@
 python-docx
-PyPDF2
+pypdf
 ebooklib
 modelscope
 DrissionPage
 certifi
 cryptography
-chromadb
 numpy
 psutil

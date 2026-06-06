@@ -65,7 +65,7 @@ class LocalEmbedding(EmbeddingBackend):
                 return
             cache_dir = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'usrdata', 'models'
+                'models_cache'
             )
             os.makedirs(cache_dir, exist_ok=True)
             try:

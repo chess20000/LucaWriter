@@ -6,6 +6,8 @@ import uuid
 import threading
 import hashlib
 import re
+import shutil
+import numpy as np
 from contextlib import contextmanager
 
 _local_storage = threading.local()
@@ -223,6 +225,17 @@ def init_db(book_id):
           embedded_at  INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_embedding_chunks_source ON embedding_chunks(book_id, source_type, source_id);
+
+        CREATE TABLE IF NOT EXISTS vector_entries (
+          id            TEXT PRIMARY KEY,
+          book_id       TEXT NOT NULL,
+          embedding     BLOB NOT NULL,
+          dimensions    INTEGER NOT NULL,
+          document      TEXT NOT NULL DEFAULT '',
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          updated_at    INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_vector_entries_book ON vector_entries(book_id);
 
         CREATE TABLE IF NOT EXISTS kb_proposals (
           id              TEXT PRIMARY KEY,
@@ -876,7 +889,7 @@ def reset_book_kb(book_id):
             'rule_mentions',
             'mentions', 'events', 'foreshadowing', 'rules',
             'entities', 'chapters', 'rt_logs', 'rt_state',
-            'embedding_chunks',
+            'embedding_chunks', 'vector_entries',
         ):
             if table == 'mentions':
                 conn.execute('''DELETE FROM mentions WHERE entity_id IN
@@ -895,90 +908,133 @@ def count_embedding_chunks(book_id):
     finally:
         conn.close()
 
-# ─── ChromaDB Wrapper ───
+# ─── SQLite Vector Store ───
 
-# 禁用 chromadb telemetry 导入，避免 PyInstaller 打包后因缺少 posthog 模块崩溃
-os.environ['CHROMA_TELEMETRY_DISABLED'] = '1'
-import chromadb
-import chromadb.api.rust  # 确保 PyInstaller 打包包含该模块（chromadb 运行时动态导入）
-from chromadb import Documents, EmbeddingFunction, Embeddings
-from chromadb.config import Settings as _ChromaSettings
-import numpy as np
+def _metadata_matches(metadata, where):
+    if not where:
+        return True
+    if not isinstance(where, dict):
+        return False
+    if '$and' in where:
+        values = where.get('$and')
+        return isinstance(values, list) and all(_metadata_matches(metadata, item) for item in values)
+    if '$or' in where:
+        values = where.get('$or')
+        return isinstance(values, list) and any(_metadata_matches(metadata, item) for item in values)
+    for key, expected in where.items():
+        actual = metadata.get(key)
+        if isinstance(expected, dict):
+            if '$eq' in expected and actual != expected['$eq']:
+                return False
+            if '$ne' in expected and actual == expected['$ne']:
+                return False
+            if '$in' in expected and actual not in expected['$in']:
+                return False
+            if '$nin' in expected and actual in expected['$nin']:
+                return False
+        elif actual != expected:
+            return False
+    return True
 
-_chroma_clients = {}
-_chroma_clients_lock = threading.Lock()
-_CHROMA_KB_COLLECTION = 'luca_kb'
-_CHROMA_SETTINGS = _ChromaSettings(
-    anonymized_telemetry=False,
-    chroma_server_host=None,
-    chroma_server_http_port=None,
-    chroma_server_grpc_port=None,
-    chroma_coordinator_host='',
-    chroma_logservice_host='',
-    chroma_otel_collection_endpoint='',
-)
-
-def _get_chroma_client(book_id):
-    client = _chroma_clients.get(book_id)
-    if client is not None:
-        return client
-    from main import get_book_dir
-    persist_dir = os.path.join(get_book_dir(book_id), '.vector_db')
-    with _chroma_clients_lock:
-        client = _chroma_clients.get(book_id)
-        if client is None:
-            os.makedirs(persist_dir, exist_ok=True)
-            client = chromadb.PersistentClient(path=persist_dir, settings=_CHROMA_SETTINGS)
-            _chroma_clients[book_id] = client
-        return client
-
-def _get_chroma_collection(book_id, embedding_function):
-    client = _get_chroma_client(book_id)
-    try:
-        return client.get_collection(name=_CHROMA_KB_COLLECTION, embedding_function=embedding_function)
-    except:
-        return client.create_collection(name=_CHROMA_KB_COLLECTION, embedding_function=embedding_function)
+def embed_upsert_many(book_id, ids, documents, embeddings, metadatas=None):
+    if not ids:
+        return
+    if len(ids) != len(documents) or len(ids) != len(embeddings):
+        raise ValueError('向量写入参数长度不一致')
+    metadatas = metadatas or [{} for _ in ids]
+    if len(metadatas) != len(ids):
+        raise ValueError('向量元数据长度不一致')
+    init_db(book_id)
+    now = int(time.time())
+    rows = []
+    for chunk_id, document, embedding, metadata in zip(ids, documents, embeddings, metadatas):
+        vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        if not vector.size or not np.all(np.isfinite(vector)):
+            raise ValueError(f'无效向量: {chunk_id}')
+        rows.append((
+            chunk_id,
+            book_id,
+            sqlite3.Binary(vector.tobytes()),
+            int(vector.size),
+            document or '',
+            json.dumps(metadata or {}, ensure_ascii=False, separators=(',', ':')),
+            now,
+        ))
+    with db_transaction(book_id) as conn:
+        conn.executemany('''INSERT OR REPLACE INTO vector_entries
+            (id, book_id, embedding, dimensions, document, metadata_json, updated_at)
+            VALUES (?,?,?,?,?,?,?)''', rows)
 
 def embed_upsert(book_id, chunk_id, text, embedding_backend, source_type=None, source_id=None):
-    ef = _ChromaEmbeddingFunc(embedding_backend)
-    collection = _get_chroma_collection(book_id, ef)
     vec = embedding_backend.embed([text])[0]
     metadata = {}
     if source_type: metadata['source_type'] = source_type
     if source_id: metadata['source_id'] = source_id
-    collection.upsert(ids=[chunk_id], embeddings=[vec], metadatas=[metadata])
+    embed_upsert_many(book_id, [chunk_id], [text], [vec], [metadata])
     content_hash = hashlib.sha256(text.encode('utf-8')).hexdigest()
     register_embedding_chunk(book_id, chunk_id, source_type or '', source_id or '', content_hash, embedding_backend.backend_id)
 
-def embed_query(book_id, query_text, embedding_backend, top_k=10):
-    ef = _ChromaEmbeddingFunc(embedding_backend)
-    try:
-        collection = _get_chroma_collection(book_id, ef)
-    except:
+def embed_query(book_id, query_text, embedding_backend, top_k=10, where=None):
+    init_db(book_id)
+    query = np.asarray(embedding_backend.embed([query_text])[0], dtype=np.float32).reshape(-1)
+    query_norm = float(np.linalg.norm(query))
+    if not query.size or not np.isfinite(query_norm) or query_norm == 0:
         return []
-    q_vec = embedding_backend.embed([query_text])[0]
-    results = collection.query(query_embeddings=[q_vec], n_results=top_k)
+    conn = _get_conn(book_id)
+    try:
+        rows = conn.execute('''SELECT id, embedding, dimensions, metadata_json
+            FROM vector_entries WHERE book_id=?''', (book_id,)).fetchall()
+    finally:
+        conn.close()
     hits = []
-    if results['ids'] and results['ids'][0]:
-        for i, id_ in enumerate(results['ids'][0]):
-            hits.append({
-                'id': id_,
-                'distance': results['distances'][0][i] if results.get('distances') else 0,
-                'metadata': results['metadatas'][0][i] if results.get('metadatas') else {},
-            })
-    return hits
+    for row in rows:
+        if row['dimensions'] != query.size:
+            continue
+        try:
+            metadata = json.loads(row['metadata_json'] or '{}')
+        except (TypeError, ValueError):
+            metadata = {}
+        if not _metadata_matches(metadata, where):
+            continue
+        vector = np.frombuffer(row['embedding'], dtype=np.float32, count=row['dimensions'])
+        vector_norm = float(np.linalg.norm(vector))
+        if not np.isfinite(vector_norm) or vector_norm == 0:
+            continue
+        similarity = float(np.dot(query, vector) / (query_norm * vector_norm))
+        hits.append({
+            'id': row['id'],
+            'distance': 1.0 - max(-1.0, min(1.0, similarity)),
+            'metadata': metadata,
+        })
+    hits.sort(key=lambda item: item['distance'])
+    return hits[:max(0, int(top_k))]
+
+def prune_vector_entries(book_id, expected_ids):
+    init_db(book_id)
+    expected = set(expected_ids or [])
+    with db_transaction(book_id) as conn:
+        stored = {
+            row['id']
+            for row in conn.execute(
+                'SELECT id FROM vector_entries WHERE book_id=?', (book_id,)
+            ).fetchall()
+        }
+        stale = [(book_id, chunk_id) for chunk_id in stored - expected]
+        if stale:
+            conn.executemany(
+                'DELETE FROM vector_entries WHERE book_id=? AND id=?', stale
+            )
+            conn.executemany(
+                'DELETE FROM embedding_chunks WHERE book_id=? AND id=?', stale
+            )
 
 def embed_clear(book_id):
-    try:
-        client = _get_chroma_client(book_id)
-        try:
-            client.delete_collection(name=_CHROMA_KB_COLLECTION)
-        except:
-            pass
-        _chroma_clients.pop(book_id, None)
-    except:
-        pass
-    clear_embedding_chunks(book_id)
+    init_db(book_id)
+    with db_transaction(book_id) as conn:
+        conn.execute('DELETE FROM vector_entries WHERE book_id=?', (book_id,))
+        conn.execute('DELETE FROM embedding_chunks WHERE book_id=?', (book_id,))
+    from main import get_book_dir
+    shutil.rmtree(os.path.join(get_book_dir(book_id), '.vector_db'), ignore_errors=True)
 
 def get_done_chapter_count(book_id):
     init_db(book_id)
@@ -1032,18 +1088,16 @@ def get_kb_overview(book_id, current_idx=None):
         conn.close()
 
 def embed_collection_count(book_id):
+    init_db(book_id)
+    conn = _get_conn(book_id)
     try:
-        client = _get_chroma_client(book_id)
-        collection = client.get_collection(name=_CHROMA_KB_COLLECTION)
-        return collection.count()
-    except:
-        return 0
-
-class _ChromaEmbeddingFunc(EmbeddingFunction):
-    def __init__(self, backend):
-        self._backend = backend
-    def __call__(self, input: Documents) -> Embeddings:
-        return self._backend.embed(list(input))
+        row = conn.execute(
+            'SELECT COUNT(*) AS cnt FROM vector_entries WHERE book_id=?',
+            (book_id,),
+        ).fetchone()
+        return row['cnt'] if row else 0
+    finally:
+        conn.close()
 
 # ─── Content hashing ───
 
@@ -1231,9 +1285,10 @@ def undo_edit(book_id, log_id):
 
 # ─── KB lookup helpers (for AI tool use) ───
 
-def lookup_kb(book_id, query, types=None, limit=10):
+def lookup_kb(book_id, query, types=None, limit=10, entity_kind=None):
     """Search across entities/mentions/events/foreshadowing/rules.
     Returns list of dicts with {kind, id, ...record-specific fields, chapter_id?}.
+    entity_kind: optional filter for entity type (e.g. '人物', '功法'). Only affects entities branch.
     """
     q_norm = (query or '').strip().lower()
     if not q_norm:
@@ -1243,7 +1298,10 @@ def lookup_kb(book_id, query, types=None, limit=10):
     conn = _get_conn(book_id)
     try:
         if 'entities' in types:
-            rows = conn.execute('SELECT * FROM entities WHERE book_id=?', (book_id,)).fetchall()
+            if entity_kind:
+                rows = conn.execute('SELECT * FROM entities WHERE book_id=? AND type=?', (book_id, entity_kind)).fetchall()
+            else:
+                rows = conn.execute('SELECT * FROM entities WHERE book_id=?', (book_id,)).fetchall()
             for r in rows:
                 hay = r['canonical_name'].lower()
                 aliases = []

@@ -1,6 +1,6 @@
 {
   "name": "lucawriter",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "LucaWriter - AI写作搭档",
   "main": "main.js",
   "author": "LucaWriter",
@@ -17,15 +17,15 @@
     "build:mac:dir": "electron-builder --mac --dir"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.0"
+    "electron": "42.3.3",
+    "electron-builder": "26.15.0"
   },
   "build": {
     "appId": "com.lucawriter.app",
     "productName": "LucaWriter",
     "copyright": "Copyright © 2026 LucaWriter",
     "directories": {
-      "output": "../release/v1.2.3"
+      "output": "../release/v1.2.4"
     },
     "files": [
       "main.js",

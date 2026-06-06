@@ -10,6 +10,7 @@ import secrets
 import glob
 import re
 import shutil
+import tempfile
 import base64
 import xml.etree.ElementTree as ET
 import subprocess
@@ -17,6 +18,7 @@ import socket
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote, unquote
 import urllib.request
+import urllib.error
 import threading
 import queue
 from datetime import datetime
@@ -33,19 +35,6 @@ if not os.environ.get('SSL_CERT_FILE'):
         if sys.platform == 'darwin' and os.path.exists(_macos_cert):
             os.environ['SSL_CERT_FILE'] = _macos_cert
 
-import chromadb
-import chromadb.api.rust  # 确保 PyInstaller 打包包含该模块（chromadb 运行时动态导入）
-from chromadb import Documents, EmbeddingFunction, Embeddings
-from chromadb.config import Settings as _ChromaSettings
-_CHROMA_SETTINGS = _ChromaSettings(
-    anonymized_telemetry=False,
-    chroma_server_host=None,
-    chroma_server_http_port=None,
-    chroma_server_grpc_port=None,
-    chroma_coordinator_host='',
-    chroma_logservice_host='',
-    chroma_otel_collection_endpoint='',
-)
 import numpy as np
 
 import kb_pipeline
@@ -76,7 +65,7 @@ except ImportError:
     HAS_DOCX = False
 
 try:
-    from PyPDF2 import PdfReader
+    from pypdf import PdfReader
     HAS_PDF = True
 except ImportError:
     HAS_PDF = False
@@ -138,8 +127,9 @@ def _find_data_dir():
     return usrdata
 
 DATA_DIR = _find_data_dir()
-PORT = 20000 if os.environ.get('DATA_DIR') else 10000
+PORT = int(os.environ.get('LUCA_PORT', 20000 if os.environ.get('DATA_DIR') else 10000))
 BOOKS_DIR = os.path.join(DATA_DIR, 'books')
+WORKS_DIR = os.path.join(DATA_DIR, 'works')  # COO v2 世界观级共享目录
 LOG_DIR = os.path.join(DATA_DIR, 'logs')
 MESSAGES_DIR = os.path.join(DATA_DIR, 'messages')
 CHAT_SESSIONS_DIR = os.path.join(DATA_DIR, 'chat_sessions')
@@ -678,247 +668,695 @@ def _archive_kb_db(book_id, settings):
     return True
 
 
-def _build_coo_zip(bid, pen_name=''):
-    bd = get_book_dir(bid)
-    if not os.path.isdir(bd):
-        raise FileNotFoundError(f'书本目录不存在: {bid}')
-    meta = get_book_meta(bid) or {}
-    pen_name = str(pen_name or '').strip()
-    coo_uid = _ensure_coo_book_uid(bid, meta, bd)
-    ch_dir = os.path.join(bd, 'chapters')
-    all_chapters = {}
-    if os.path.isdir(ch_dir):
-        for fn in os.listdir(ch_dir):
-            if not fn.endswith('.json') or fn.startswith('.'):
-                continue
-            try:
-                with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
-                    ch = json.load(f)
-                cid = str(ch.get('id') or fn[:-5])
-                all_chapters[cid] = ch
-            except Exception:
-                continue
-    order = [cid for cid in meta.get('chapter_order', []) if cid in all_chapters]
-    order.extend([cid for cid in all_chapters.keys() if cid not in order])
+def _build_coo_zip(work_id, pen_name=''):
+    detail = _work_detail(work_id)
+    if not detail:
+        raise FileNotFoundError(f'作品不存在: {work_id}')
+    work = detail['work']
+    pen_name = str(pen_name or work.get('author') or '').strip() or '佚名'
+    exported_at = time.time()
+    package_books = []
+    book_id_map = {}
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        chapters_manifest = []
-        for idx, cid in enumerate(order, start=1):
-            ch = all_chapters.get(cid) or {}
-            safe = _coo_safe_name(cid, f'ch_{idx:05d}')
-            chapter_arc = f'chapters/{idx:05d}_{safe}.json'
-            content = ch.get('content', '')
-            chapter_payload = {
-                'id': cid,
-                'title': ch.get('title', '') or f'第 {idx} 章',
-                'content': content,
-                'updated': ch.get('updated', meta.get('updated', 0)),
-            }
-            zf.writestr(chapter_arc, json.dumps(chapter_payload, ensure_ascii=False, indent=2))
-            summary_arc = ''
-            summary_path = os.path.join(bd, 'chapter_summaries', f'{cid}.md')
-            if os.path.isfile(summary_path):
-                summary_arc = f'ai/chapter_summaries/{idx:05d}_{safe}.md'
-                _coo_add_file(zf, summary_path, summary_arc)
-            chapters_manifest.append({
-                'id': cid,
-                'title': chapter_payload['title'],
-                'order': idx,
-                'path': chapter_arc,
-                'summary_path': summary_arc,
-                'word_count': len(content or ''),
-                'updated': chapter_payload['updated'],
-            })
+        for book_index, book in enumerate(detail['books'], start=1):
+            local_bid = book['id']
+            meta = get_book_meta(local_bid) or {}
+            package_bid = f'{book_index:02d}_{_coo_safe_name(book.get("title"), "book")}'
+            while package_bid in book_id_map.values():
+                package_bid += '_' + secrets.token_hex(2)
+            book_id_map[local_bid] = package_bid
+            book_dir = f'books/{package_bid}/'
+            chapters_manifest = []
+            for chapter_index, chapter in enumerate(book.get('chapters') or [], start=1):
+                cid = chapter['id']
+                ch = _read_chapter_file(local_bid, cid) or {}
+                safe = _coo_safe_name(cid, f'ch_{chapter_index:05d}')
+                rel_path = f'chapters/{chapter_index:05d}_{safe}.json'
+                payload = {
+                    'id': cid,
+                    'title': ch.get('title') or f'第 {chapter_index} 章',
+                    'content': ch.get('content', ''),
+                    'updated': ch.get('updated', meta.get('updated', 0)),
+                }
+                zf.writestr(
+                    book_dir + rel_path,
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                )
+                summary_rel = ''
+                summary_path = os.path.join(BOOKS_DIR, local_bid, 'chapter_summaries', f'{cid}.md')
+                if os.path.isfile(summary_path):
+                    summary_rel = f'ai/chapter_summaries/{safe}.md'
+                    _coo_add_file(zf, summary_path, book_dir + summary_rel)
+                chapters_manifest.append({
+                    'id': cid,
+                    'title': payload['title'],
+                    'order': chapter_index,
+                    'path': rel_path,
+                    'summary_path': summary_rel,
+                    'word_count': len(payload['content'] or ''),
+                    'updated': payload['updated'],
+                })
 
-        cover_arc = ''
-        cover_path = os.path.join(bd, 'cover')
-        if os.path.isfile(cover_path):
-            try:
-                with open(cover_path, 'rb') as f:
+            child_cover = ''
+            child_cover_path = os.path.join(BOOKS_DIR, local_bid, 'cover')
+            if os.path.isfile(child_cover_path):
+                with open(child_cover_path, 'rb') as f:
                     cover_raw = f.read()
                 if cover_raw:
-                    cover_arc = _coo_cover_arcname(cover_raw)
-                    zf.writestr(cover_arc, cover_raw)
-            except Exception:
-                cover_arc = ''
+                    child_cover = _coo_cover_arcname(cover_raw)
+                    zf.writestr(book_dir + child_cover, cover_raw)
 
-        source_added = _coo_add_file(zf, os.path.join(bd, 'source.md'), 'ai/source.md')
-        outline_added = _coo_add_file(zf, os.path.join(bd, 'outline.md'), 'ai/outline.md')
-        core_added = _coo_add_file(zf, os.path.join(bd, 'core_memory.md'), 'ai/core_memory.md')
-        kb_added = _coo_add_file(zf, os.path.join(bd, 'kb.db'), 'ai/kb.db')
-        volume_added = _coo_add_dir(zf, os.path.join(bd, 'volume_summaries'), 'ai/volume_summaries')
-        vector_added = _coo_add_dir(zf, os.path.join(bd, '.vector_db'), 'vector_db')
-        manifest = {
-            'format_version': 1,
-            'format_name': 'coo',
-            'book_uid': coo_uid,
-            'exported_at': time.time(),
-            'producer': {
-                'app_name': 'LucaWriter',
-                'app_version': '1.2.3',
-            },
-            'book': {
-                'id': meta.get('id', bid),
-                'title': meta.get('title', ''),
-                'author': pen_name or '佚名',
+            outline_rel = 'ai/outline.md' if _coo_add_file(
+                zf, os.path.join(BOOKS_DIR, local_bid, 'outline.md'), book_dir + 'ai/outline.md'
+            ) else ''
+            volume_rel = 'ai/volume_summary.md' if _coo_add_file(
+                zf, os.path.join(BOOKS_DIR, local_bid, 'volume_summary.md'),
+                book_dir + 'ai/volume_summary.md'
+            ) else ''
+            sub_manifest = {
+                'book_uid': meta.get('book_uid') or _new_stable_uid(),
+                'title': book.get('title', '未命名书本'),
+                'author': meta.get('author') or pen_name,
                 'description': meta.get('description', ''),
-                'language': meta.get('language', 'zh-CN'),
+                'cover_file': child_cover,
+                'order': book_index,
+                'language': meta.get('language', work.get('language', 'zh-CN')),
                 'created': meta.get('created', 0),
                 'updated': meta.get('updated', 0),
-                'cover_file': cover_arc,
+                'chapters': chapters_manifest,
+                'ai': {'outline_path': outline_rel, 'volume_summary_path': volume_rel},
+            }
+            zf.writestr(
+                book_dir + 'manifest.json',
+                json.dumps(sub_manifest, ensure_ascii=False, indent=2),
+            )
+            package_books.append({
+                'id': package_bid,
+                'title': book.get('title', '未命名书本'),
+                'order': book_index,
+                'path': book_dir,
+                'manifest_path': book_dir + 'manifest.json',
+            })
+
+        lore_manifest = []
+        lore_id_map = {}
+        for idx, lore in enumerate(detail['lore'], start=1):
+            lore_id = str(lore.get('id') or f'lore_{idx}')
+            package_lore_id = lore_id
+            lore_id_map[lore_id] = package_lore_id
+            rel_path = f'lore/{idx:04d}_{_coo_safe_name(lore.get("title"), "lore")}.md'
+            zf.writestr(rel_path, str(lore.get('content') or ''))
+            lore_manifest.append({
+                'id': package_lore_id,
+                'title': lore.get('title', '未命名设定'),
+                'kind': lore.get('kind', ''),
+                'path': rel_path,
+                'updated': lore.get('updated', 0),
+            })
+
+        reading_order = []
+        for item in _normalize_work_reading_order(work_id, append_missing=True):
+            kind = item.get('type')
+            if kind == 'chapter' and item.get('book') in book_id_map:
+                reading_order.append({
+                    'type': 'chapter',
+                    'book': book_id_map[item['book']],
+                    'chapter': item.get('chapter'),
+                })
+            elif kind == 'lore' and item.get('ref') in lore_id_map:
+                row = {'type': 'lore', 'ref': lore_id_map[item['ref']]}
+                if item.get('note'):
+                    row['note'] = item['note']
+                reading_order.append(row)
+            elif kind == 'volume_boundary' and item.get('book') in book_id_map:
+                row = {'type': 'volume_boundary', 'book': book_id_map[item['book']]}
+                if item.get('prompt_override'):
+                    row['prompt_override'] = item['prompt_override']
+                reading_order.append(row)
+
+        work_cover = ''
+        work_cover_path = os.path.join(WORKS_DIR, work_id, 'cover')
+        if os.path.isfile(work_cover_path):
+            with open(work_cover_path, 'rb') as f:
+                cover_raw = f.read()
+            if cover_raw:
+                work_cover = 'assets/' + _coo_cover_arcname(cover_raw)
+                zf.writestr(work_cover, cover_raw)
+
+        shared_dir = get_work_kb_dir(work_id)
+        characters_added = _coo_add_file(zf, os.path.join(shared_dir, 'source.md'), 'shared/ai/characters.md')
+        world_added = _coo_add_file(zf, os.path.join(shared_dir, 'outline.md'), 'shared/ai/world_settings.md')
+        timeline_added = _coo_add_file(zf, os.path.join(shared_dir, 'timeline.md'), 'shared/ai/timeline.md')
+        core_added = _coo_add_file(zf, os.path.join(shared_dir, 'core_memory.md'), 'shared/ai/core_memory.md')
+        kb_added = _coo_add_file(zf, os.path.join(shared_dir, 'kb.db'), 'shared/ai/kb.db')
+        vector_added = _coo_add_dir(zf, os.path.join(shared_dir, '.vector_db'), 'shared/vector_db')
+
+        merge_sources = work.get('merge_sources') or []
+        provenance = {'history_path': 'META-INF/coo-history.jsonl'}
+        if merge_sources:
+            provenance['merge_sources_path'] = 'META-INF/coo-merge-sources.json'
+        manifest = {
+            'format_name': 'coo',
+            'format_version': 2,
+            'work_uid': work.get('work_uid') or _new_stable_uid(),
+            'exported_at': exported_at,
+            'producer': {'app_name': 'LucaWriter', 'app_version': '2.0.0'},
+            'work': {
+                'title': work.get('title', '未命名作品'),
+                'author': pen_name,
+                'description': work.get('description', ''),
+                'language': work.get('language', 'zh-CN'),
+                'created': work.get('created', 0),
+                'updated': work.get('updated', 0),
+                'cover_file': work_cover,
             },
-            'chapters': chapters_manifest,
-            'ai': {
-                'source_path': 'ai/source.md' if source_added else '',
-                'outline_path': 'ai/outline.md' if outline_added else '',
-                'core_memory_path': 'ai/core_memory.md' if core_added else '',
-                'kb_path': 'ai/kb.db' if kb_added else '',
-                'vector_db_path': 'vector_db/' if vector_added else '',
-            },
+            'books': package_books,
+            'lore': lore_manifest,
+            'reading_order': reading_order,
+            'shared': {'ai': {
+                'characters_path': 'shared/ai/characters.md' if characters_added else '',
+                'world_settings_path': 'shared/ai/world_settings.md' if world_added else '',
+                'timeline_path': 'shared/ai/timeline.md' if timeline_added else '',
+                'core_memory_path': 'shared/ai/core_memory.md' if core_added else '',
+                'kb_path': 'shared/ai/kb.db' if kb_added else '',
+                'vector_db_path': 'shared/vector_db/' if vector_added else '',
+            }},
             'contains': {
-                'chapters': True,
-                'summaries': bool(source_added or outline_added or core_added or volume_added or any(c.get('summary_path') for c in chapters_manifest)),
+                'books': bool(package_books),
+                'lore': bool(lore_manifest),
+                'reading_order': True,
+                'summaries': bool(characters_added or world_added or timeline_added or core_added),
                 'knowledge_db': bool(kb_added),
                 'vector_db': bool(vector_added),
                 'chat_history': False,
                 'personal_settings': False,
             },
-            'provenance': {
-                'history_path': 'META-INF/coo-history.jsonl',
-                'keys_path': 'META-INF/coo-keys.json',
-                'signature_alg': 'Ed25519',
-            },
+            'provenance': provenance,
         }
         zf.writestr('manifest.json', json.dumps(manifest, ensure_ascii=False, indent=2))
-    raw = buf.getvalue()
+        if merge_sources:
+            zf.writestr(
+                'META-INF/coo-merge-sources.json',
+                json.dumps(merge_sources, ensure_ascii=False, indent=2),
+            )
+        history_path = os.path.join(WORKS_DIR, work_id, 'coo-history.jsonl')
+        _coo_add_file(zf, history_path, 'META-INF/coo-history.jsonl')
+
     if not HAS_COO_PROVENANCE:
-        raise RuntimeError('缺少 COO 签名模块或 cryptography 依赖')
+        raise RuntimeError('缺少 COO 留名与校验模块')
     identity = coo_provenance.load_or_create_identity(
         os.path.join(DATA_DIR, 'coo_identity.json'),
         client_name='LucaWriter',
-        client_version='1.2.3',
+        client_version='2.0.0',
         client_id_prefix='lucawriter',
-        user_name=pen_name or '佚名',
+        user_name=pen_name,
     )
-    return coo_provenance.sign_coo_bytes(raw, identity, event_type='export')
+    event_type = 'merge' if work.get('pending_history_event') == 'merge' else 'export'
+    output = coo_provenance.write_coo_with_history(
+        buf.getvalue(), identity, event_type=event_type
+    )
+    try:
+        with zipfile.ZipFile(io.BytesIO(output), 'r') as final_zip:
+            history = final_zip.read('META-INF/coo-history.jsonl')
+        with open(os.path.join(WORKS_DIR, work_id, 'coo-history.jsonl'), 'wb') as f:
+            f.write(history)
+    except Exception:
+        pass
+    if work.get('pending_history_event'):
+        latest = get_work_meta(work_id) or work
+        latest.pop('pending_history_event', None)
+        save_work_meta(work_id, latest)
+    return output
+
+
+def _safe_coo_path(value):
+    value = str(value or '').replace('\\', '/')
+    if not value or value.startswith('/') or '..' in value.split('/'):
+        return ''
+    return value
+
+
+def _normalize_coobox_server_url(value):
+    value = str(value or '').strip().rstrip('/')
+    if not value:
+        return ''
+    if any(ord(ch) < 32 for ch in value):
+        raise ValueError('网站地址包含非法字符')
+    parsed = urlparse(value)
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+        raise ValueError('网站地址必须是完整的 http:// 或 https:// URL')
+    if parsed.username or parsed.password:
+        raise ValueError('网站地址不能包含用户名或密码')
+    if parsed.query or parsed.fragment:
+        raise ValueError('网站地址不能包含查询参数或片段')
+    return value
 
 
 def _import_coo_zip(raw):
+    if not HAS_COO_PROVENANCE:
+        raise ValueError('缺少 COO 校验模块')
     try:
         zf = zipfile.ZipFile(io.BytesIO(raw), 'r')
     except zipfile.BadZipFile:
-        raise ValueError('无效的 .coo 文件（无法解压）')
+        raise ValueError('不是有效的 COO ZIP')
     try:
         _validate_zip_archive(zf)
-        manifest_str = _zip_read_limited(zf, 'manifest.json', EPUB_MAX_META_BYTES).decode('utf-8')
-        manifest = json.loads(manifest_str)
     except Exception:
-        raise ValueError('无效的 .coo 文件（缺少 manifest.json）')
-    if manifest.get('format_name') != 'coo':
-        raise ValueError('不是有效的 .coo 文件')
-    bid = 'book_' + str(int(time.time() * 1000))
-    bd = get_book_dir(bid)
-    os.makedirs(bd, exist_ok=True)
-    ch_dir = os.path.join(bd, 'chapters')
-    os.makedirs(ch_dir, exist_ok=True)
-    ch_order = []
-    used_ids = set()
-    for idx, ch_meta in enumerate(manifest.get('chapters', []), start=1):
-        ch_path = (ch_meta.get('path') or '').replace('\\', '/')
-        if not ch_path or ch_path.startswith('/') or '..' in ch_path.split('/'):
+        zf.close()
+        raise
+    report = coo_provenance.verify_coo_bytes(raw)
+    if not report.get('ok'):
+        zf.close()
+        raise ValueError(report.get('reason') or 'COO 篡改校验失败')
+    manifest = report.get('manifest') or {}
+    if int(manifest.get('format_version') or 0) != 2:
+        zf.close()
+        raise ValueError('仅支持 COO v2')
+    work_info = manifest.get('work') or {}
+    books_info = sorted(manifest.get('books') or [], key=lambda x: x.get('order', 0))
+    if not books_info:
+        zf.close()
+        raise ValueError('COO v2 至少需要一卷')
+
+    wid = _new_local_id('work')
+    now = time.time()
+    work = {
+        'id': wid,
+        'work_uid': manifest.get('work_uid') or _new_stable_uid(),
+        'title': str(work_info.get('title') or '导入的作品')[:200],
+        'author': str(work_info.get('author') or '')[:200],
+        'description': str(work_info.get('description') or ''),
+        'language': str(work_info.get('language') or 'zh-CN')[:30],
+        'created': work_info.get('created') or now,
+        'updated': now,
+        'book_ids': [],
+        'reading_order': [],
+        'coo_server_url': '',
+        'coo_email': '',
+    }
+    work_dir = get_work_dir(wid)
+    os.makedirs(os.path.join(work_dir, 'lore'), exist_ok=True)
+    package_book_map = {}
+    package_chapters = {}
+
+    for book_index, book_ref in enumerate(books_info, start=1):
+        package_bid = str(book_ref.get('id') or f'book_{book_index}')
+        manifest_path = _safe_coo_path(book_ref.get('manifest_path'))
+        if not manifest_path:
+            base = _safe_coo_path(book_ref.get('path')).rstrip('/')
+            manifest_path = f'{base}/manifest.json' if base else ''
+        if not manifest_path:
             continue
         try:
-            ch = json.loads(_zip_read_limited(zf, ch_path, 80 * 1024 * 1024).decode('utf-8'))
+            sub = json.loads(_zip_read_limited(zf, manifest_path, EPUB_MAX_META_BYTES).decode('utf-8'))
         except Exception:
             continue
-        cid = str(ch.get('id') or ch_meta.get('id') or f'ch_{idx}')
-        if not is_valid_id(cid) or cid in used_ids:
-            cid = f'ch_{int(time.time() * 1000)}_{idx}'
-        used_ids.add(cid)
-        ch_order.append(cid)
-        save_json(os.path.join(ch_dir, f'{cid}.json'), {
-            'id': cid,
-            'title': str(ch.get('title') or ch_meta.get('title') or f'第 {idx} 章')[:200],
-            'content': ch.get('content', ''),
-            'updated': ch.get('updated') or ch_meta.get('updated') or time.time(),
-        })
-        summary_path = (ch_meta.get('summary_path') or '').replace('\\', '/')
-        if summary_path and not summary_path.startswith('/') and '..' not in summary_path.split('/'):
+        base_dir = manifest_path.rsplit('/', 1)[0] + '/'
+        bid = _new_local_id('book')
+        package_book_map[package_bid] = bid
+        bd = os.path.join(BOOKS_DIR, bid)
+        ch_dir = os.path.join(bd, 'chapters')
+        os.makedirs(ch_dir, exist_ok=True)
+        os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+        chapter_order = []
+        chapter_ids = set()
+        for chapter_index, ch_ref in enumerate(
+            sorted(sub.get('chapters') or [], key=lambda x: x.get('order', 0)), start=1
+        ):
+            rel = _safe_coo_path(ch_ref.get('path'))
+            path = _safe_coo_path(base_dir + rel) if rel else ''
+            if not path:
+                continue
             try:
-                summary = _zip_read_limited(zf, summary_path, 10 * 1024 * 1024).decode('utf-8')
-                os.makedirs(os.path.join(bd, 'chapter_summaries'), exist_ok=True)
-                with open(os.path.join(bd, 'chapter_summaries', f'{cid}.md'), 'w', encoding='utf-8') as f:
-                    f.write(summary)
+                ch = json.loads(_zip_read_limited(zf, path, 80 * _MB).decode('utf-8'))
+            except Exception:
+                continue
+            cid = str(ch.get('id') or ch_ref.get('id') or _new_local_id('ch'))
+            if not is_valid_id(cid) or cid in chapter_ids:
+                cid = _new_local_id('ch')
+            chapter_ids.add(cid)
+            chapter_order.append(cid)
+            save_json(os.path.join(ch_dir, f'{cid}.json'), {
+                'id': cid,
+                'title': str(ch.get('title') or ch_ref.get('title') or f'第 {chapter_index} 章')[:200],
+                'content': str(ch.get('content') or ''),
+                'updated': ch.get('updated') or ch_ref.get('updated') or now,
+            })
+            summary_rel = _safe_coo_path(ch_ref.get('summary_path'))
+            if summary_rel:
+                try:
+                    summary = _zip_read_limited(zf, base_dir + summary_rel, 10 * _MB)
+                    summary_dir = os.path.join(bd, 'chapter_summaries')
+                    os.makedirs(summary_dir, exist_ok=True)
+                    with open(os.path.join(summary_dir, f'{cid}.md'), 'wb') as f:
+                        f.write(summary)
+                except Exception:
+                    pass
+        meta = {
+            'id': bid,
+            'work_id': wid,
+            'book_uid': sub.get('book_uid') or _new_stable_uid(),
+            'title': str(sub.get('title') or book_ref.get('title') or '未命名书本')[:200],
+            'author': str(sub.get('author') or work['author'])[:200],
+            'description': str(sub.get('description') or ''),
+            'language': str(sub.get('language') or work['language'])[:30],
+            'created': sub.get('created') or now,
+            'updated': sub.get('updated') or now,
+            'chapter_order': chapter_order,
+            'current_chapter_id': chapter_order[0] if chapter_order else '',
+        }
+        save_json(os.path.join(bd, 'meta.json'), meta)
+        save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+        package_chapters[package_bid] = set(chapter_order)
+        work['book_ids'].append(bid)
+        cover_rel = _safe_coo_path(sub.get('cover_file'))
+        if cover_rel:
+            try:
+                with open(os.path.join(bd, 'cover'), 'wb') as f:
+                    f.write(_zip_read_limited(zf, base_dir + cover_rel, EPUB_MAX_COVER_BYTES))
             except Exception:
                 pass
-    meta = get_book_meta(bid) or {}
-    book_info = manifest.get('book', {})
-    meta['id'] = bid
-    meta['title'] = book_info.get('title', '导入的书本')
-    meta['author'] = book_info.get('author', '')
-    meta['description'] = book_info.get('description', '')
-    meta['language'] = book_info.get('language', 'zh-CN')
-    meta['created'] = time.time()
-    meta['updated'] = time.time()
-    meta['chapter_order'] = ch_order
-    meta['current_chapter_id'] = ch_order[0] if ch_order else ''
-    meta['coo_book_uid'] = manifest.get('book_uid') or ('coo_' + secrets.token_hex(48))
-    save_json(os.path.join(bd, 'meta.json'), meta)
 
-    ai = manifest.get('ai') or {}
-    ai_map = {
-        ai.get('source_path') or 'ai/source.md': 'source.md',
-        ai.get('outline_path') or 'ai/outline.md': 'outline.md',
-        ai.get('core_memory_path') or 'ai/core_memory.md': 'core_memory.md',
-        ai.get('kb_path') or 'ai/kb.db': 'kb.db',
-    }
-    for src, dest in ai_map.items():
-        src = (src or '').replace('\\', '/')
-        if not src or src.startswith('/') or '..' in src.split('/'):
+    if not work['book_ids']:
+        zf.close()
+        shutil.rmtree(work_dir, ignore_errors=True)
+        raise ValueError('COO v2 中没有可导入的有效卷')
+
+    lore_map = {}
+    for idx, lore_ref in enumerate(manifest.get('lore') or [], start=1):
+        path = _safe_coo_path(lore_ref.get('path'))
+        if not path:
             continue
         try:
-            raw_file = _zip_read_limited(zf, src, 200 * 1024 * 1024)
-            with open(os.path.join(bd, dest), 'wb') as f:
-                f.write(raw_file)
+            content = _zip_read_limited(zf, path, 20 * _MB).decode('utf-8')
         except Exception:
-            pass
-    for info in zf.infolist():
-        name = info.filename.replace('\\', '/')
-        if info.is_dir() or name.startswith('/') or '..' in name.split('/'):
             continue
-        if name.startswith('ai/volume_summaries/'):
-            rel = name[len('ai/volume_summaries/'):]
-            if rel:
-                fp = os.path.join(bd, 'volume_summaries', rel)
-                os.makedirs(os.path.dirname(fp), exist_ok=True)
-                try:
-                    with open(fp, 'wb') as f:
-                        f.write(_zip_read_limited(zf, name, 50 * 1024 * 1024))
-                except Exception:
-                    pass
-        elif name.startswith('vector_db/'):
-            rel = name[len('vector_db/'):]
-            if rel:
-                fp = os.path.join(bd, '.vector_db', rel)
-                os.makedirs(os.path.dirname(fp), exist_ok=True)
-                try:
-                    with open(fp, 'wb') as f:
-                        f.write(_zip_read_limited(zf, name, 200 * 1024 * 1024))
-                except Exception:
-                    pass
-    cover_file = (book_info.get('cover_file') or '').replace('\\', '/')
-    if cover_file and not cover_file.startswith('/') and '..' not in cover_file.split('/'):
+        package_lid = str(lore_ref.get('id') or f'lore_{idx}')
+        lid = package_lid if is_valid_id(package_lid) else _new_local_id('lore')
+        if lid in lore_map.values():
+            lid = _new_local_id('lore')
+        lore_map[package_lid] = lid
+        save_json(os.path.join(work_dir, 'lore', f'{lid}.json'), {
+            'id': lid,
+            'title': str(lore_ref.get('title') or '未命名设定')[:200],
+            'kind': str(lore_ref.get('kind') or '')[:100],
+            'content': content,
+            'updated': lore_ref.get('updated') or now,
+        })
+
+    for item in manifest.get('reading_order') or []:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get('type')
+        if kind == 'chapter':
+            package_bid, cid = item.get('book'), item.get('chapter')
+            if package_bid in package_book_map and cid in package_chapters.get(package_bid, set()):
+                work['reading_order'].append({
+                    'type': 'chapter', 'book': package_book_map[package_bid], 'chapter': cid,
+                })
+        elif kind == 'lore' and item.get('ref') in lore_map:
+            row = {'type': 'lore', 'ref': lore_map[item['ref']]}
+            if item.get('note'):
+                row['note'] = str(item['note'])[:500]
+            work['reading_order'].append(row)
+        elif kind == 'volume_boundary' and item.get('book') in package_book_map:
+            row = {'type': 'volume_boundary', 'book': package_book_map[item['book']]}
+            if item.get('prompt_override'):
+                row['prompt_override'] = str(item['prompt_override'])[:1000]
+            work['reading_order'].append(row)
+    if not work['reading_order']:
+        for bid in work['book_ids']:
+            for cid in (get_book_meta(bid) or {}).get('chapter_order') or []:
+                work['reading_order'].append({'type': 'chapter', 'book': bid, 'chapter': cid})
+    save_work_meta(wid, work)
+
+    cover_path = _safe_coo_path(work_info.get('cover_file'))
+    if cover_path:
         try:
-            with open(os.path.join(bd, 'cover'), 'wb') as f:
-                f.write(_zip_read_limited(zf, cover_file, EPUB_MAX_COVER_BYTES))
+            with open(os.path.join(work_dir, 'cover'), 'wb') as f:
+                f.write(_zip_read_limited(zf, cover_path, EPUB_MAX_COVER_BYTES))
         except Exception:
             pass
+    try:
+        with open(os.path.join(work_dir, 'coo-history.jsonl'), 'wb') as f:
+            f.write(_zip_read_limited(zf, 'META-INF/coo-history.jsonl', 20 * _MB))
+    except Exception:
+        pass
+    try:
+        merge_sources = json.loads(
+            _zip_read_limited(
+                zf, 'META-INF/coo-merge-sources.json', 2 * _MB
+            ).decode('utf-8')
+        )
+        if isinstance(merge_sources, list):
+            work['merge_sources'] = merge_sources[:1000]
+            save_work_meta(wid, work)
+    except Exception:
+        pass
+
+    shared = (manifest.get('shared') or {}).get('ai') or {}
+    shared_dir = get_work_kb_dir(wid)
+    for field, dest in {
+        'characters_path': 'source.md',
+        'world_settings_path': 'outline.md',
+        'timeline_path': 'timeline.md',
+        'core_memory_path': 'core_memory.md',
+    }.items():
+        path = _safe_coo_path(shared.get(field))
+        if not path:
+            continue
+        try:
+            with open(os.path.join(shared_dir, dest), 'wb') as f:
+                f.write(_zip_read_limited(zf, path, 200 * _MB))
+        except Exception:
+            pass
+    # kb.db and Chroma vector_db are generated caches. Never deserialize them
+    # from an untrusted COO; rebuild locally to avoid executable collection config.
+    if shared.get('kb_path') or shared.get('vector_db_path'):
+        work = get_work_meta(wid) or work
+        work['needs_readthrough'] = True
+        save_work_meta(wid, work)
     zf.close()
-    return bid, meta, manifest
+    return wid, get_work_meta(wid), manifest
+
+
+def _clear_work_generated_ai(work_id):
+    shared_dir = os.path.join(WORKS_DIR, work_id, 'shared')
+    if os.path.isdir(shared_dir):
+        shutil.rmtree(shared_dir)
+    os.makedirs(shared_dir, exist_ok=True)
+    work = get_work_meta(work_id) or {}
+    for bid in work.get('book_ids') or []:
+        bd = os.path.join(BOOKS_DIR, bid)
+        for dirname in ('chapter_summaries', 'volume_summaries', '.vector_db', 'kb_archives'):
+            path = os.path.join(bd, dirname)
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+        for filename in (
+            'kb.db', 'source.md', 'timeline.md', 'prediction.md',
+            'core_memory.md', 'readthrough_checkpoint.json',
+        ):
+            path = os.path.join(bd, filename)
+            if os.path.isfile(path):
+                os.remove(path)
+
+
+def _merge_imported_work(target_work_id, source_work_id):
+    target = get_work_meta(target_work_id)
+    if not target:
+        raise ValueError('目标作品不存在')
+    backup_root = tempfile.mkdtemp(prefix='luca-merge-', dir=DATA_DIR)
+    target_work_dir = os.path.join(WORKS_DIR, target_work_id)
+    backup_work_dir = os.path.join(backup_root, 'work')
+    backup_books_dir = os.path.join(backup_root, 'books')
+    original_book_ids = list(target.get('book_ids') or [])
+    try:
+        if os.path.isdir(target_work_dir):
+            shutil.copytree(target_work_dir, backup_work_dir)
+        os.makedirs(backup_books_dir, exist_ok=True)
+        for book_id in original_book_ids:
+            source_dir = os.path.join(BOOKS_DIR, book_id)
+            if os.path.isdir(source_dir):
+                shutil.copytree(
+                    source_dir,
+                    os.path.join(backup_books_dir, book_id),
+                )
+        return _merge_imported_work_apply(target_work_id, source_work_id)
+    except Exception:
+        shutil.rmtree(target_work_dir, ignore_errors=True)
+        if os.path.isdir(backup_work_dir):
+            shutil.copytree(backup_work_dir, target_work_dir)
+        for book_id in original_book_ids:
+            target_dir = os.path.join(BOOKS_DIR, book_id)
+            backup_dir = os.path.join(backup_books_dir, book_id)
+            shutil.rmtree(target_dir, ignore_errors=True)
+            if os.path.isdir(backup_dir):
+                shutil.copytree(backup_dir, target_dir)
+        raise
+    finally:
+        shutil.rmtree(backup_root, ignore_errors=True)
+
+
+def _merge_imported_work_apply(target_work_id, source_work_id):
+    target = get_work_meta(target_work_id)
+    source = get_work_meta(source_work_id)
+    if not target or not source:
+        raise ValueError('合并源或目标作品不存在')
+    if target.get('work_uid') != source.get('work_uid'):
+        raise ValueError('只能合并 work_uid 相同的 COO 分支')
+
+    target_book_by_uid = {}
+    for bid in target.get('book_ids') or []:
+        meta = get_book_meta(bid) or {}
+        if meta.get('book_uid'):
+            target_book_by_uid[meta['book_uid']] = bid
+    source_to_target = {}
+
+    for source_bid in source.get('book_ids') or []:
+        source_meta = get_book_meta(source_bid)
+        if not source_meta:
+            continue
+        target_bid = target_book_by_uid.get(source_meta.get('book_uid'))
+        if not target_bid:
+            target_bid = source_bid
+            source_to_target[source_bid] = target_bid
+            source_meta['work_id'] = target_work_id
+            save_json(os.path.join(BOOKS_DIR, source_bid, 'meta.json'), source_meta)
+            if target_bid not in target.get('book_ids', []):
+                target.setdefault('book_ids', []).append(target_bid)
+            continue
+        source_to_target[source_bid] = target_bid
+        target_meta = get_book_meta(target_bid) or {}
+        target_dir = os.path.join(BOOKS_DIR, target_bid)
+        source_dir = os.path.join(BOOKS_DIR, source_bid)
+        target_chapters = os.path.join(target_dir, 'chapters')
+        source_chapters = os.path.join(source_dir, 'chapters')
+        os.makedirs(target_chapters, exist_ok=True)
+        if os.path.isdir(source_chapters):
+            for filename in os.listdir(source_chapters):
+                if filename.endswith('.json') and not filename.startswith('.'):
+                    shutil.copy2(
+                        os.path.join(source_chapters, filename),
+                        os.path.join(target_chapters, filename),
+                    )
+        incoming_order = list(source_meta.get('chapter_order') or [])
+        target_order = list(target_meta.get('chapter_order') or [])
+        target_meta.update({
+            'title': source_meta.get('title', target_meta.get('title', '')),
+            'author': source_meta.get('author', target_meta.get('author', '')),
+            'description': source_meta.get('description', target_meta.get('description', '')),
+            'language': source_meta.get('language', target_meta.get('language', 'zh-CN')),
+            'updated': max(
+                float(source_meta.get('updated') or 0),
+                float(target_meta.get('updated') or 0),
+            ),
+            'chapter_order': incoming_order + [
+                cid for cid in target_order if cid not in incoming_order
+            ],
+        })
+        save_json(os.path.join(target_dir, 'meta.json'), target_meta)
+        source_cover = os.path.join(source_dir, 'cover')
+        if os.path.isfile(source_cover):
+            shutil.copy2(source_cover, os.path.join(target_dir, 'cover'))
+
+    incoming_book_order = [
+        source_to_target[source_bid]
+        for source_bid in source.get('book_ids') or []
+        if source_bid in source_to_target
+    ]
+    target['book_ids'] = incoming_book_order + [
+        bid for bid in target.get('book_ids') or []
+        if bid not in incoming_book_order
+    ]
+    for key in ('title', 'author', 'description', 'language'):
+        if key in source:
+            target[key] = source[key]
+
+    target_lore_dir = os.path.join(WORKS_DIR, target_work_id, 'lore')
+    source_lore_dir = os.path.join(WORKS_DIR, source_work_id, 'lore')
+    os.makedirs(target_lore_dir, exist_ok=True)
+    if os.path.isdir(source_lore_dir):
+        for filename in os.listdir(source_lore_dir):
+            if filename.endswith('.json') and not filename.startswith('.'):
+                shutil.copy2(
+                    os.path.join(source_lore_dir, filename),
+                    os.path.join(target_lore_dir, filename),
+                )
+
+    incoming_line = []
+    for item in source.get('reading_order') or []:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        if row.get('book') in source_to_target:
+            row['book'] = source_to_target[row['book']]
+        incoming_line.append(row)
+    target_line = list(target.get('reading_order') or [])
+    line_keys = {
+        json.dumps(item, ensure_ascii=False, sort_keys=True)
+        for item in incoming_line if isinstance(item, dict)
+    }
+    incoming_line.extend(
+        item for item in target_line
+        if isinstance(item, dict)
+        and json.dumps(item, ensure_ascii=False, sort_keys=True) not in line_keys
+    )
+    target['reading_order'] = incoming_line
+
+    source_cover = os.path.join(WORKS_DIR, source_work_id, 'cover')
+    if os.path.isfile(source_cover):
+        shutil.copy2(source_cover, os.path.join(WORKS_DIR, target_work_id, 'cover'))
+    try:
+        history_path = os.path.join(WORKS_DIR, source_work_id, 'coo-history.jsonl')
+        events = []
+        if os.path.isfile(history_path):
+            with open(history_path, 'r', encoding='utf-8') as f:
+                events = [json.loads(line) for line in f if line.strip()]
+        merge_sources = list(target.get('merge_sources') or [])
+        merge_sources.extend(source.get('merge_sources') or [])
+        merge_sources.append({
+            'work_uid': source.get('work_uid'),
+            'title': source.get('title', ''),
+            'merged_at': time.time(),
+            'last_event_hash': events[-1].get('event_hash', '') if events else '',
+            'authors': sorted({
+                str(event.get('author') or '').strip()
+                for event in events if str(event.get('author') or '').strip()
+            }),
+        })
+        deduped = []
+        seen = set()
+        for item in merge_sources:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                str(item.get('work_uid') or ''),
+                str(item.get('last_event_hash') or ''),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        target['merge_sources'] = deduped[-1000:]
+    except Exception:
+        pass
+    target['needs_readthrough'] = True
+    target['readthrough_at'] = 0
+    target['pending_history_event'] = 'merge'
+    save_work_meta(target_work_id, target)
+    _clear_work_generated_ai(target_work_id)
+
+    for source_bid in source.get('book_ids') or []:
+        if source_to_target.get(source_bid) != source_bid:
+            shutil.rmtree(os.path.join(BOOKS_DIR, source_bid), ignore_errors=True)
+    shutil.rmtree(os.path.join(WORKS_DIR, source_work_id), ignore_errors=True)
+    return _work_detail(target_work_id)
 
 
 def ensure_dirs():
-    for d in [DATA_DIR, BOOKS_DIR, LOG_DIR, MESSAGES_DIR, USER_FONTS_DIR]:
+    for d in [DATA_DIR, BOOKS_DIR, WORKS_DIR, LOG_DIR, MESSAGES_DIR, USER_FONTS_DIR]:
         os.makedirs(d, exist_ok=True)
 
 
@@ -1243,7 +1681,7 @@ def _read_chapter_subagent(settings, chapter_title, chapter_content, fallback_te
 请输出结构化 JSON，不要代码块：
 {{
   "summary": "200-400 字的事实摘要，只包含原文明确陈述的信息",
-  "entities": [{{"name": "出现的人物/实体名", "type": "人物/物品/地点/势力/概念", "facts": ["原文明确提到的事实"]}}],
+  "entities": [{{"name": "出现的人物/实体名", "type": "该实体的类别，自由词。常见：人物/势力/地点/物品/概念/种族/功法/组织…但不限于此，按本作世界观自拟", "facts": ["原文明确提到的事实"]}}],
   "events": [{{"description": "章节中发生的具体事件"}}],
   "key_points": ["关键事实点（每条约 10-20 字）"]
 }}"""
@@ -1613,104 +2051,428 @@ def _est_text_width(text, font_size):
             w += font_size * 0.55
     return w
 
-def _make_series_cover_svg(title, book_count):
-    safe_title = _html_mod.escape(title or '未命名')
-    # 智能换行：中文按字、英文按词
-    lines = []
-    current = ''
-    for ch in safe_title:
-        if ch == ' ' and len(current) >= 2:
-            lines.append(current)
-            current = ''
-        else:
-            current += ch
-    if current:
-        lines.append(current)
-    if not lines:
-        lines = [safe_title]
-
-    W, H = 600, 800
-    BORDER = 20
-    MAX_W = W - BORDER * 2
-    MAX_H = H - BORDER * 2 - 60  # 顶部留空给装饰线
-    FONT_FAMILY = '-apple-system,BlinkMacSystemFont,Noto Sans SC,sans-serif'
-
-    lo, hi = 8, 200
-    best_size = 8
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        ok = True
-        total_h = 0
-        for ln in lines:
-            w_est = 0
-            for ch in ln:
-                if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
-                    w_est += mid
-                else:
-                    w_est += mid * 0.55
-            if w_est > MAX_W and len(ln) == 1 and ord(ln[0]) > 127:
-                ok = False
-                break
-            wraps = max(1, int(w_est / MAX_W) + (1 if w_est % MAX_W > 0 else 0))
-            total_h += wraps * mid * 1.25
-        if not ok or total_h > MAX_H:
-            hi = mid - 1
-        else:
-            best_size = mid
-            lo = mid + 1
-
-    font_size = max(14, best_size)
-    line_height = int(font_size * 1.25)
-
-    rendered_lines = []
-    for ln in lines:
-        if not ln.strip():
-            rendered_lines.append('')
-            continue
-        words = ''
-        for ch in ln:
-            w = font_size if ('\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef') else font_size * 0.55
-            if _est_text_width(words + ch, font_size) > MAX_W and words:
-                rendered_lines.append(words.rstrip())
-                words = ch
-            else:
-                words += ch
-        if words:
-            rendered_lines.append(words.rstrip())
-
-    total_h = len(rendered_lines) * line_height
-    start_y = (H - total_h) // 2 + int(font_size * 0.88) + 20
-
-    tspans = ''
-    for i, ln in enumerate(rendered_lines):
-        y = start_y + i * line_height
-        tspans += f'<tspan x="{W//2}" y="{y}" text-anchor="middle">{ln}</tspan>'
-
-    count_text = f'系列 · {book_count} 本'
-
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#383838"/>
-      <stop offset="100%" stop-color="#2a2a2a"/>
-    </linearGradient>
-  </defs>
-  <rect width="{W}" height="{H}" fill="url(#bg)"/>
-  <line x1="{BORDER + 20}" y1="{BORDER + 12}" x2="{W - BORDER - 20}" y2="{BORDER + 12}" stroke="#ffffff" stroke-opacity="0.1" stroke-width="2"/>
-  <rect x="{BORDER + 20}" y="{BORDER + 12}" width="{W - (BORDER + 20)*2}" height="{H - (BORDER + 12)*2}" rx="6" fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="1"/>
-  <text fill="#ffffff" fill-opacity="0.95" font-family="{FONT_FAMILY}" font-weight="600" font-size="{font_size}px" letter-spacing="1">
-    {tspans}
-  </text>
-  <text x="{W//2}" y="{H - 30}" text-anchor="middle" fill="#999999" font-size="11" font-family="-apple-system,sans-serif">{count_text}</text>
-</svg>'''
-
 def get_book_dir(book_id):
+    """Return a child-book directory, or a work's shared AI directory.
+
+    The knowledge-base layer historically accepts a ``book_id``. Work-level
+    readthrough keeps that API but stores its files under works/<id>/shared.
+    """
+    work_path = os.path.join(WORKS_DIR, book_id)
+    if str(book_id).startswith('work_') or os.path.isdir(work_path):
+        return get_work_kb_dir(book_id)
     return os.path.join(BOOKS_DIR, book_id)
 
 
+def get_work_dir(work_id):
+    """COO v2: 世界观级共享目录。"""
+    d = os.path.join(WORKS_DIR, work_id)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def get_work_kb_dir(work_id):
+    """世界观级共享知识库目录（含 kb.db 和 vector_db）。"""
+    d = os.path.join(get_work_dir(work_id), 'shared')
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
 def get_book_meta(book_id):
-    p = os.path.join(get_book_dir(book_id), 'meta.json')
+    p = os.path.join(BOOKS_DIR, book_id, 'meta.json')
     return load_json(p) if os.path.exists(p) else None
+
+
+def get_work_meta(work_id):
+    p = os.path.join(WORKS_DIR, work_id, 'meta.json')
+    return load_json(p) if os.path.exists(p) else None
+
+
+def save_work_meta(work_id, meta):
+    meta['id'] = work_id
+    meta['updated'] = time.time()
+    save_json(os.path.join(get_work_dir(work_id), 'meta.json'), meta)
+
+
+def _new_stable_uid():
+    return 'coo_' + secrets.token_hex(48)
+
+
+def _new_local_id(prefix):
+    return f'{prefix}_{int(time.time() * 1000)}_{secrets.token_hex(3)}'
+
+
+def _create_child_book(work_id, title='第一卷', create_first_chapter=True):
+    work = get_work_meta(work_id)
+    if not work:
+        raise ValueError('作品不存在')
+    bid = _new_local_id('book')
+    bd = os.path.join(BOOKS_DIR, bid)
+    ch_dir = os.path.join(bd, 'chapters')
+    os.makedirs(ch_dir, exist_ok=True)
+    os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+    chapter_order = []
+    if create_first_chapter:
+        cid = _new_local_id('ch')
+        save_json(os.path.join(ch_dir, f'{cid}.json'), {
+            'id': cid, 'title': '第一章', 'content': '', 'updated': time.time(),
+        })
+        chapter_order.append(cid)
+    now = time.time()
+    meta = {
+        'id': bid,
+        'work_id': work_id,
+        'book_uid': _new_stable_uid(),
+        'title': str(title or '未命名书本').strip() or '未命名书本',
+        'author': work.get('author', ''),
+        'description': '',
+        'language': work.get('language', 'zh-CN'),
+        'created': now,
+        'updated': now,
+        'chapter_order': chapter_order,
+        'current_chapter_id': chapter_order[0] if chapter_order else '',
+    }
+    save_json(os.path.join(bd, 'meta.json'), meta)
+    save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+    book_ids = [x for x in work.get('book_ids', []) if get_book_meta(x)]
+    book_ids.append(bid)
+    work['book_ids'] = book_ids
+    line = list(work.get('reading_order') or [])
+    line.extend({'type': 'chapter', 'book': bid, 'chapter': cid} for cid in chapter_order)
+    work['reading_order'] = line
+    save_work_meta(work_id, work)
+    return meta
+
+
+def _create_work(title='新作品', first_book_title='第一卷', create_first_chapter=True):
+    wid = _new_local_id('work')
+    now = time.time()
+    work = {
+        'id': wid,
+        'work_uid': _new_stable_uid(),
+        'title': str(title or '新作品').strip() or '新作品',
+        'author': '',
+        'description': '',
+        'language': 'zh-CN',
+        'created': now,
+        'updated': now,
+        'book_ids': [],
+        'reading_order': [],
+        'coo_server_url': '',
+        'coo_email': '',
+    }
+    os.makedirs(os.path.join(get_work_dir(wid), 'lore'), exist_ok=True)
+    save_work_meta(wid, work)
+    first = _create_child_book(
+        wid, first_book_title or work['title'], create_first_chapter=create_first_chapter
+    )
+    return get_work_meta(wid), first
+
+
+def _work_lore_items(work_id):
+    lore_dir = os.path.join(WORKS_DIR, work_id, 'lore')
+    items = []
+    if not os.path.isdir(lore_dir):
+        return items
+    for fn in sorted(os.listdir(lore_dir)):
+        if not fn.endswith('.json') or fn.startswith('.'):
+            continue
+        item = load_json(os.path.join(lore_dir, fn), dict)
+        if item and item.get('id'):
+            items.append(item)
+    return items
+
+
+def _normalize_work_reading_order(work_id, append_missing=False):
+    work = get_work_meta(work_id) or {}
+    book_ids = [bid for bid in work.get('book_ids', []) if get_book_meta(bid)]
+    books = {bid: get_book_meta(bid) for bid in book_ids}
+    lore = {x['id']: x for x in _work_lore_items(work_id)}
+    normalized = []
+    seen_chapters = set()
+    seen_lore = set()
+    for raw in work.get('reading_order') or []:
+        if not isinstance(raw, dict):
+            continue
+        kind = raw.get('type')
+        if kind == 'chapter':
+            bid, cid = raw.get('book'), raw.get('chapter')
+            meta = books.get(bid)
+            if not meta or cid not in (meta.get('chapter_order') or []) or (bid, cid) in seen_chapters:
+                continue
+            normalized.append({'type': 'chapter', 'book': bid, 'chapter': cid})
+            seen_chapters.add((bid, cid))
+        elif kind == 'lore':
+            ref = raw.get('ref')
+            if ref not in lore or ref in seen_lore:
+                continue
+            item = {'type': 'lore', 'ref': ref}
+            if raw.get('note'):
+                item['note'] = str(raw.get('note'))[:500]
+            normalized.append(item)
+            seen_lore.add(ref)
+        elif kind == 'volume_boundary' and raw.get('book') in books:
+            item = {'type': 'volume_boundary', 'book': raw.get('book')}
+            if raw.get('prompt_override'):
+                item['prompt_override'] = str(raw.get('prompt_override'))[:1000]
+            normalized.append(item)
+    if append_missing:
+        for bid in book_ids:
+            for cid in books[bid].get('chapter_order') or []:
+                if (bid, cid) not in seen_chapters:
+                    normalized.append({'type': 'chapter', 'book': bid, 'chapter': cid})
+    return normalized
+
+
+def _sync_book_reading_items(book_id, deleted_chapter=None, reordered=None):
+    meta = get_book_meta(book_id) or {}
+    work_id = meta.get('work_id')
+    work = get_work_meta(work_id) if work_id else None
+    if not work:
+        return
+    line = list(work.get('reading_order') or [])
+    if deleted_chapter:
+        line = [
+            x for x in line
+            if not (
+                isinstance(x, dict) and x.get('type') == 'chapter'
+                and x.get('book') == book_id and x.get('chapter') == deleted_chapter
+            )
+        ]
+    if reordered is not None:
+        ordered = [cid for cid in reordered if cid in (meta.get('chapter_order') or [])]
+        positions = [
+            idx for idx, item in enumerate(line)
+            if isinstance(item, dict) and item.get('type') == 'chapter' and item.get('book') == book_id
+        ]
+        for idx, cid in zip(positions, ordered):
+            line[idx] = {'type': 'chapter', 'book': book_id, 'chapter': cid}
+        if len(positions) > len(ordered):
+            remove_positions = set(positions[len(ordered):])
+            line = [item for idx, item in enumerate(line) if idx not in remove_positions]
+        elif len(ordered) > len(positions):
+            line.extend(
+                {'type': 'chapter', 'book': book_id, 'chapter': cid}
+                for cid in ordered[len(positions):]
+            )
+    work['reading_order'] = line
+    save_work_meta(work_id, work)
+
+
+def _work_detail(work_id):
+    work = get_work_meta(work_id)
+    if not work:
+        return None
+    work['reading_order'] = _normalize_work_reading_order(work_id, append_missing=True)
+    if work['reading_order'] != (get_work_meta(work_id) or {}).get('reading_order'):
+        save_work_meta(work_id, work)
+    books = []
+    chapter_lookup = {}
+    for order_index, bid in enumerate(work.get('book_ids', []), start=1):
+        meta = get_book_meta(bid)
+        if not meta:
+            continue
+        chapters = []
+        for idx, cid in enumerate(meta.get('chapter_order') or []):
+            ch = _read_chapter_file(bid, cid) or {}
+            ch_hash = ch.get('content_hash') or hashlib.md5((ch.get('content', '') or '').encode()).hexdigest()
+            kb_ch = None
+            try:
+                kb_storage.init_db(bid)
+                kb_ch = kb_storage.get_chapter(bid, cid)
+            except: pass
+            rr_status = 'unread'
+            if kb_ch:
+                kb_status = kb_ch.get('status') or 'pending'
+                kb_hash = kb_ch.get('content_hash') or ''
+                if kb_status == 'done':
+                    rr_status = 'unchanged' if kb_hash == ch_hash else 'changed'
+            row = {
+                'id': cid,
+                'title': ch.get('title', f'第{idx + 1}章'),
+                'updated': ch.get('updated', 0),
+                'word_count': len(ch.get('content', '') or ''),
+                'reread_status': rr_status,
+            }
+            chapters.append(row)
+            chapter_lookup[(bid, cid)] = row
+        books.append({
+            'id': bid,
+            'book_uid': meta.get('book_uid', ''),
+            'title': meta.get('title', bid),
+            'author': meta.get('author', ''),
+            'description': meta.get('description', ''),
+            'order': order_index,
+            'created': meta.get('created', 0),
+            'updated': meta.get('updated', 0),
+            'has_cover': os.path.isfile(os.path.join(BOOKS_DIR, bid, 'cover')),
+            'chapter_count': len(chapters),
+            'chapters': chapters,
+        })
+    book_lookup = {b['id']: b for b in books}
+    lore = _work_lore_items(work_id)
+    lore_lookup = {x['id']: x for x in lore}
+    line = []
+    placed_lore = set()
+    previous_book = None
+    for item in work['reading_order']:
+        kind = item.get('type')
+        if kind == 'chapter':
+            bid, cid = item.get('book'), item.get('chapter')
+            if previous_book and previous_book != bid:
+                line.append({
+                    'type': 'implicit_boundary',
+                    'book': bid,
+                    'book_title': (book_lookup.get(bid) or {}).get('title', ''),
+                })
+            ch = chapter_lookup.get((bid, cid))
+            if ch:
+                line.append({
+                    'type': 'chapter', 'book': bid, 'chapter': cid,
+                    'book_title': (book_lookup.get(bid) or {}).get('title', ''),
+                    'title': ch.get('title', ''),
+                    'word_count': ch.get('word_count', 0),
+                })
+                previous_book = bid
+        elif kind == 'lore' and item.get('ref') in lore_lookup:
+            entry = lore_lookup[item['ref']]
+            line.append({
+                'type': 'lore', 'ref': entry['id'], 'title': entry.get('title', ''),
+                'kind': entry.get('kind', ''), 'content': entry.get('content', ''),
+            })
+            placed_lore.add(entry['id'])
+        elif kind == 'volume_boundary':
+            line.append(dict(item))
+    return {
+        'work': {
+            **work,
+            'has_cover': os.path.isfile(os.path.join(WORKS_DIR, work_id, 'cover')),
+            'book_count': len(books),
+            'chapter_count': sum(b['chapter_count'] for b in books),
+        },
+        'books': books,
+        'lore': lore,
+        'unplaced_lore': [x for x in lore if x['id'] not in placed_lore],
+        'reading_line': line,
+    }
+
+
+def _migrate_legacy_series_to_works():
+    """Convert old series containers into works without losing source data."""
+    if not os.path.isdir(BOOKS_DIR):
+        return
+    existing = {}
+    if os.path.isdir(WORKS_DIR):
+        for wid in os.listdir(WORKS_DIR):
+            work = get_work_meta(wid)
+            if work and work.get('legacy_group_id'):
+                existing[work['legacy_group_id']] = wid
+    archive_root = os.path.join(DATA_DIR, 'legacy_group_archive')
+    for legacy_id in sorted(os.listdir(BOOKS_DIR)):
+        legacy_dir = os.path.join(BOOKS_DIR, legacy_id)
+        if not os.path.isdir(legacy_dir):
+            continue
+        legacy = load_json(os.path.join(legacy_dir, 'meta.json'), dict)
+        if not legacy or legacy.get('type') != 'series':
+            continue
+        work_id = existing.get(legacy_id)
+        if not work_id:
+            child_ids = [
+                child_id for child_id in legacy.get('series_books', [])
+                if is_valid_id(child_id) and get_book_meta(child_id)
+            ]
+            now = time.time()
+            work_id = _new_local_id('work')
+            reading_order = []
+            for child_id in child_ids:
+                child = get_book_meta(child_id) or {}
+                child['work_id'] = work_id
+                child['book_uid'] = child.get('book_uid') or _new_stable_uid()
+                child.pop('series_id', None)
+                save_json(os.path.join(BOOKS_DIR, child_id, 'meta.json'), child)
+                reading_order.extend(
+                    {'type': 'chapter', 'book': child_id, 'chapter': chapter_id}
+                    for chapter_id in child.get('chapter_order', [])
+                )
+            work = {
+                'id': work_id,
+                'work_uid': legacy.get('work_uid') or _new_stable_uid(),
+                'title': legacy.get('title', '未命名作品'),
+                'author': legacy.get('author', ''),
+                'description': legacy.get('description', ''),
+                'language': legacy.get('language', 'zh-CN'),
+                'created': legacy.get('created', now),
+                'updated': legacy.get('updated', now),
+                'book_ids': child_ids,
+                'reading_order': reading_order,
+                'coo_server_url': legacy.get('coo_server_url', ''),
+                'coo_email': legacy.get('coo_email', ''),
+                'legacy_group_id': legacy_id,
+            }
+            save_work_meta(work_id, work)
+            legacy_cover = os.path.join(legacy_dir, 'cover')
+            if os.path.isfile(legacy_cover):
+                shutil.copy2(legacy_cover, os.path.join(get_work_dir(work_id), 'cover'))
+            existing[legacy_id] = work_id
+        os.makedirs(archive_root, exist_ok=True)
+        archive_path = os.path.join(archive_root, legacy_id)
+        if os.path.exists(archive_path):
+            archive_path += '_' + str(int(time.time()))
+        try:
+            shutil.move(legacy_dir, archive_path)
+            log_action('LEGACY_GROUP_MIGRATED', f'{legacy_id} -> {work_id}')
+        except Exception as exc:
+            log_action('LEGACY_GROUP_ARCHIVE_ERROR', f'{legacy_id}: {str(exc)[:120]}')
+
+
+def _ensure_work_index():
+    """Migrate old containers and wrap standalone books as one-book works."""
+    os.makedirs(WORKS_DIR, exist_ok=True)
+    _migrate_legacy_series_to_works()
+    assigned = set()
+    for wid in os.listdir(WORKS_DIR):
+        work = get_work_meta(wid)
+        if work:
+            assigned.update(work.get('book_ids') or [])
+    if not os.path.isdir(BOOKS_DIR):
+        return
+    for bid in sorted(os.listdir(BOOKS_DIR)):
+        meta = get_book_meta(bid)
+        if meta and 'coo_password' in meta:
+            meta.pop('coo_password', None)
+            save_json(os.path.join(BOOKS_DIR, bid, 'meta.json'), meta)
+        if not meta or meta.get('type') == 'series' or bid in assigned:
+            continue
+        linked = meta.get('work_id')
+        if linked and get_work_meta(linked):
+            work = get_work_meta(linked)
+            if bid not in work.get('book_ids', []):
+                work.setdefault('book_ids', []).append(bid)
+                save_work_meta(linked, work)
+            continue
+        wid = _new_local_id('work')
+        now = time.time()
+        work = {
+            'id': wid,
+            'work_uid': meta.get('work_uid') or _new_stable_uid(),
+            'title': meta.get('title', '未命名作品'),
+            'author': meta.get('author', ''),
+            'description': meta.get('description', ''),
+            'language': meta.get('language', 'zh-CN'),
+            'created': meta.get('created', now),
+            'updated': meta.get('updated', now),
+            'book_ids': [bid],
+            'reading_order': [
+                {'type': 'chapter', 'book': bid, 'chapter': cid}
+                for cid in meta.get('chapter_order') or []
+            ],
+            'coo_server_url': meta.get('coo_server_url', ''),
+            'coo_email': meta.get('coo_email', ''),
+        }
+        meta['work_id'] = wid
+        meta['book_uid'] = meta.get('book_uid') or _new_stable_uid()
+        save_json(os.path.join(BOOKS_DIR, bid, 'meta.json'), meta)
+        os.makedirs(os.path.join(get_work_dir(wid), 'lore'), exist_ok=True)
+        save_work_meta(wid, work)
 
 
 def list_chapter_files(book_id):
@@ -1825,70 +2587,46 @@ def _get_user_book_titles():
 
 
 def _build_bookshelf_tree():
-    """构建书库目录树字符串，类似 GitHub 项目结构图。"""
-    if not os.path.isdir(BOOKS_DIR):
-        return '（书库为空）'
-    standalone = []
-    series_list = []
-    # 第一遍：区分系列和独立书本
-    for bid in os.listdir(BOOKS_DIR):
-        bd = os.path.join(BOOKS_DIR, bid)
-        if not os.path.isdir(bd) or bid.startswith('builtin_'):
-            continue
-        meta = load_json(os.path.join(bd, 'meta.json'), dict)
-        if not meta:
-            continue
-        if meta.get('type') == 'series':
-            series_list.append({'id': bid, 'title': meta.get('title', '未命名'), 'books': []})
-        else:
-            order = meta.get('chapter_order', []) or []
-            chapters = []
-            for cid in order:
-                cp = os.path.join(bd, 'chapters', f'{cid}.json')
-                if os.path.exists(cp):
-                    cd = load_json(cp, dict)
-                    chapters.append(cd.get('title', '') or '')
-            standalone.append({'id': bid, 'title': meta.get('title', '未命名'), 'chapter_count': len(chapters), 'chapters': chapters})
-    # 第二遍：把书本归入系列
-    for s in series_list:
-        sm = load_json(os.path.join(BOOKS_DIR, s['id'], 'meta.json'), dict)
-        sids = sm.get('series_books', []) or []
-        for sid in sids:
-            sb_meta = get_book_meta(sid)
-            if sb_meta:
-                sb_title = sb_meta.get('title', '未命名')
-                sb_order = sb_meta.get('chapter_order', []) or []
-                sb_ch = []
-                sb_bd = get_book_dir(sid)
-                for cid in sb_order:
-                    cp = os.path.join(sb_bd, 'chapters', f'{cid}.json')
-                    if os.path.exists(cp):
-                        cd = load_json(cp, dict)
-                        sb_ch.append(cd.get('title', '') or '')
-                s['books'].append({'title': sb_title, 'chapter_count': len(sb_ch), 'chapters': sb_ch})
-                standalone[:] = [b for b in standalone if b['id'] != sid]
-    if not series_list and not standalone:
+    """构建作品、书本、章节三级目录树。"""
+    works = []
+    if os.path.isdir(WORKS_DIR):
+        for work_id in sorted(os.listdir(WORKS_DIR)):
+            work = get_work_meta(work_id)
+            if not work:
+                continue
+            books = []
+            for book_id in work.get('book_ids', []):
+                book = get_book_meta(book_id)
+                if not book:
+                    continue
+                chapters = []
+                for chapter_id in book.get('chapter_order', []):
+                    chapter = _read_chapter_file(book_id, chapter_id)
+                    if chapter:
+                        chapters.append(chapter.get('title', '') or '未命名')
+                books.append({
+                    'title': book.get('title', '未命名'),
+                    'chapters': chapters,
+                })
+            works.append({'title': work.get('title', '未命名作品'), 'books': books})
+    if not works:
         return '（书库为空）'
     lines = ['[书库]']
-    all_items = series_list + standalone
-    for idx, item in enumerate(all_items):
-        is_last = idx == len(all_items) - 1
+    for idx, work in enumerate(works):
+        is_last = idx == len(works) - 1
         prefix = '└── ' if is_last else '├── '
-        if 'books' in item:
-            # 系列
-            lines.append(f'{prefix}[系列] {item["title"]}')
-            for bi, b in enumerate(item['books']):
-                b_prefix = ('    ' if is_last else '│   ') + ('└── ' if bi == len(item['books']) - 1 else '├── ')
-                lines.append(f'{b_prefix}{b["title"]}（{b["chapter_count"]}章）')
-                for ci, ch in enumerate(b['chapters']):
-                    c_prefix = ('    ' if is_last else '│   ') + ('    ' if bi == len(item['books']) - 1 else '│   ') + ('└── ' if ci == len(b['chapters']) - 1 else '├── ')
-                    lines.append(f'{c_prefix}{ch or "未命名"}')
-        else:
-            # 独立书本
-            lines.append(f'{prefix}{item["title"]}（{item["chapter_count"]}章）')
-            for ci, ch in enumerate(item['chapters']):
-                c_prefix = ('    ' if is_last else '│   ') + ('└── ' if ci == len(item['chapters']) - 1 else '├── ')
-                lines.append(f'{c_prefix}{ch or "未命名"}')
+        lines.append(f'{prefix}[作品] {work["title"]}')
+        for book_index, book in enumerate(work['books']):
+            book_last = book_index == len(work['books']) - 1
+            book_prefix = ('    ' if is_last else '│   ') + ('└── ' if book_last else '├── ')
+            lines.append(f'{book_prefix}{book["title"]}（{len(book["chapters"])}章）')
+            for chapter_index, chapter in enumerate(book['chapters']):
+                chapter_prefix = (
+                    ('    ' if is_last else '│   ')
+                    + ('    ' if book_last else '│   ')
+                    + ('└── ' if chapter_index == len(book['chapters']) - 1 else '├── ')
+                )
+                lines.append(f'{chapter_prefix}{chapter}')
     return '\n'.join(lines)
 
 
@@ -2132,7 +2870,7 @@ def parse_docx_bytes(raw, filename):
 
 
 def parse_pdf_bytes(raw, filename):
-    if not HAS_PDF: return None, '需安装 PyPDF2（pip install PyPDF2）'
+    if not HAS_PDF: return None, '需安装 pypdf（pip install pypdf）'
     try:
         reader = PdfReader(io.BytesIO(raw))
         pages = reader.pages[:500]  # 限制 500 页，防止超大 PDF 卡死
@@ -2200,7 +2938,15 @@ def _validate_zip_archive(zf, max_entries=ZIP_MAX_ENTRIES, max_total=ZIP_MAX_TOT
     if len(infos) > max_entries:
         raise ValueError(f'压缩包文件数量超过 {max_entries} 个')
     total = 0
+    names = set()
     for info in infos:
+        name = info.filename.replace('\\', '/')
+        if name.startswith('/') or '..' in name.split('/'):
+            raise ValueError(f'压缩包包含非法路径: {name}')
+        normalized = name.rstrip('/') if info.is_dir() else name
+        if normalized in names:
+            raise ValueError(f'压缩包包含重复路径: {normalized}')
+        names.add(normalized)
         if info.is_dir():
             continue
         if info.file_size > max_entry:
@@ -2768,9 +3514,14 @@ def _do_import_book_task(task_id, raw, filename, ext):
             except Exception:
                 pass
         save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+        _ensure_work_index()
+        work_id = (get_book_meta(bid) or {}).get('work_id', '')
         elapsed = round(time.time() - import_start, 2)
         log_action('IMPORT_BOOK', f'{bid}: {imported} chapters from {filename} in {elapsed}s')
-        bg_task_update(task_id, progress=100, result=json.dumps({'phase': 'done', 'book_id': bid, 'title': title, 'imported': imported}))
+        bg_task_update(task_id, progress=100, result=json.dumps({
+            'phase': 'done', 'book_id': bid, 'work_id': work_id,
+            'title': title, 'imported': imported,
+        }))
         bg_task_done(task_id)
     except Exception as e:
         log_action('IMPORT_BOOK_TASK_ERR', f'{filename}: {str(e)[:200]}')
@@ -2827,6 +3578,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
             self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(content.encode('utf-8'))
@@ -3007,6 +3759,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
 
+        if path.startswith('/api/series'):
+            self.json_resp(404, {'error': '系列功能已移除'}); return
+
         # 下面这些会暴露客户端 IP / AI 活动等元数据，必须先过认证
         if path == '/api/connected-clients':
             self.json_resp(200, {'clients': get_connected_clients()}); return
@@ -3089,6 +3844,120 @@ class Handler(BaseHTTPRequestHandler):
             result.sort(key=lambda x: x.get('created', 0), reverse=True)
             self.json_resp(200, {'sessions': result}); return
 
+        if path == '/api/works':
+            _ensure_work_index()
+            works = []
+            for wid in os.listdir(WORKS_DIR):
+                detail = _work_detail(wid)
+                if not detail:
+                    continue
+                work = detail['work']
+                works.append({
+                    'id': wid,
+                    'work_uid': work.get('work_uid', ''),
+                    'title': work.get('title', wid),
+                    'author': work.get('author', ''),
+                    'description': work.get('description', ''),
+                    'created': work.get('created', 0),
+                    'updated': work.get('updated', 0),
+                    'book_count': work.get('book_count', 0),
+                    'chapter_count': work.get('chapter_count', 0),
+                    'has_cover': work.get('has_cover', False),
+                })
+            works.sort(key=lambda x: x.get('updated', 0), reverse=True)
+            self.json_resp(200, {'works': works}); return
+
+        if path.startswith('/api/work/'):
+            parts = path.split('/')
+            wid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(wid) or not get_work_meta(wid):
+                self.json_resp(404, {'error': '作品不存在'}); return
+            sub = parts[4] if len(parts) > 4 else ''
+            if not sub:
+                self.json_resp(200, _work_detail(wid)); return
+            if sub == 'cover':
+                cover_path = os.path.join(WORKS_DIR, wid, 'cover')
+                if not os.path.isfile(cover_path):
+                    work = get_work_meta(wid) or {}
+                    for bid in work.get('book_ids') or []:
+                        fallback = os.path.join(BOOKS_DIR, bid, 'cover')
+                        if os.path.isfile(fallback):
+                            cover_path = fallback
+                            break
+                if os.path.isfile(cover_path):
+                    with open(cover_path, 'rb') as f:
+                        body = f.read()
+                    ct = 'image/png'
+                    if body[:3] == b'\xff\xd8\xff':
+                        ct = 'image/jpeg'
+                    elif body[:4] == b'RIFF':
+                        ct = 'image/webp'
+                    elif body[:3] == b'GIF':
+                        ct = 'image/gif'
+                else:
+                    body = _make_cover_svg((get_work_meta(wid) or {}).get('title', '未命名作品')).encode('utf-8')
+                    ct = 'image/svg+xml; charset=utf-8'
+                self.send_response(200)
+                self.send_header('Content-Type', ct)
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'no-cache')
+                self.send_cors(); self.end_headers()
+                self.wfile.write(body)
+                return
+            if sub == 'coo-remote':
+                work = get_work_meta(wid) or {}
+                self.json_resp(200, {
+                    'server_url': work.get('coo_server_url', ''),
+                    'email': work.get('coo_email', ''),
+                }); return
+            if sub == 'readthrough':
+                action = parts[5] if len(parts) > 5 else 'status'
+                if action == 'status':
+                    try:
+                        kb_storage.init_db(wid)
+                        st = kb_storage.get_rt_state(wid)
+                    except Exception:
+                        st = None
+                    resp = dict(st) if st else {
+                        'status': 'idle', 'phase': '', 'current_idx': -1,
+                        'total': 0, 'stream_buffer': '', 'error': '',
+                    }
+                    resp['recent_logs'] = kb_storage.get_rt_logs(wid, 30)
+                    resp['done_count'] = kb_storage.get_done_chapter_count(wid)
+                    resp['has_source'] = bool(get_source(wid))
+                    self.json_resp(200, resp); return
+                if action == 'file':
+                    ft = parse_qs(urlparse(self.path).query).get('type', ['source'])[0]
+                    getters = {
+                        'source': get_source,
+                        'outline': get_outline_md,
+                        'timeline': get_timeline_md,
+                        'prediction': get_prediction_md,
+                    }
+                    getter = getters.get(ft)
+                    if not getter:
+                        self.json_resp(400, {'error': '未知文件类型'}); return
+                    text = getter(wid)
+                    self.json_resp(200, {'text': text, 'exists': bool(text), 'type': ft}); return
+            if sub == 'edit-log':
+                try:
+                    work = get_work_meta(wid) or {}
+                    bids = work.get('book_ids', [])
+                    logs = []
+                    for bid in bids:
+                        try:
+                            bl = kb_storage.list_edit_log(bid, limit=10)
+                            for l in bl:
+                                l['book_id'] = bid
+                                l['book_title'] = (get_book_meta(bid) or {}).get('title', bid)
+                            logs.extend(bl)
+                        except Exception:
+                            pass
+                    logs.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+                    self.json_resp(200, {'logs': logs[:30]}); return
+                except Exception as e:
+                    self.json_resp(500, {'error': str(e)}); return
+
         if path == '/api/books':
             books = []
             if os.path.isdir(BOOKS_DIR):
@@ -3106,12 +3975,9 @@ class Handler(BaseHTTPRequestHandler):
                         'created': meta.get('created', 0),
                         'updated': meta.get('updated', 0),
                         'chapter_count': cc,
-                        'type': meta.get('type', 'book'),
                         'has_cover': has_cover,
                         'author': meta.get('author', ''),
                         'description': meta.get('description', ''),
-                        'series_books': meta.get('series_books', []),
-                        'cover_book': meta.get('cover_book', ''),
                     })
             books.sort(key=lambda x: x.get('updated', 0), reverse=True)
             self.json_resp(200, {'books': books}); return
@@ -3486,6 +4352,71 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     self.json_resp(400, {'error': '未知文件类型'}); return
 
+        # 增量通读状态
+        if path.startswith('/api/book/') and path.endswith('/reread-status'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            try:
+                kb_storage.init_db(bid)
+                all_chs = kb_storage.list_chapters_db(bid) or []
+                rt_state = kb_storage.get_rt_state(bid)
+            except:
+                all_chs = []
+                rt_state = None
+            ch_info = {c['id']: c for c in all_chs}
+            ch_data = []
+            stats = {'total': 0, 'unchanged': 0, 'changed': 0, 'unread': 0}
+            meta = get_book_meta(bid) or {}
+            order = meta.get('chapter_order', [])
+            for cid in order:
+                ch = _read_chapter_file(bid, cid) or {}
+                ch_hash = hashlib.md5((ch.get('content', '') or '').encode()).hexdigest()
+                kb_ch = ch_info.get(cid, {})
+                status = 'unread'
+                if kb_ch and kb_ch.get('status') == 'done':
+                    status = 'unchanged' if kb_ch.get('content_hash', '') == ch_hash else 'changed'
+                ch_data.append({'id': cid, 'title': ch.get('title', ''), 'status': status})
+                stats['total'] += 1
+                stats[status] = stats.get(status, 0) + 1
+            self.json_resp(200, {'stats': stats, 'chapters': ch_data, 'rt_state': rt_state}); return
+
+        # 增量通读启动
+        if path.startswith('/api/book/') and path.endswith('/reread-incremental'):
+            parts = path.split('/')
+            bid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
+                self.json_resp(404, {'error': '书本不存在'}); return
+            settings = get_settings()
+            if not settings.get('base_url') or not settings.get('model'):
+                self.json_resp(400, {'error': '请先配置 API'}); return
+            try:
+                kb_storage.init_db(bid)
+                st = kb_storage.get_rt_state(bid)
+            except: st = None
+            if st and st.get('status') == 'running':
+                self.json_resp(409, {'error': '通读正在进行中'}); return
+            meta = get_book_meta(bid) or {}
+            changed_ids = []
+            for cid in (meta.get('chapter_order') or []):
+                ch = _read_chapter_file(bid, cid) or {}
+                ch_hash = hashlib.md5((ch.get('content', '') or '').encode()).hexdigest()
+                try:
+                    kb_ch = kb_storage.get_chapter(bid, cid)
+                except: kb_ch = None
+                if not kb_ch or kb_ch.get('status') != 'done' or kb_ch.get('content_hash', '') != ch_hash:
+                    changed_ids.append(cid)
+            if not changed_ids:
+                self.json_resp(200, {'status': 'no_changes', 'msg': '所有章节已通读且无更改'}); return
+            tid = bg_task_start('reread-incremental', bid, '更新')
+            threading.Thread(
+                target=_do_kb_reread_task,
+                args=(tid, bid, changed_ids, True, {}, settings),
+                daemon=True,
+            ).start()
+            self.json_resp(200, {'status': 'started', 'chapters': len(changed_ids)}); return
+
         # 通用后台任务状态查询
         if path.startswith('/api/book/') and '/task/' in path:
             parts = path.split('/')
@@ -3554,11 +4485,7 @@ class Handler(BaseHTTPRequestHandler):
             # 无封面 — 生成 SVG 占位图
             meta = get_book_meta(bid) or {}
             title = meta.get('title', bid) or '未命名'
-            if meta.get('type') == 'series':
-                book_count = len([x for x in meta.get('series_books', []) if x])
-                svg = _make_series_cover_svg(title, book_count)
-            else:
-                svg = _make_cover_svg(title)
+            svg = _make_cover_svg(title)
             body = svg.encode('utf-8')
             self.send_response(200)
             self.send_header('Content-Type', 'image/svg+xml; charset=utf-8')
@@ -3568,78 +4495,6 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-
-        # 系列通读状态 (GET)
-        if path.startswith('/api/series/') and '/readthrough/status' in path:
-            sid = path.split('/')[3] if len(path.split('/')) > 3 else ''
-            if not is_valid_id(sid):
-                self.json_resp(400, {'error': 'Invalid ID'}); return
-            with _series_rt_lock:
-                t = _series_rt_tasks.get(sid, {'status': 'idle', 'progress': 0, 'phase': '准备中', 'total_chapters': 0, 'done_chapters': 0, 'error': '', 'stream_buffer': ''})
-                resp = dict(t)
-            self.json_resp(200, resp); return
-
-        # 系列详情 (GET)
-        if path.startswith('/api/series/') and len(path.split('/')) >= 4:
-            parts = path.split('/')
-            sid = parts[3] if len(parts) > 3 else ''
-            if not is_valid_id(sid):
-                self.json_resp(400, {'error': 'Invalid ID'}); return
-            s_meta = get_book_meta(sid)
-            if not s_meta or s_meta.get('type') != 'series':
-                self.json_resp(404, {'error': '系列不存在'}); return
-            series_book_ids = [x for x in s_meta.get('series_books', []) if x]
-            books_data = []
-            for bid_item in series_book_ids:
-                b_meta = get_book_meta(bid_item)
-                if not b_meta:
-                    continue
-                bp_item = get_book_dir(bid_item)
-                ch_dir_item = os.path.join(bp_item, 'chapters')
-                cc_item = len(os.listdir(ch_dir_item)) if os.path.isdir(ch_dir_item) else 0
-                has_cover_item = os.path.isfile(os.path.join(bp_item, 'cover'))
-                ch_names_item = []
-                ch_order_item = b_meta.get('chapter_order', [])
-                if os.path.isdir(ch_dir_item):
-                    ch_map_item = {}
-                    for fn_item in os.listdir(ch_dir_item):
-                        if fn_item.endswith('.json') and not fn_item.startswith('.'):
-                            try:
-                                with open(os.path.join(ch_dir_item, fn_item), 'r', encoding='utf-8') as f_ch:
-                                    ch_data_item = json.load(f_ch)
-                                    ch_id_item = fn_item.replace('.json', '')
-                                    ch_map_item[ch_id_item] = ch_data_item.get('title', '未命名')
-                            except: continue
-                    for cid_item in ch_order_item:
-                        if cid_item in ch_map_item:
-                            ch_names_item.append({'id': cid_item, 'title': ch_map_item.pop(cid_item)})
-                    for cid_item, cname_item in ch_map_item.items():
-                        ch_names_item.append({'id': cid_item, 'title': cname_item})
-                books_data.append({
-                    'id': bid_item,
-                    'title': b_meta.get('title', bid_item),
-                    'created': b_meta.get('created', 0),
-                    'updated': b_meta.get('updated', 0),
-                    'chapter_count': cc_item,
-                    'chapter_names': ch_names_item,
-                    'type': b_meta.get('type', 'book'),
-                    'has_cover': has_cover_item,
-                    'author': b_meta.get('author', ''),
-                    'description': b_meta.get('description', ''),
-                })
-            self.json_resp(200, {
-                'series': {
-                    'id': sid,
-                    'title': s_meta.get('title', ''),
-                    'type': 'series',
-                    'created': s_meta.get('created', 0),
-                    'updated': s_meta.get('updated', 0),
-                    'has_cover': os.path.isfile(os.path.join(get_book_dir(sid), 'cover')),
-                    'series_books': series_book_ids,
-                    'cover_book': s_meta.get('cover_book', ''),
-                },
-                'books': books_data,
-            }); return
 
         # 静态文件（图片、SVG 等）
         if path.endswith(('.png', '.svg', '.ico', '.jpg', '.jpeg', '.gif', '.webp')):
@@ -3774,6 +4629,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
 
+        if path.startswith('/api/series'):
+            self.json_resp(404, {'error': '系列功能已移除'}); return
+        if path.startswith('/api/book/') and path.endswith(
+            ('/export-coo', '/coo-remote', '/coo-push')
+        ):
+            self.json_resp(410, {
+                'error': '卷 COO 接口已移除，请从作品页面操作'
+            }); return
+
         if path == '/api/editor-fonts':
             filename = str(data.get('filename') or '')
             font_b64 = str(data.get('data') or '')
@@ -3883,20 +4747,378 @@ class Handler(BaseHTTPRequestHandler):
             save_json(SESSIONS_FILE, sessions)
             self.json_resp(200, {'ok': True, 'device_name': name}); return
 
+        if path == '/api/works/create':
+            title = str(data.get('title') or '新作品').strip()[:200]
+            first_book_title = str(data.get('first_book_title') or title or '第一卷').strip()[:200]
+            work, first = _create_work(title, first_book_title)
+            log_action('WORK_CREATE', work['id'])
+            self.json_resp(200, {'work': work, 'book': first}); return
+
+        if path.startswith('/api/work/'):
+            parts = path.split('/')
+            wid = unquote(parts[3]) if len(parts) > 3 else ''
+            if not is_valid_id(wid) or not get_work_meta(wid):
+                self.json_resp(404, {'error': '作品不存在'}); return
+            action = parts[4] if len(parts) > 4 else ''
+            work = get_work_meta(wid) or {}
+
+            if action == 'update':
+                for key, limit in [('title', 200), ('author', 200), ('description', 10000), ('language', 30)]:
+                    if key in data:
+                        work[key] = str(data.get(key) or '').strip()[:limit]
+                if not work.get('title'):
+                    self.json_resp(400, {'error': '作品标题不能为空'}); return
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True, 'work': get_work_meta(wid)}); return
+
+            if action == 'add-book':
+                book = _create_child_book(wid, str(data.get('title') or '新书本')[:200])
+                self.json_resp(200, {'ok': True, 'book': book}); return
+
+            if action == 'import-volume':
+                filename = data.get('filename', '')
+                file_b64 = data.get('data', '')
+                if not filename or not file_b64:
+                    self.json_resp(400, {'error': '缺少文件'}); return
+                ext = os.path.splitext(filename)[1].lower()
+                if ext not in IMPORT_PARSERS:
+                    self.json_resp(400, {'error': f'不支持的格式: {ext}'}); return
+                try:
+                    raw = base64.b64decode(file_b64)
+                except Exception:
+                    self.json_resp(400, {'error': '文件数据无效'}); return
+                if len(raw) > 150 * 1024 * 1024:
+                    self.json_resp(400, {'error': '文件超过 150MB'}); return
+                parser = IMPORT_PARSERS[ext]
+                result = parser(raw, filename)
+                cover_data = None
+                if len(result) == 4:
+                    chapters, book_title, err, cover_data = result
+                elif len(result) == 3:
+                    chapters, book_title, err = result
+                else:
+                    chapters, err = result
+                    book_title = ''
+                if err:
+                    self.json_resp(400, {'error': err}); return
+                if not chapters:
+                    self.json_resp(400, {'error': '未能解析出章节'}); return
+                vol_title = book_title or os.path.splitext(os.path.basename(filename))[0]
+                bid = _new_local_id('book')
+                bd = os.path.join(BOOKS_DIR, bid)
+                ch_dir = os.path.join(bd, 'chapters')
+                os.makedirs(ch_dir, exist_ok=True)
+                os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+                order = []
+                for idx, ch in enumerate(chapters):
+                    cid = 'ch_' + re.sub(r'[^\w]', '_', ch.get('title', 'untitled')[:30]) + '_' + str(int(time.time() * 1000)) + str(idx)
+                    if not is_valid_id(cid):
+                        cid = 'ch_' + str(int(time.time() * 1000)) + str(idx)
+                    content = ch.get('content', '')
+                    ch_data = {'id': cid, 'title': ch.get('title', '未命名')[:200], 'content': content, 'updated': time.time()}
+                    if ch.get('_import_meta'):
+                        ch_data['_import_meta'] = ch['_import_meta']
+                    save_json(os.path.join(ch_dir, f"{cid}.json"), ch_data)
+                    order.append(cid)
+                now = time.time()
+                meta = {
+                    'id': bid, 'work_id': wid,
+                    'book_uid': _new_stable_uid(),
+                    'title': vol_title[:200],
+                    'author': work.get('author', ''),
+                    'description': '',
+                    'language': work.get('language', 'zh-CN'),
+                    'created': now, 'updated': now,
+                    'chapter_order': order,
+                    'current_chapter_id': order[0] if order else '',
+                }
+                save_json(os.path.join(bd, 'meta.json'), meta)
+                save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+                if cover_data and isinstance(cover_data, bytes) and len(cover_data) > 100:
+                    try:
+                        with open(os.path.join(bd, 'cover'), 'wb') as f:
+                            f.write(cover_data)
+                    except Exception:
+                        pass
+                book_ids = [x for x in work.get('book_ids', []) if get_book_meta(x)]
+                book_ids.append(bid)
+                work['book_ids'] = book_ids
+                line = list(work.get('reading_order') or [])
+                line.append({'type': 'volume_boundary', 'book': bid})
+                line.extend({'type': 'chapter', 'book': bid, 'chapter': cid} for cid in order)
+                work['reading_order'] = line
+                save_work_meta(wid, work)
+                log_action('IMPORT_VOLUME', f'{bid} into {wid}: {len(order)} chapters from {filename}')
+                self.json_resp(200, {'ok': True, 'book_id': bid, 'chapters': len(order)}); return
+
+            if action == 'book-order':
+                requested = [str(x) for x in (data.get('order') or [])]
+                current = [x for x in work.get('book_ids', []) if get_book_meta(x)]
+                work['book_ids'] = [x for x in requested if x in current]
+                work['book_ids'].extend(x for x in current if x not in work['book_ids'])
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True, 'order': work['book_ids']}); return
+
+            if action == 'reading-order':
+                requested = data.get('order') or []
+                if not isinstance(requested, list) or len(requested) > 100000:
+                    self.json_resp(400, {'error': '阅读线格式无效'}); return
+                work['reading_order'] = requested
+                save_work_meta(wid, work)
+                normalized = _normalize_work_reading_order(wid, append_missing=False)
+                work = get_work_meta(wid) or work
+                work['reading_order'] = normalized
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True, 'reading_order': normalized}); return
+
+            if action == 'lore-create':
+                lid = _new_local_id('lore')
+                item = {
+                    'id': lid,
+                    'title': str(data.get('title') or '新设定').strip()[:200] or '新设定',
+                    'kind': str(data.get('kind') or '').strip()[:100],
+                    'content': str(data.get('content') or ''),
+                    'updated': time.time(),
+                }
+                lore_dir = os.path.join(WORKS_DIR, wid, 'lore')
+                os.makedirs(lore_dir, exist_ok=True)
+                save_json(os.path.join(lore_dir, f'{lid}.json'), item)
+                work.setdefault('reading_order', []).append({'type': 'lore', 'ref': lid})
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True, 'lore': item}); return
+
+            if action in ('lore-update', 'lore-delete', 'lore-place', 'lore-unplace'):
+                lid = str(data.get('lore_id') or data.get('ref') or '')
+                if not is_valid_id(lid):
+                    self.json_resp(400, {'error': '设定 ID 无效'}); return
+                lore_path = os.path.join(WORKS_DIR, wid, 'lore', f'{lid}.json')
+                item = load_json(lore_path, dict)
+                if not item:
+                    self.json_resp(404, {'error': '档案不存在'}); return
+                if action == 'lore-update':
+                    for key, limit in [('title', 200), ('kind', 100), ('content', 2_000_000)]:
+                        if key in data:
+                            item[key] = str(data.get(key) or '')[:limit]
+                    item['updated'] = time.time()
+                    save_json(lore_path, item)
+                elif action == 'lore-delete':
+                    try:
+                        os.remove(lore_path)
+                    except OSError:
+                        pass
+                    work['reading_order'] = [
+                        x for x in work.get('reading_order', [])
+                        if not (isinstance(x, dict) and x.get('type') == 'lore' and x.get('ref') == lid)
+                    ]
+                    save_work_meta(wid, work)
+                elif action == 'lore-place':
+                    present = any(
+                        isinstance(x, dict) and x.get('type') == 'lore' and x.get('ref') == lid
+                        for x in work.get('reading_order', [])
+                    )
+                    if not present:
+                        work.setdefault('reading_order', []).append({'type': 'lore', 'ref': lid})
+                        save_work_meta(wid, work)
+                else:
+                    work['reading_order'] = [
+                        x for x in work.get('reading_order', [])
+                        if not (isinstance(x, dict) and x.get('type') == 'lore' and x.get('ref') == lid)
+                    ]
+                    save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'upload-cover':
+                cover_b64 = data.get('cover', '')
+                try:
+                    if ',' in cover_b64:
+                        cover_b64 = cover_b64.split(',', 1)[1]
+                    cover_raw = base64.b64decode(cover_b64, validate=True)
+                except Exception:
+                    self.json_resp(400, {'error': '封面数据无效'}); return
+                if not cover_raw or len(cover_raw) > 20 * _MB:
+                    self.json_resp(400, {'error': '封面为空或过大'}); return
+                with open(os.path.join(WORKS_DIR, wid, 'cover'), 'wb') as f:
+                    f.write(cover_raw)
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'delete':
+                for bid in work.get('book_ids') or []:
+                    shutil.rmtree(os.path.join(BOOKS_DIR, bid), ignore_errors=True)
+                shutil.rmtree(os.path.join(WORKS_DIR, wid), ignore_errors=True)
+                log_action('WORK_DELETE', wid)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'export-coo':
+                pen_name = str(data.get('pen_name') or data.get('author') or '').strip()
+                try:
+                    output = _build_coo_zip(wid, pen_name)
+                except Exception as e:
+                    self.json_resp(500, {'error': f'打包失败: {str(e)[:160]}'}); return
+                safe_title = re.sub(
+                    r'[^\w\u4e00-\u9fff.\-]', '_', work.get('title', 'work')
+                )[:100] or 'work'
+                utf8_fn = quote(safe_title + '.coo', safe='')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/vnd.coobox.coo+zip')
+                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
+                self.send_header('Content-Length', str(len(output)))
+                self.send_header('Connection', 'close')
+                self.send_cors(); self.end_headers()
+                self.wfile.write(output)
+                return
+
+            if action == 'coo-remote':
+                try:
+                    work['coo_server_url'] = _normalize_coobox_server_url(
+                        data.get('server_url')
+                    )
+                except ValueError as e:
+                    self.json_resp(400, {'error': str(e)}); return
+                work['coo_email'] = str(data.get('email') or '').strip()
+                work.pop('coo_password', None)
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'coo-push':
+                try:
+                    server_url = _normalize_coobox_server_url(
+                        data.get('server_url') or work.get('coo_server_url')
+                    )
+                except ValueError as e:
+                    self.json_resp(400, {'error': str(e)}); return
+                email = str(data.get('email') or work.get('coo_email') or '').strip()
+                password = str(data.get('password') or '')
+                if not server_url or not email or not password:
+                    self.json_resp(400, {'error': '请填写网站地址、邮箱和密码'}); return
+                try:
+                    login_body = json.dumps({'email': email, 'password': password}).encode('utf-8')
+                    login_req = urllib.request.Request(
+                        server_url + '/api/client/login', data=login_body, method='POST',
+                        headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    )
+                    with urllib.request.urlopen(login_req, timeout=20, context=_get_ssl_context()) as resp:
+                        login_result = json.loads(resp.read().decode('utf-8'))
+                    token = str(login_result.get('token') or '')
+                    if not token:
+                        raise ValueError(login_result.get('error') or '服务器未返回登录令牌')
+                    coo_bytes = _build_coo_zip(
+                        wid, str(data.get('pen_name') or work.get('author') or email).strip()
+                    )
+                    upload_req = urllib.request.Request(
+                        server_url + '/api/client/upload', data=coo_bytes, method='POST',
+                        headers={
+                            'Content-Type': 'application/vnd.coobox.coo+zip',
+                            'Authorization': 'Bearer ' + token,
+                            'X-COO-Filename': quote(work.get('title', 'work') + '.coo', safe=''),
+                            'Accept': 'application/json',
+                        },
+                    )
+                    with urllib.request.urlopen(upload_req, timeout=120, context=_get_ssl_context()) as resp:
+                        upload_result = json.loads(resp.read().decode('utf-8'))
+                    work = get_work_meta(wid) or work
+                    work['coo_server_url'] = server_url
+                    work['coo_email'] = email
+                    work.pop('coo_password', None)
+                    save_work_meta(wid, work)
+                    self.json_resp(200, {
+                        'ok': True, 'size': len(coo_bytes),
+                        'work_id': upload_result.get('work_id'),
+                        'updated': bool(upload_result.get('updated')),
+                    }); return
+                except urllib.error.HTTPError as e:
+                    try:
+                        body = json.loads(e.read().decode('utf-8', errors='replace'))
+                        message = body.get('error') or body.get('message')
+                    except Exception:
+                        message = ''
+                    self.json_resp(e.code if 400 <= e.code < 600 else 502, {
+                        'error': message or f'Coobox 返回 HTTP {e.code}'
+                    }); return
+                except Exception as e:
+                    self.json_resp(502, {'error': f'推送失败: {str(e)[:180]}'}); return
+
+            if action == 'merge-coo':
+                file_b64 = str(data.get('data') or '')
+                if not file_b64:
+                    self.json_resp(400, {'error': '缺少 COO 文件'}); return
+                try:
+                    raw = base64.b64decode(file_b64, validate=True)
+                except Exception:
+                    self.json_resp(400, {'error': 'COO 文件数据无效'}); return
+                source_work_id = ''
+                try:
+                    source_work_id, _, _ = _import_coo_zip(raw)
+                    detail = _merge_imported_work(wid, source_work_id)
+                except ValueError as e:
+                    if source_work_id and get_work_meta(source_work_id):
+                        source = get_work_meta(source_work_id) or {}
+                        for source_bid in source.get('book_ids') or []:
+                            shutil.rmtree(os.path.join(BOOKS_DIR, source_bid), ignore_errors=True)
+                        shutil.rmtree(os.path.join(WORKS_DIR, source_work_id), ignore_errors=True)
+                    self.json_resp(400, {'error': str(e)}); return
+                except Exception as e:
+                    if source_work_id and get_work_meta(source_work_id):
+                        source = get_work_meta(source_work_id) or {}
+                        for source_bid in source.get('book_ids') or []:
+                            shutil.rmtree(os.path.join(BOOKS_DIR, source_bid), ignore_errors=True)
+                        shutil.rmtree(os.path.join(WORKS_DIR, source_work_id), ignore_errors=True)
+                    self.json_resp(500, {'error': f'合并失败: {str(e)[:180]}'}); return
+
+                settings = get_settings()
+                started = bool(settings.get('base_url') and settings.get('model'))
+                if started:
+                    threading.Thread(
+                        target=_do_work_readthrough_wrapper,
+                        args=(wid, settings, {}, False),
+                        daemon=True,
+                    ).start()
+                self.json_resp(200, {
+                    'ok': True,
+                    'work': (detail or {}).get('work', {}),
+                    'readthrough_started': started,
+                    'needs_readthrough': True,
+                }); return
+
+            if action == 'readthrough':
+                sub = parts[5] if len(parts) > 5 else 'start'
+                if sub == 'start':
+                    settings = get_settings()
+                    if not settings.get('base_url') or not settings.get('model'):
+                        self.json_resp(400, {'error': '请先配置 API'}); return
+                    try:
+                        kb_storage.init_db(wid)
+                        st = kb_storage.get_rt_state(wid)
+                    except Exception:
+                        st = None
+                    if st and st.get('status') == 'running':
+                        self.json_resp(409, {'error': '作品通读正在进行中'}); return
+                    resume = bool(data.get('resume'))
+                    threading.Thread(
+                        target=_do_work_readthrough_wrapper,
+                        args=(wid, settings, data.get('config') or {}, resume),
+                        daemon=True,
+                    ).start()
+                    self.json_resp(200, {'status': 'started'}); return
+                if sub in ('pause', 'stop'):
+                    kb_storage.init_db(wid)
+                    kb_storage.set_rt_state(wid, pause_requested=1, phase='正在暂停')
+                    close_all_ai_connections()
+                    self.json_resp(200, {'status': 'pausing'}); return
+                self.json_resp(400, {'error': '未知通读操作'}); return
+
+            self.json_resp(404, {'error': '未知作品操作'}); return
+
         if path == '/api/books/create':
-            title = data.get('title', '新书本').strip()
-            bid = 'book_' + str(int(time.time() * 1000))
-            bd = get_book_dir(bid)
-            ch_dir = os.path.join(bd, 'chapters')
-            os.makedirs(ch_dir, exist_ok=True)
-            os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
-            first_cid = 'ch_' + str(int(time.time() * 1000))
-            save_json(os.path.join(ch_dir, f"{first_cid}.json"), {'id': first_cid, 'title': '第一章', 'content': '', 'updated': time.time()})
-            meta = {'id': bid, 'title': title, 'created': time.time(), 'updated': time.time(), 'chapter_order': [first_cid], 'current_chapter_id': first_cid}
-            save_json(os.path.join(bd, 'meta.json'), meta)
-            save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
-            log_action('BOOK_CREATE', bid)
-            self.json_resp(200, {'book': meta}); return
+            title = str(data.get('title') or '新书本').strip()[:200]
+            work_id = str(data.get('work_id') or '')
+            if work_id and get_work_meta(work_id):
+                meta = _create_child_book(work_id, title)
+                work = get_work_meta(work_id)
+            else:
+                work, meta = _create_work(title, title)
+            log_action('BOOK_CREATE', meta['id'])
+            self.json_resp(200, {'book': meta, 'work': work}); return
 
         if path == '/api/books/import':
             filename = data.get('filename', '')
@@ -3950,8 +5172,12 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+            _ensure_work_index()
+            meta = get_book_meta(bid) or meta
             log_action('IMPORT', f'{bid}: {len(chapters)} chapters from {filename}')
-            self.json_resp(200, {'book': meta, 'imported': len(chapters)}); return
+            self.json_resp(200, {
+                'book': meta, 'work_id': meta.get('work_id'), 'imported': len(chapters)
+            }); return
 
         if path == '/api/books/import-coo':
             file_b64 = data.get('data', '')
@@ -3962,17 +5188,18 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self.json_resp(400, {'error': '文件数据无效'}); return
             try:
-                bid, meta, manifest = _import_coo_zip(raw)
+                wid, meta, manifest = _import_coo_zip(raw)
             except ValueError as e:
                 self.json_resp(400, {'error': str(e)}); return
             except Exception as e:
                 self.json_resp(500, {'error': f'导入失败: {str(e)[:100]}'}); return
-            log_action('IMPORT_COO', bid)
-            ch_dir = os.path.join(get_book_dir(bid), 'chapters')
-            ch_count = 0
-            if os.path.isdir(ch_dir):
-                ch_count = len([f for f in os.listdir(ch_dir) if f.endswith('.json')])
-            self.json_resp(200, {'book_id': bid, 'title': meta.get('title', ''), 'imported': ch_count}); return
+            detail = _work_detail(wid) or {}
+            log_action('IMPORT_COO', wid)
+            self.json_resp(200, {
+                'work_id': wid,
+                'title': meta.get('title', ''),
+                'imported': (detail.get('work') or {}).get('chapter_count', 0),
+            }); return
 
         if path == '/api/books/check-coo':
             file_b64 = data.get('data', '')
@@ -3988,7 +5215,11 @@ class Handler(BaseHTTPRequestHandler):
                 zf.close()
             except Exception:
                 self.json_resp(400, {'error': '无效的 .coo 文件'}); return
-            self.json_resp(200, {'valid': manifest.get('format_name') == 'coo'}); return
+            valid = (
+                manifest.get('format_name') == 'coo'
+                and int(manifest.get('format_version') or 0) == 2
+            )
+            self.json_resp(200, {'valid': valid, 'version': manifest.get('format_version')}); return
 
         if path == '/api/books/rename':
             bid = data.get('book_id', '')
@@ -3997,91 +5228,30 @@ class Handler(BaseHTTPRequestHandler):
             if not meta: self.json_resp(404, {'error': '书本不存在'}); return
             meta['title'] = data.get('title', meta['title'])
             meta['updated'] = time.time()
-            save_json(os.path.join(get_book_dir(bid), 'meta.json'), meta)
+            save_json(os.path.join(BOOKS_DIR, bid, 'meta.json'), meta)
+            if meta.get('work_id') and get_work_meta(meta['work_id']):
+                work = get_work_meta(meta['work_id'])
+                save_work_meta(meta['work_id'], work)
             self.json_resp(200, {'ok': True}); return
-
-        if path == '/api/series/chat':
-            sid = data.get('series_id', '')
-            if not is_valid_id(sid):
-                self.json_resp(400, {'error': 'Invalid ID'}); return
-            s_meta = get_book_meta(sid)
-            if not s_meta or s_meta.get('type') != 'series':
-                self.json_resp(404, {'error': '系列不存在'}); return
-            text = data.get('text', '')
-            if not text:
-                self.json_resp(200, {'comment': ''}); return
-            settings = get_settings()
-            if not settings.get('base_url') or not settings.get('model'):
-                self.json_resp(400, {'error': '请先配置API'}); return
-            existing = bg_task_get_running_luca_chat()
-            if existing and existing.get('status') == 'running':
-                self.json_resp(400, {'error': '已有对话在进行中，请稍候'}); return
-            tid = bg_task_start('series-chat', sid, '系列AI对话')
-            _append_chat_history(sid, [
-                {'text': text, 'type': 'user'},
-                {'text': '', 'type': 'ai', 'reasoning': '', '_pending': True, 'task_id': tid},
-            ])
-            threading.Thread(target=_do_series_chat, args=(sid, tid, text, settings, data.get('history', [])), daemon=True).start()
-            self.json_resp(200, {'task_id': tid}); return
-
-        if path.startswith('/api/series/') and '/readthrough/' in path:
-            parts = path.split('/')
-            sid = parts[3] if len(parts) > 3 else ''
-            if not is_valid_id(sid):
-                self.json_resp(400, {'error': 'Invalid ID'}); return
-            s_meta = get_book_meta(sid)
-            if not s_meta or s_meta.get('type') != 'series':
-                self.json_resp(404, {'error': '系列不存在'}); return
-            if 'start' in path:
-                settings = get_settings()
-                if not settings.get('base_url') or not settings.get('model'):
-                    self.json_resp(400, {'error': '请先配置API'}); return
-                with _series_rt_lock:
-                    t = _series_rt_tasks.get(sid)
-                    if t and t.get('status') == 'running':
-                        self.json_resp(400, {'error': '通读正在进行中'}); return
-                    _series_rt_tasks[sid] = {'status': 'running', 'progress': 0, 'phase': '准备中', 'total_chapters': 0, 'done_chapters': 0, 'error': '', 'stream_buffer': '', 'stopped': False}
-                threading.Thread(target=do_series_readthrough, args=(sid, settings), daemon=True).start()
-                self.json_resp(200, {'status': 'started'}); return
-            elif 'stop' in path:
-                with _series_rt_lock:
-                    t = _series_rt_tasks.get(sid, {})
-                    t['stopped'] = True
-                    if sid in _series_rt_tasks:
-                        _series_rt_tasks[sid] = t
-                close_all_ai_connections()
-                self.json_resp(200, {'status': 'stopping'}); return
-            self.json_resp(400, {'error': '未知操作'}); return
-
-        if path.startswith('/api/book/') and path.endswith('/export-coo'):
-            parts = path.split('/')
-            bid = parts[3] if len(parts) > 3 else ''
-            if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
-                self.json_resp(404, {'error': '书本不存在'}); return
-            log_action('EXPORT_COO_REQUEST', f'book={bid}')
-            pen_name = str(data.get('pen_name') or data.get('author') or '').strip()
-            try:
-                output = _build_coo_zip(bid, pen_name)
-            except Exception as e:
-                self.json_resp(500, {'error': f'打包失败: {str(e)[:100]}'}); return
-            meta = get_book_meta(bid) or {}
-            safe_title = re.sub(r'[^\w\u4e00-\u9fff.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
-            utf8_fn = quote(safe_title + '.coo', safe='')
-            log_action('EXPORT_COO', f'book={bid} size={len(output)}')
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/vnd.coobox.coo+zip')
-            self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
-            self.send_header('Content-Length', str(len(output)))
-            self.send_header('Connection', 'close')
-            self.send_cors(); self.end_headers()
-            self.wfile.write(output)
-            return
 
         if path == '/api/books/delete':
             bid = data.get('book_id', '')
             if not is_valid_id(bid): self.json_resp(400, {'error': 'Invalid ID'}); return
-            bd = get_book_dir(bid)
+            meta = get_book_meta(bid) or {}
+            work_id = meta.get('work_id')
+            bd = os.path.join(BOOKS_DIR, bid)
             if os.path.isdir(bd): shutil.rmtree(bd, ignore_errors=True)
+            work = get_work_meta(work_id) if work_id else None
+            if work:
+                work['book_ids'] = [x for x in work.get('book_ids', []) if x != bid]
+                work['reading_order'] = [
+                    x for x in work.get('reading_order', [])
+                    if not (isinstance(x, dict) and x.get('book') == bid)
+                ]
+                if work['book_ids']:
+                    save_work_meta(work_id, work)
+                else:
+                    shutil.rmtree(os.path.join(WORKS_DIR, work_id), ignore_errors=True)
             log_action('BOOK_DELETE', bid)
             self.json_resp(200, {'ok': True}); return
 
@@ -4392,14 +5562,24 @@ class Handler(BaseHTTPRequestHandler):
             if action == 'chapter' and data.get('id'):
                 cid = data['id']
                 if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
-                ch = {'id': cid, 'title': data.get('title', ''), 'content': data.get('content', ''), 'updated': time.time()}
+                _debug_content = data.get('content', '')
+                print(f'[DEBUG_SAVE] cid={cid} title={repr(data.get("title",""))} content_type={type(_debug_content).__name__} content_repr={repr(_debug_content)[:200]}', flush=True)
+                ch = {'id': cid, 'title': data.get('title', ''), 'content': _debug_content, 'updated': time.time()}
                 save_json(os.path.join(ch_dir, f"{cid}.json"), ch)
                 meta = get_book_meta(bid) or {}
-                if cid not in meta.get('chapter_order', []):
+                is_new = cid not in meta.get('chapter_order', [])
+                if is_new:
                     meta.setdefault('chapter_order', []).append(cid)
                 meta['current_chapter_id'] = cid
                 meta['updated'] = time.time()
                 save_json(os.path.join(bd, 'meta.json'), meta)
+                if is_new:
+                    work = get_work_meta(meta.get('work_id')) if meta.get('work_id') else None
+                    if work:
+                        work.setdefault('reading_order', []).append({
+                            'type': 'chapter', 'book': bid, 'chapter': cid,
+                        })
+                        save_work_meta(meta['work_id'], work)
                 self.json_resp(200, {'status': 'ok', 'chapter': ch}); return
 
             if action == 'set-current-chapter' and data.get('id'):
@@ -4439,6 +5619,7 @@ class Handler(BaseHTTPRequestHandler):
                 if meta.get('current_chapter_id') == cid:
                     meta['current_chapter_id'] = ''
                 save_json(os.path.join(bd, 'meta.json'), meta)
+                _sync_book_reading_items(bid, deleted_chapter=cid)
                 self.json_resp(200, {'status': 'ok'}); return
 
             if action == 'restore' and data.get('id'):
@@ -4465,6 +5646,12 @@ class Handler(BaseHTTPRequestHandler):
                             order.insert(insert_at, cid)
                             meta['chapter_order'] = order
                             save_json(os.path.join(bd, 'meta.json'), meta)
+                            work = get_work_meta(meta.get('work_id')) if meta.get('work_id') else None
+                            if work:
+                                work.setdefault('reading_order', []).append({
+                                    'type': 'chapter', 'book': bid, 'chapter': cid,
+                                })
+                                save_work_meta(meta['work_id'], work)
                     except: pass
                 self.json_resp(200, {'status': 'ok'}); return
 
@@ -4676,14 +5863,7 @@ class Handler(BaseHTTPRequestHandler):
                             if os.path.exists(cp_chat):
                                 ch_data_chat = load_json(cp_chat, dict)
                                 ch_title_chat = ch_data_chat.get('title', '未命名章节')
-                        browse_parts = []
-                        _sid_chat = _find_series_for_book(book_id)
-                        if _sid_chat:
-                            _s_meta_chat = get_book_meta(_sid_chat)
-                            _s_title_chat = _s_meta_chat.get('title', '') if _s_meta_chat else ''
-                            if _s_title_chat:
-                                browse_parts.append(_s_title_chat)
-                        browse_parts.append(meta_chat.get('title', '未命名'))
+                        browse_parts = [meta_chat.get('title', '未命名')]
                         if cid_chat and ch_title_chat and ch_title_chat != '未命名章节':
                             browse_parts.append(ch_title_chat)
                         browse_ctx = ' - '.join(browse_parts)
@@ -5814,8 +6994,6 @@ class Handler(BaseHTTPRequestHandler):
                 with open(cover_path, 'wb') as f:
                     f.write(cover_raw)
                 meta = get_book_meta(bid) or {}
-                if meta.get('type') == 'series':
-                    meta.pop('cover_book', None)
                 meta['updated'] = time.time()
                 save_json(os.path.join(bd, 'meta.json'), meta)
                 log_action('COVER_UPLOAD', bid)
@@ -5841,122 +7019,6 @@ class Handler(BaseHTTPRequestHandler):
             tid = bg_task_start('import-book', '', filename)
             threading.Thread(target=_do_import_book_task, args=(tid, raw, filename, ext), daemon=True).start()
             self.json_resp(200, {'task_id': tid, 'async': True}); return
-
-        # ---- 系列管理 ----
-        if path == '/api/series/create':
-            title = data.get('title', '新系列').strip()
-            sid = 'series_' + str(int(time.time() * 1000))
-            bd = get_book_dir(sid)
-            os.makedirs(bd, exist_ok=True)
-            meta = {
-                'id': sid,
-                'title': title,
-                'type': 'series',
-                'series_books': [],
-                'created': time.time(),
-                'updated': time.time(),
-            }
-            save_json(os.path.join(bd, 'meta.json'), meta)
-            log_action('SERIES_CREATE', sid)
-            self.json_resp(200, {'series': {
-                'id': sid, 'title': title, 'type': 'series',
-                'created': meta['created'], 'updated': meta['updated'],
-                'chapter_count': 0, 'has_cover': False,
-                'series_books': [], 'author': '', 'description': '',
-            }}); return
-
-        if path == '/api/series/add-book':
-            sid = data.get('series_id', '')
-            bid = data.get('book_id', '')
-            if not is_valid_id(sid) or not is_valid_id(bid):
-                self.json_resp(400, {'error': 'Invalid ID'}); return
-            s_meta = get_book_meta(sid)
-            if not s_meta or s_meta.get('type') != 'series':
-                self.json_resp(404, {'error': '系列不存在'}); return
-            if not os.path.isdir(get_book_dir(bid)):
-                self.json_resp(404, {'error': '书本不存在'}); return
-            books = s_meta.get('series_books', [])
-            if bid not in books:
-                books.append(bid)
-            s_meta['series_books'] = books
-            s_meta['updated'] = time.time()
-            save_json(os.path.join(get_book_dir(sid), 'meta.json'), s_meta)
-            log_action('SERIES_ADD_BOOK', f'{sid} <- {bid}')
-            self.json_resp(200, {'ok': True, 'series_books': books}); return
-
-        if path == '/api/series/remove-book':
-            sid = data.get('series_id', '')
-            bid = data.get('book_id', '')
-            if not is_valid_id(sid) or not is_valid_id(bid):
-                self.json_resp(400, {'error': 'Invalid ID'}); return
-            s_meta = get_book_meta(sid)
-            if not s_meta or s_meta.get('type') != 'series':
-                self.json_resp(404, {'error': '系列不存在'}); return
-            books = s_meta.get('series_books', [])
-            if bid in books:
-                books.remove(bid)
-            s_meta['series_books'] = books
-            s_meta['updated'] = time.time()
-            save_json(os.path.join(get_book_dir(sid), 'meta.json'), s_meta)
-            log_action('SERIES_REMOVE_BOOK', f'{sid} / {bid}')
-            self.json_resp(200, {'ok': True, 'series_books': books}); return
-
-        if path == '/api/series/reorder':
-            sid = data.get('series_id', '')
-            order = data.get('order', [])
-            if not is_valid_id(sid):
-                self.json_resp(400, {'error': 'Invalid ID'}); return
-            s_meta = get_book_meta(sid)
-            if not s_meta or s_meta.get('type') != 'series':
-                self.json_resp(404, {'error': '系列不存在'}); return
-            s_meta['series_books'] = order
-            s_meta['updated'] = time.time()
-            save_json(os.path.join(get_book_dir(sid), 'meta.json'), s_meta)
-            log_action('SERIES_REORDER', sid)
-            self.json_resp(200, {'ok': True}); return
-
-        if path.startswith('/api/series/') and not any(x in path for x in ['add-book', 'remove-book', 'reorder', 'create', 'readthrough']):
-            parts = path.split('/')
-            sid = parts[3] if len(parts) > 3 else ''
-            if not is_valid_id(sid):
-                self.json_resp(400, {'error': 'Invalid ID'}); return
-            s_meta = get_book_meta(sid)
-            if not s_meta or s_meta.get('type') != 'series':
-                self.json_resp(404, {'error': '系列不存在'}); return
-            series_book_ids = [x for x in s_meta.get('series_books', []) if x]
-            books_data = []
-            for bid_item in series_book_ids:
-                b_meta = get_book_meta(bid_item)
-                if not b_meta:
-                    continue
-                bp_item = get_book_dir(bid_item)
-                ch_dir_item = os.path.join(bp_item, 'chapters')
-                cc_item = len(os.listdir(ch_dir_item)) if os.path.isdir(ch_dir_item) else 0
-                has_cover_item = os.path.isfile(os.path.join(bp_item, 'cover'))
-                books_data.append({
-                    'id': bid_item,
-                    'title': b_meta.get('title', bid_item),
-                    'created': b_meta.get('created', 0),
-                    'updated': b_meta.get('updated', 0),
-                    'chapter_count': cc_item,
-                    'type': b_meta.get('type', 'book'),
-                    'has_cover': has_cover_item,
-                    'author': b_meta.get('author', ''),
-                    'description': b_meta.get('description', ''),
-                })
-            self.json_resp(200, {
-                'series': {
-                    'id': sid,
-                    'title': s_meta.get('title', ''),
-                    'type': 'series',
-                    'created': s_meta.get('created', 0),
-                    'updated': s_meta.get('updated', 0),
-                    'has_cover': os.path.isfile(os.path.join(get_book_dir(sid), 'cover')),
-                    'series_books': series_book_ids,
-                    'cover_book': s_meta.get('cover_book', ''),
-                },
-                'books': books_data,
-            }); return
 
         if path == '/api/settings':
             if not self.is_authed():
@@ -6762,7 +7824,7 @@ def bg_task_get_by_book_type(book_id, task_type):
 def bg_task_get_running_luca_chat():
     with _bg_lock:
         for t in _bg_tasks.values():
-            if t.get('type') in ('chat', 'series-chat') and t.get('status') == 'running':
+            if t.get('type') == 'chat' and t.get('status') == 'running':
                 return dict(t)
         return None
 
@@ -6859,19 +7921,6 @@ def _build_chat_kb_tool_context(book_id, user_text='', current_chapter_id=''):
         log_action('CHAT_KB_TOOL_CONTEXT_ERROR', str(e)[:160])
         return '（知识库记录ID读取失败；必要时用 REREAD_KB。）'
 
-def _find_series_for_book(book_id):
-    books_dir = BOOKS_DIR
-    if not os.path.isdir(books_dir):
-        return None
-    for d in os.listdir(books_dir):
-        dp = os.path.join(books_dir, d)
-        if not os.path.isdir(dp):
-            continue
-        meta = load_json(os.path.join(dp, 'meta.json'), dict)
-        if meta.get('type') == 'series' and book_id in (meta.get('series_books') or []):
-            return d
-    return None
-
 _chat_history_lock = threading.RLock()
 _CHAT_TRANSIENT_KEYS = {'_pollTick', '_reasoningOpen', '_kbModalShown', '_streaming'}
 
@@ -6926,12 +7975,6 @@ def _merge_chat_histories(existing, incoming):
     return merged
 
 def _legacy_chat_history_path(entity_id):
-    meta = get_book_meta(entity_id)
-    if meta and meta.get('type') == 'series':
-        return os.path.join(get_book_dir(entity_id), 'chat_history.json')
-    sid = _find_series_for_book(entity_id)
-    if sid:
-        return os.path.join(get_book_dir(sid), 'chat_history.json')
     return os.path.join(get_book_dir(entity_id), 'chat_history.json')
 
 def _iter_legacy_chat_history_paths():
@@ -7313,288 +8356,6 @@ def _browser_summarize(conv, query, cfg_settings, tid):
     except Exception:
         return '浏览完毕。'
 
-def _do_series_chat(sid, task_id, user_text, cfg_settings, history_list):
-    set_conn_meta('series-chat', '系列AI对话', sid)
-    try:
-        history_list = _saved_chat_to_ai_history(sid, task_id)
-        s_meta = get_book_meta(sid)
-        series_title = s_meta.get('title', '未命名系列') if s_meta else '未命名系列'
-        series_book_ids = [x for x in (s_meta.get('series_books', []) if s_meta else []) if x]
-        source_parts = []
-        for bid in series_book_ids:
-            b_meta = get_book_meta(bid)
-            b_title = b_meta.get('title', '未命名') if b_meta else '未命名'
-            src = get_source(bid)
-            if src and len(src) > 50:
-                source_parts.append(f'【{b_title}】\n{src}')
-            else:
-                ch_dir = os.path.join(get_book_dir(bid), 'chapters')
-                cc = len(os.listdir(ch_dir)) if os.path.isdir(ch_dir) else 0
-                source_parts.append(f'【{b_title}】（共{cc}章，尚未通读）')
-        source_ctx = '\n\n'.join(source_parts) if source_parts else '（系列中暂无阅读笔记）'
-        tp = cfg_settings.get('ai_temperature', 0.7)
-        _series_ch_list_parts = []
-        for bid in series_book_ids:
-            b_meta = get_book_meta(bid)
-            b_title = b_meta.get('title', '未命名') if b_meta else '未命名'
-            _ch_order = (b_meta or {}).get('chapter_order', [])
-            for _ci, _cid in enumerate(_ch_order):
-                _cp = os.path.join(get_book_dir(bid), 'chapters', f'{_cid}.json')
-                if os.path.exists(_cp):
-                    _cd = load_json(_cp, dict)
-                    _series_ch_list_parts.append(f'id={_cid} [{b_title}] 第{_ci+1}章 {_cd.get("title", "未命名")}')
-        _series_ch_list_ctx = '\n'.join(_series_ch_list_parts[:80])
-        bookshelf_tree = _build_bookshelf_tree()
-        is_first_round = not history_list
-        appendix = f"""当前时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M')}
-
-【系列阅读笔记】
-{source_ctx}
-
-【章节列表】
-{_series_ch_list_ctx}"""
-        if is_first_round:
-            appendix += '\n\n【初始问候】如果对话历史为空（用户第一次开口），你的第一句回复开头自然地融入"有什么我可以帮你的吗"这层意思，但不要机械重复这句话。'
-        sys_msg = f"""你是 Luca，一个为分析大量文字和世界观叙事设计的作家助理。根据接入模型的不同，你的性格可能有细微差别。用户正在写系列小说，你协助他规划和管理整个系列。
-
-【重要】你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。
-
-【说话方式】
-谨言慎行。温文尔雅，不卑不亢。惜字如金。
-不要列选项，不要反问，不要结构化分析。
-看到好就简短说好，有问题就精准点出。不浮夸，也不冷漠。
-你不是客服，平时不必特意照顾用户。但如果用户明显焦虑或沮丧，沉稳地关心一句。
-你欣赏世界观宏大、设定严丝合缝的好作品，但作品的成败不会影响你的情绪。
-你对小说的世界观、设定、人物关系、伏笔特别上心。看到设定相关的细节，比起单纯赞美或挑错，你更愿意和作者一起推敲、追问、延伸——但仍然惜字如金，不啰嗦。设定一被提及，主动多关心两句。
-避免用"呗""啦"结尾，显得轻浮。
-【思考规则】一个问题不要反复思考多次，同一层面想一次就够了，否则可能陷入死循环。如果你的回复包含多个推理段落，在每个段落开头加上"第一，""第二，"这样的前缀，帮助自己理清层次。
-
-【绝对禁止】
-严禁任何身份描述。严禁说：
-- "我是你的朋友／搭档／助手／助理" "写小说的朋友"
-- "我叫XX" "我就是帮你XX的" "你的写作搭档"
-被问"你是谁"时可以说"我是 Luca，你的写作助手"这样一句话，严禁展开描述角色或人设。
-严禁自我评价："我很真诚""我是个XX的人""我的风格是..."
-你的品格从言行中流露——好人不说自己是好人，有修养的人不说自己有修养。
-绝对禁止输出任何 markdown 格式（包括标题、列表、表格、粗体、斜体、代码块等），只输出纯文本。
-
-【书库结构】
-{bookshelf_tree}
-
-（系列阅读笔记和章节列表详见文末附录）
-
-【你的专长】
-你是系列小说的宏观顾问，擅长：
-- 系列整体架构规划：各本书的定位、节奏、篇幅
-- 世界观补全：哪些方面还没展开，下一本适合从哪个角度拓展
-- 人物弧线：跨书的人物成长和命运安排
-- 伏笔管理：前书埋下的伏笔在后续如何回收
-- 连贯性检查：各书之间是否有设定冲突或时间线问题
-- 读者体验：从读者角度审视系列的阅读节奏和期待管理
-
-你有一个"读取章节"工具。当你需要查看某个章节的正文内容时，可以调用此工具。
-- 调用格式：[READ_CHAPTER]{{"chapter_id":"章节ID"}}[/READ_CHAPTER]
-- 你可以一次读取多个章节，每个章节调用一次。
-
-【隐藏功能】你可以主动启动系列通读进程。当你判断用户想要你通读整个系列（例如说"帮我把系列通读一遍""分析一下全系列""我要通读"等），或你认为需要全面了解所有细节才能回答当前问题时，请调用这个工具。调用后系统会自动逐书逐章阅读并生成完整的阅读笔记。
-- 调用格式：[START_SERIES_READTHROUGH][/START_SERIES_READTHROUGH]
-- 注意：调用前先简短告诉用户"好的，我这就启动系列通读"，然后输出工具标签。
-
-这个系列叫「{series_title}」，以下是各本书的阅读笔记：
-（详见文末附录）
-
-用户当前正在浏览：{series_title}
-
-请继续和用户对话。
-
-=== 附录 ===
-{appendix}"""
-        msgs = [{'role': 'system', 'content': sys_msg}]
-        for h in history_list:
-            role = h.get('role')
-            content = h.get('content')
-            if role and content:
-                msgs.append({'role': role, 'content': content})
-        msgs.append({'role': 'user', 'content': user_text})
-        content_acc = []
-        reasoning_acc = []
-        def on_content(tk):
-            content_acc.append(tk)
-            bg_task_update(task_id, result=''.join(content_acc), progress=min(95, 30 + len(''.join(content_acc)) // 10))
-        def on_reasoning(tk):
-            reasoning_acc.append(tk)
-            bg_task_update(task_id, reasoning=''.join(reasoning_acc))
-        full_text, err = call_ai_stream(cfg_settings, msgs, None, tp, timeout=120,
-                                        on_content_token=on_content,
-                                        on_reasoning_token=on_reasoning,
-                                        should_stop_fn=lambda: bg_task_should_stop(task_id))
-        if err:
-            if '用户停止' in err or bg_task_should_stop(task_id):
-                _replace_pending_chat_msg(sid, task_id, '[已停止]')
-                bg_task_done(task_id, '已停止')
-            else:
-                _replace_pending_chat_msg(sid, task_id, '[错误: ' + err + ']')
-                bg_task_done(task_id, err)
-            return
-        reasoning_text = ''.join(reasoning_acc)
-        content_text = ''.join(content_acc)
-        
-        # 去重：推理模型的思考过程有时会重复出现在正文中
-        def _normalize_for_dedup(t):
-            return re.sub(r'\s+', ' ', t).strip()
-        
-        r_norm = _normalize_for_dedup(reasoning_text) if reasoning_text else ''
-        f_norm = _normalize_for_dedup(full_text) if full_text else ''
-        c_norm = _normalize_for_dedup(content_text) if content_text else ''
-        
-        if r_norm and (f_norm == r_norm or c_norm == r_norm):
-            reasoning_text = ''
-            reasoning_acc.clear()
-        elif r_norm and len(r_norm) > 2 and (r_norm in f_norm or r_norm in c_norm):
-            full_text = full_text.replace(r_norm, '', 1).strip()
-            reasoning_text = ''
-            reasoning_acc.clear()
-        elif f_norm and len(f_norm) > 2 and (f_norm in r_norm):
-            reasoning_text = ''
-            reasoning_acc.clear()
-        elif r_norm and (f_norm.startswith(r_norm) or c_norm.startswith(r_norm)):
-            full_text = full_text[len(r_norm):].strip()
-            
-        if not full_text and reasoning_text:
-            full_text = reasoning_text
-            reasoning_text = ''
-        result = _clean_ai_text(full_text)
-        # — 处理 [READ_CHAPTER] 工具调用（系列对话）
-        _READ_CHAPTER_RE_S = re.compile(r'\[READ_CHAPTER\]\s*(\{.*?\})\s*(?:\[/READ_CHAPTER\]|(?=\n|$))', re.S)
-        _read_chapter_raw_ids_s = []
-        for _rc_m in _READ_CHAPTER_RE_S.finditer(result):
-            try:
-                _rc_cmd = json.loads(_rc_m.group(1).strip())
-                _rc_id = _rc_cmd.get('chapter_id', '')
-                if _rc_id:
-                    _read_chapter_raw_ids_s.append(str(_rc_id))
-            except Exception:
-                pass
-        if _read_chapter_raw_ids_s:
-            result = _READ_CHAPTER_RE_S.sub('', result).strip()
-            # 拼接整个系列的章节 order 用于回退匹配
-            _series_order_s = []  # list of (chapter_id, book_id)
-            for _bid in series_book_ids:
-                _bm = get_book_meta(_bid) or {}
-                for _cid in (_bm.get('chapter_order') or []):
-                    _series_order_s.append((_cid, _bid))
-            _series_id_list = [t[0] for t in _series_order_s]
-            _chapter_contents_s = []
-            _missing_ids_s = []
-            for _raw in _read_chapter_raw_ids_s[:3]:
-                _rcid = _resolve_chapter_id(_raw, _series_id_list)
-                if not _rcid:
-                    _missing_ids_s.append(_raw)
-                    continue
-                _hit = False
-                for _cid, _bid in _series_order_s:
-                    if _cid != _rcid:
-                        continue
-                    _rcp = os.path.join(get_book_dir(_bid), 'chapters', f'{_rcid}.json')
-                    if not os.path.exists(_rcp):
-                        break
-                    _rcd = load_json(_rcp, dict)
-                    _rc_title = _rcd.get('title', '未命名')
-                    _rc_content = _rcd.get('content', '')
-                    if _rc_content:
-                        _b_meta = get_book_meta(_bid)
-                        _b_title = _b_meta.get('title', '') if _b_meta else ''
-                        _sub_status_text_s = f'[子代理] 正在客观阅读「{_b_title} - {_rc_title}」…'
-                        if not result:
-                            bg_task_update(task_id, result=_sub_status_text_s, progress=60)
-                        else:
-                            bg_task_update(task_id, result=result + '\n\n' + _sub_status_text_s, progress=60)
-                        _sub_result_s = _read_chapter_subagent(cfg_settings, f'{_b_title} - {_rc_title}', _rc_content, tp)
-                        if _sub_result_s:
-                            _chapter_contents_s.append(f'【{_b_title} - {_rc_title}】子代理客观摘要\n{_sub_result_s}')
-                        else:
-                            _chapter_contents_s.append(f'【{_b_title} - {_rc_title}】\n{_rc_content[:8000]}')
-                        bg_task_update(task_id, result=result or '', progress=65)
-                        _hit = True
-                    break
-                if not _hit:
-                    _missing_ids_s.append(_raw)
-
-            _injection_parts_s = []
-            if _chapter_contents_s:
-                _injection_parts_s.append('[系统注入：子代理已客观阅读以下章节，以下是摘要]\n\n' + '\n\n'.join(_chapter_contents_s))
-            if _missing_ids_s:
-                _avail_s = '\n'.join(f'  - id={_cid}' for _cid, _ in _series_order_s[:80])
-                _injection_parts_s.append(
-                    f'[系统提示：以下 chapter_id 未找到对应章节]\n'
-                    f'  未找到：{", ".join(_missing_ids_s)}\n'
-                    f'  可用章节 ID 列表（必须用 id= 后面的字符串作为 chapter_id，不要用章节号数字）：\n{_avail_s}\n'
-                    f'请直接基于已有信息回答用户，不要再调用 READ_CHAPTER 重试同一个 ID。绝对禁止输出任何 markdown 格式（包括标题、列表、表格、粗体、斜体、代码块等），只输出纯文本。'
-                )
-            _injection_s = '\n\n'.join(_injection_parts_s) + '\n\n请直接回答，你已拥有正文内容，无需再次调用 READ_CHAPTER。'
-
-            # 修改系统提示词：告知 AI 已读取到正文
-            if msgs and msgs[0].get('role') == 'system':
-                _sys = msgs[0]['content']
-                if '你无法直接看到章节正文' in _sys:
-                    msgs[0] = dict(msgs[0])
-                    msgs[0]['content'] = _sys.replace(
-                        '你无法直接看到章节正文。如果需要查看正文，请使用[READ_CHAPTER]工具读取。',
-                        '你已通过[READ_CHAPTER]读取了章节正文，内容已在下方提供。请直接回答。'
-                    )
-
-            msgs.append({'role': 'assistant', 'content': result or '让我看看正文。'})
-            msgs.append({'role': 'user', 'content': _injection_s})
-            _rc_content_acc_s = []
-            _rc_reasoning_acc_s = []
-            def _rc_on_content_s(tk):
-                _rc_content_acc_s.append(tk)
-                bg_task_update(task_id, result=(result + '\n\n' if result else '') + ''.join(_rc_content_acc_s), progress=min(95, 60 + len(''.join(_rc_content_acc_s)) // 10))
-            def _rc_on_reasoning_s(tk):
-                _rc_reasoning_acc_s.append(tk)
-                bg_task_update(task_id, reasoning=''.join(_rc_reasoning_acc_s))
-            _rc_full_s, _rc_err_s = call_ai_stream(cfg_settings, msgs, None, tp, timeout=120,
-                                                    on_content_token=_rc_on_content_s,
-                                                    on_reasoning_token=_rc_on_reasoning_s,
-                                                    should_stop_fn=lambda: bg_task_should_stop(task_id))
-            if _rc_err_s:
-                if not result:
-                    result = '[读取章节后生成回复失败]'
-            else:
-                _rc_result_s = _clean_ai_text(_rc_full_s or '')
-                # 防止续聊又输出 READ_CHAPTER
-                _rc_result_s = _READ_CHAPTER_RE_S.sub('', _rc_result_s).strip()
-                result = (result + '\n\n' if result else '') + _rc_result_s
-                reasoning_text = ''.join(_rc_reasoning_acc_s) or reasoning_text
-            if not result.strip():
-                if _missing_ids_s and not _chapter_contents_s:
-                    result = '抱歉，未能定位到你提到的章节，请直接告诉我章节标题或问题本身。'
-                else:
-                    result = '（未生成内容）'
-        # 模型自重复检测：如果结果的前半段和后半段高度相似，截掉后半段
-        if len(result) > 20:
-            half = len(result) // 2
-            first_half = re.sub(r'\s+', '', result[:half])
-            second_half = re.sub(r'\s+', '', result[half:])
-            if first_half and second_half and first_half == second_half:
-                result = result[:half].strip()
-            elif len(result) > 40:
-                q = len(result) // 4
-                a = re.sub(r'\s+', '', result[:q])
-                b = re.sub(r'\s+', '', result[q:q*2])
-                if a and b and a == b:
-                    result = result[:q*2].strip()
-        needs_rt = False
-        if re.search(r'\[START_SERIES_READTHROUGH\]', result):
-            needs_rt = True
-            result = re.sub(r'\[START_SERIES_READTHROUGH\]\s*\[/START_SERIES_READTHROUGH\]', '', result).strip()
-        _replace_pending_chat_msg(sid, task_id, result, reasoning_text)
-        bg_task_update(task_id, progress=100, result=result, reasoning=reasoning_text, needs_series_readthrough=needs_rt)
-        bg_task_done(task_id)
-        _schedule_idle_compress(sid)
-    except Exception as e:
-        _replace_pending_chat_msg(sid, task_id, '[错误: ' + str(e) + ']')
-        bg_task_done(task_id, str(e))
 _ai_conn_lock = threading.Lock()
 _ai_connections = {}
 _ai_sse_clients = []
@@ -7788,139 +8549,6 @@ def get_readthrough_config(bid):
 def save_readthrough_config(bid, cfg):
     p = os.path.join(get_book_dir(bid), 'readthrough.json')
     save_json(p, cfg)
-
-# ===== 系列通读 =====
-_series_rt_lock = threading.Lock()
-_series_rt_tasks = {}
-
-def _series_rt_log(sid, msg):
-    with _series_rt_lock:
-        t = _series_rt_tasks.get(sid, {})
-        t['stream_buffer'] = t.get('stream_buffer', '') + msg + '\n'
-
-def _series_rt_update(sid, **kw):
-    with _series_rt_lock:
-        _series_rt_tasks[sid] = {**_series_rt_tasks.get(sid, {}), **kw}
-
-def _series_rt_should_stop(sid):
-    with _series_rt_lock:
-        return _series_rt_tasks.get(sid, {}).get('stopped', False)
-
-def do_series_readthrough(sid, settings):
-    set_conn_meta('series-readthrough', '系列摘要', sid)
-    try:
-        s_meta = get_book_meta(sid)
-        series_title = s_meta.get('title', '未命名') if s_meta else '未命名'
-        series_book_ids = [x for x in (s_meta.get('series_books', []) if s_meta else []) if x]
-        if not series_book_ids:
-            _series_rt_update(sid, status='error', phase='系列中没有书本', error='系列中没有书本')
-            return
-
-        all_chapters = []
-        for bid in series_book_ids:
-            b_meta = get_book_meta(bid)
-            if not b_meta: continue
-            b_title = b_meta.get('title', bid)
-            order = b_meta.get('chapter_order', [])
-            ch_dir = os.path.join(get_book_dir(bid), 'chapters')
-            if not os.path.isdir(ch_dir) or not order: continue
-            for cid in order:
-                ch = _read_chapter_file(bid, cid)
-                if ch:
-                    all_chapters.append({
-                        'book_id': bid, 'book_title': b_title,
-                        'id': cid, 'title': ch.get('title', '未命名'),
-                        'content': ch.get('content', '')
-                    })
-
-        total = len(all_chapters)
-        if total == 0:
-            _series_rt_update(sid, status='error', phase='没有章节', error='系列中没有章节')
-            return
-
-        _series_rt_update(sid, status='running', progress=0, phase='准备中', total_chapters=total, done_chapters=0, stream_buffer='')
-        _series_rt_log(sid, f'系列「{series_title}」共 {len(series_book_ids)} 本书，{total} 章')
-        _series_rt_log(sid, '开始通读系列...')
-
-        current_source = f'# 系列「{series_title}」全书阅读笔记\n\n'
-        done_count = 0
-        cfg_settings = {'temperature': get_settings().get('ai_temperature', 0.5)}
-
-        for ch in all_chapters:
-            if _series_rt_should_stop(sid):
-                _series_rt_update(sid, status='stopped', phase='已停止')
-                save_source(sid, current_source)
-                return
-
-            if _is_content_empty(ch['content']):
-                _series_rt_log(sid, f'跳过空章节: [{ch["book_title"]}] {ch["title"]}')
-                skip_result = f'## 剧情摘要\n[本章无实质正文，跳过]\n\n## 资料记录\n[无]\n'
-                current_source += f'\n\n### [{ch["book_title"]}] {ch["title"]}\n{skip_result}'
-                done_count += 1
-                save_source(sid, current_source)
-                pct = int(done_count / total * 85)
-                _series_rt_update(sid, progress=pct, done_chapters=done_count, phase=f'跳过空章节: {ch["title"]}')
-                continue
-
-            _series_rt_log(sid, f'正在读: [{ch["book_title"]}] {ch["title"]}')
-            _series_rt_update(sid, phase=f'正在读: {ch["title"]}', progress=int(done_count / total * 85))
-
-            prev_ctx = _extract_context_summary(current_source)
-            max_retries = 3
-            attempt = 0
-            result = ''
-            err = None
-            while attempt < max_retries:
-                if _series_rt_should_stop(sid):
-                    _series_rt_update(sid, status='stopped', phase='已停止')
-                    save_source(sid, current_source)
-                    return
-                result, err = _ai_read_chapter(settings, ch['title'], ch['content'], prev_ctx, config=cfg_settings)
-                if result and not err:
-                    break
-                attempt += 1
-                if attempt < max_retries:
-                    _series_rt_log(sid, f'重试 {attempt}/{max_retries}...')
-            if not result or err:
-                _series_rt_log(sid, f'跳过失败章节: {ch["title"]} ({err or "未返回"})')
-                result = f'## 剧情摘要\n[读取失败]\n\n## 资料记录\n[无]\n'
-
-            current_source += f'\n\n### [{ch["book_title"]}] {ch["title"]}\n{result}'
-            done_count += 1
-            save_source(sid, current_source)
-            pct = int(done_count / total * 85)
-            _series_rt_update(sid, progress=pct, done_chapters=done_count)
-
-        # 生成系列大纲
-        _series_rt_log(sid, '正在生成系列大纲...')
-        _series_rt_update(sid, phase='生成系列大纲', progress=90)
-        try:
-            outline_prompt = f"""基于以下系列阅读笔记，整理一份结构清晰的系列大纲。
-
-{current_source}
-
-【要求】
-1. 用自己的语言重新组织，不要复制原文句子
-2. 梳理跨书的主题脉络、人物弧线、世界观演变
-3. 标注各书之间的伏笔和呼应
-4. 输出为简洁的 Markdown 格式"""
-            msgs = [{'role': 'system', 'content': '你是系列小说大纲整理专家。基于阅读笔记，梳理跨书脉络。'}, {'role': 'user', 'content': outline_prompt}]
-            _ctx_for_outline = int(_get_effective_context_length(settings) or 0)
-            _input_chars_outline = len(outline_prompt) + 80
-            _outline_budget = max(8192, _ctx_for_outline - int(_input_chars_outline * 0.55) - 3500) if _ctx_for_outline > 0 else 16384
-            outline, _, outline_err = call_ai_full(settings, msgs, max_tokens=_outline_budget, temperature=0.3, timeout=600)
-            if outline and not outline_err:
-                save_outline_md(sid, outline)
-                _series_rt_log(sid, '系列大纲已生成')
-        except Exception as e:
-            _series_rt_log(sid, f'大纲生成失败: {str(e)[:100]}')
-
-        save_source(sid, current_source)
-        _series_rt_update(sid, status='done', progress=100, phase='完成', done_chapters=done_count, total_chapters=done_count, stream_buffer=current_source[-2000:])
-        _series_rt_log(sid, '系列通读完成！')
-    except Exception as e:
-        _series_rt_update(sid, status='error', phase='失败', error=str(e)[:200])
-        _series_rt_log(sid, f'错误: {str(e)[:200]}')
 
 def get_source(bid):
     p = os.path.join(get_book_dir(bid), 'source.md')
@@ -9490,95 +10118,6 @@ def _do_idle_compress(entity_id):
     except Exception as e:
         log_action('IDLE_COMPRESS_ERROR', f'{entity_id}: {str(e)[:160]}')
 
-
-class _SimpleEmbedding(EmbeddingFunction):
-    def __call__(self, input: Documents) -> Embeddings:
-        embs = []
-        for t in input:
-            if not t or not t.strip():
-                embs.append([0.0] * 64)
-                continue
-            vec = [0.0] * 64
-            chars = list(t.lower())
-            n = len(chars)
-            if n == 0:
-                embs.append(vec); continue
-            for i, c in enumerate(chars):
-                idx = ord(c) % 64
-                weight = 1.0 - (i / (n + 100))
-                vec[idx] += weight * ord(c)
-            norm = sum(v*v for v in vec)**0.5 or 1.0
-            embs.append([v/norm for v in vec])
-        return embs
-
-_chroma_clients = {}
-_chroma_collections = {}
-_chroma_clients_lock = threading.Lock()
-_chroma_collections_lock = threading.Lock()
-
-def _get_chroma_client(book_id):
-    client = _chroma_clients.get(book_id)
-    if client is not None:
-        return client
-    with _chroma_clients_lock:
-        client = _chroma_clients.get(book_id)
-        if client is None:
-            db_dir = os.path.join(get_book_dir(book_id), '.vector_db')
-            os.makedirs(db_dir, exist_ok=True)
-            client = chromadb.PersistentClient(path=db_dir, settings=_CHROMA_SETTINGS)
-            _chroma_clients[book_id] = client
-        return client
-
-def _get_kb_collection(book_id):
-    col = _chroma_collections.get(book_id)
-    if col is not None:
-        return col
-    client = _get_chroma_client(book_id)
-    with _chroma_collections_lock:
-        col = _chroma_collections.get(book_id)
-        if col is None:
-            col = client.get_or_create_collection(
-                name='knowledge_base',
-                embedding_function=_SimpleEmbedding(),
-                metadata={'hnsw:space': 'cosine'}
-            )
-            _chroma_collections[book_id] = col
-        return col
-
-def _kb_clear(book_id):
-    try:
-        col = _get_kb_collection(book_id)
-        col.delete(where={'$and': []})
-    except Exception as e:
-        log_action('KB_CLEAR_ERR', str(e)[:100])
-
-def _kb_upsert(book_id, chunks, metadatas=None, ids=None):
-    if not chunks:
-        return
-    col = _get_kb_collection(book_id)
-    safe_ids = ids or [f'kb_{i}_{int(time.time()*1000)}' for i in range(len(chunks))]
-    safe_metas = []
-    for i, m in enumerate((metadatas or []) or [{}]*len(chunks)):
-        sm = {'entity': str(m.get('entity','')), 'chapter': str(m.get('chapter','')),
-              'section': str(m.get('section',''))}
-        safe_metas.append(sm)
-    try:
-        col.upsert(documents=chunks, metadatas=safe_metas, ids=safe_ids[:len(chunks)])
-    except Exception as e:
-        log_action('KB_UPSERT_ERR', str(e)[:100])
-
-def _kb_search(book_id, query_text, top_k=8, where_filter=None):
-    try:
-        col = _get_kb_collection(book_id)
-        kwargs = {'query_texts': [query_text], 'n_results': min(top_k, 50)}
-        if where_filter:
-            kwargs['where'] = where_filter
-        results = col.query(**kwargs)
-        return results
-    except Exception as e:
-        log_action('KB_SEARCH_ERR', str(e)[:100])
-        return None
-
 _SOURCE_DIR_NAME = 'source'
 _ENTITY_DIR = 'entities'
 
@@ -9632,42 +10171,6 @@ def _get_all_entities_text(book_id):
         if text.strip():
             parts.append(text)
     return '\n\n---\n\n'.join(parts)
-
-def _rebuild_vector_index(book_id):
-    _kb_clear(book_id)
-    chunks = []
-    metas = []
-    ids = []
-    chunk_counter = [0]
-    def _add_chunks(entity_name, text, chapter='', section=''):
-        if not text or not text.strip():
-            return
-        paras = re.split(r'\n(?=### )', text)
-        for p in paras:
-            p = p.strip()
-            if len(p) < 10:
-                continue
-            cid = f'{entity_name}_{chunk_counter[0]}'
-            chunks.append(p)
-            metas.append({'entity': entity_name, 'chapter': chapter, 'section': section})
-            ids.append(cid)
-            chunk_counter[0] += 1
-    for fp in _list_entity_files(book_id):
-        ename = os.path.splitext(os.path.basename(fp))[0]
-        etext = _read_entity_file(fp)
-        _add_chunks(ename, etext, section='entity')
-    rules_path = os.path.join(_get_source_dir(book_id), 'rules.md')
-    if os.path.exists(rules_path):
-        _add_chunks('__rules__', _read_entity_file(rules_path), section='rules')
-    tl_path = os.path.join(_get_source_dir(book_id), 'timeline.md')
-    if os.path.exists(tl_path):
-        _add_chunks('__timeline__', _read_entity_file(tl_path), section='timeline')
-    fs_path = os.path.join(_get_source_dir(book_id), 'foreshadowing.md')
-    if os.path.exists(fs_path):
-        _add_chunks('__foreshadowing__', _read_entity_file(fs_path), section='foreshadowing')
-    if chunks:
-        _kb_upsert(book_id, chunks, metas, ids)
-    log_action('KB_REBUILT', f'chunks={len(chunks)}, entities={len(_list_entity_files(book_id))}')
 
 def _parse_entities_from_notes(notes_text):
     entities = {}
@@ -10412,6 +10915,31 @@ def _do_readthrough_wrapper(book_id, cfg_settings, config=None, resume=False):
         log_action('RT_POST_JOBS_ERR', str(e)[:120])
 
 
+def _do_work_readthrough_wrapper(work_id, cfg_settings, config=None, resume=False):
+    threading.current_thread().name = f'kb_readthrough_{work_id}'
+    detail = _work_detail(work_id)
+    if not detail:
+        return
+    kb_pipeline.do_readthrough_work(
+        work_id,
+        detail['books'],
+        cfg_settings,
+        reading_order=_normalize_work_reading_order(work_id, append_missing=True),
+        work_title=detail['work'].get('title', ''),
+        config=config,
+        resume=resume,
+    )
+    try:
+        st = kb_storage.get_rt_state(work_id)
+        if st and st.get('status') == 'done':
+            meta = get_work_meta(work_id) or {}
+            meta['needs_readthrough'] = False
+            meta['readthrough_at'] = time.time()
+            save_work_meta(work_id, meta)
+    except Exception as e:
+        log_action('WORK_RT_META_ERR', str(e)[:120])
+
+
 def _do_chapter_complete_wrapper(task_id, book_id, chapter_id, cfg_settings, text=None):
     """包装器：调用新版 kb_pipeline.do_chapter_complete"""
     set_conn_meta('chapter-complete', '本章通读', book_id)
@@ -10451,9 +10979,6 @@ def get_summary_config(bid):
 
 def save_summary_config(bid, cfg):
     return save_readthrough_config(bid, cfg)
-
-def do_series_summary(sid, settings):
-    return do_series_readthrough(sid, settings)
 
 def do_summary(bid, settings, config=None, resume=False):
     return do_readthrough(bid, settings, config, resume)
@@ -10516,6 +11041,7 @@ def run():
     except Exception:
         pass
     _migrate_old_books()
+    _ensure_work_index()
     # 提前生成硬件策略缓存。embeddings.py 会读它决定嵌入模型放 CPU 还是 GPU，
     # 必须在 _warmup_embedding_backend 触发首次加载之前就位。
     try:

@@ -17,7 +17,8 @@ from kb_storage import (
     list_timeline_relations, save_consistency_alerts, list_consistency_alerts,
     delete_kb_records,
     set_rt_state, get_rt_state, get_pause_requested, append_stream, rt_log, get_rt_logs,
-    embed_upsert, embed_query, embed_clear, embed_collection_count,
+    embed_upsert, embed_upsert_many, embed_query, embed_clear,
+    embed_collection_count, prune_vector_entries,
     hash_content, get_embedding_backend_id, get_embedding_chunk, get_kb_path,
     _get_conn,
 )
@@ -28,7 +29,7 @@ def _lazy_main():
     from main import (
         call_ai_full, call_ai_stream,
         _get_effective_context_length,
-        _read_chapter_file, get_book_meta, get_book_dir,
+        _read_chapter_file, get_book_meta, get_book_dir, get_work_dir, load_json,
         save_source, _get_source_dir, _write_entity_file,
         save_prediction_md,
         _is_content_empty, _extract_context_summary,
@@ -45,7 +46,11 @@ def _main():
 
 
 STRUCTURED_SYSTEM_PROMPT = '''你是资料整理员。读完每一章后，提取所有信息，输出严格 JSON。
-JSON 必须能被 Python 的 json.loads 解析，不要包含任何多余文字。'''
+JSON 必须能被 Python 的 json.loads 解析，不要包含任何多余文字。
+
+实体 type 字段为开放自由词，按本作世界观自拟最贴切的类别。
+常见：人物/势力/地点/物品/概念/种族/功法/组织/灵宝/境界/宗门…但不限于此。
+不要受限于预设列表，用最能描述该实体本质的词。'''
 
 STRUCTURED_USER_TEMPLATE = '''【章节】{title}
 【正文】
@@ -149,7 +154,7 @@ def _extract_json_array_from_text(raw: str) -> str:
     return text
 
 
-def ai_read_chapter_structured(settings, ch, prev_context='', on_token=None, should_stop_fn=None):
+def ai_read_chapter_structured(settings, ch, prev_context='', on_token=None, should_stop_fn=None, prior_records=None):
     m = _main()
     call_ai_stream = m['call_ai_stream']
 
@@ -167,6 +172,15 @@ def ai_read_chapter_structured(settings, ch, prev_context='', on_token=None, sho
         }
 
     ctx_str = f'【前情索引（只供参考，不要输出）】\n{prev_context}\n\n' if prev_context else ''
+    if prior_records and any(prior_records.get(k) for k in ('mentions', 'events', 'rules', 'foreshadowing')):
+        ctx_str += (
+            '【二周目纠错（重要）】\n'
+            '你之前通读过本章并记下了下面这些笔记，但本章正文随后被作者改过，旧笔记可能已过时或本来就有误。\n'
+            '请把旧笔记当作"可能有错的记忆"，以当前正文为唯一准绳重新通读并纠错：\n'
+            '- 当前正文仍成立的照常输出；与正文冲突、或已被改写/删除的旧内容不要再输出（即纠正/删除）；正文新增的正常补充。\n'
+            '最终只输出与当前正文一致的、修正后的完整结构化笔记。\n'
+            f'旧笔记：\n{json.dumps(prior_records, ensure_ascii=False)}\n\n'
+        )
     prompt = STRUCTURED_USER_TEMPLATE.format(
         title=title,
         content=content,
@@ -300,7 +314,8 @@ def ai_read_chapters_batch_structured(settings, chapters, prev_context='', on_to
 3. snippet 必须是原文中实际存在的片段；没有就留空字符串
 4. 不要凭空编造内容
 5. 输出要紧凑，但不要漏掉会影响后续问答的人物、事件、设定、数值、伏笔
-6. 只输出 JSON 数组，不要任何多余文字、注释、代码块标记。'''
+6. entities 的 type 字段为开放自由词，按本作世界观自拟最贴切的类别（常见：人物/势力/地点/物品/概念/种族/功法/组织…但不限于此）
+7. 只输出 JSON 数组，不要任何多余文字、注释、代码块标记。'''
 
     try:
         ctx_len = int(m['_get_effective_context_length'](settings) or 0)
@@ -409,7 +424,7 @@ def apply_structured_result(book_id, chapter_id, structured, chapter_idx=None):
             continue
         aliases = ent_data.get('aliases_in_chapter', []) or []
         ent_id = upsert_entity(
-            book_id, canonical, ent_data.get('type', '人物') or '人物',
+            book_id, canonical, ent_data.get('type', '未分类') or '未分类',
             aliases=aliases, first_chapter_id=chapter_id,
         )
         for fact_data in ent_data.get('facts', []) or []:
@@ -573,29 +588,24 @@ def incremental_embed(book_id, settings, sources=None):
     if stored_backend and stored_backend != backend.backend_id:
         embed_clear(book_id)
         rt_log(book_id, '嵌入后端已变更，已重建向量集合')
-    from kb_storage import _get_chroma_client, _ChromaEmbeddingFunc
-    import chromadb
-
-    ef = _ChromaEmbeddingFunc(backend)
-    client = _get_chroma_client(book_id)
-    try:
-        collection = client.get_collection(name='luca_kb', embedding_function=ef)
-    except:
-        collection = client.create_collection(name='luca_kb', embedding_function=ef)
-
     texts_to_embed = []
     ids_to_embed = []
     metadatas_to_embed = []
     hashes_to_register = []
+    expected_ids = set()
 
-    def queue_chunk(chunk_id, text, source_type, source_id):
+    def queue_chunk(chunk_id, text, source_type, source_id, extra_meta=None):
+        expected_ids.add(chunk_id)
         content_hash = hash_content(text)
         old = get_embedding_chunk(book_id, chunk_id)
         if old and old.get('content_hash') == content_hash and old.get('backend_id') == backend.backend_id:
             return
         texts_to_embed.append(text)
         ids_to_embed.append(chunk_id)
-        metadatas_to_embed.append({'source_type': source_type, 'source_id': source_id})
+        meta = {'source_type': source_type, 'source_id': source_id}
+        if extra_meta:
+            meta.update(extra_meta)
+        metadatas_to_embed.append(meta)
         hashes_to_register.append((chunk_id, source_type, source_id, content_hash))
 
     chapters = list_chapters_db(book_id)
@@ -616,44 +626,55 @@ def incremental_embed(book_id, settings, sources=None):
         text = f'实体: {ent["canonical_name"]} ({ent["type"]})\n'
         for m in mentions:
             text += f'- [{m.get("chapter_title","?")}] {m["fact"]}\n'
-        queue_chunk(cid, text, 'entity', ent['id'])
+        queue_chunk(cid, text, 'entity', ent['id'], extra_meta={'kind': ent['type']})
 
     events = list_events(book_id)
-    if events:
-        ev_text = '事件时间线:\n'
-        for ev in events[:100]:
-            ev_text += f'- 第{ev.get("chapter_idx","?")}章: {ev["who"]} {ev["what"]}\n'
-        cid = 'events_all'
-        queue_chunk(cid, ev_text, 'events', 'all')
+    for ev in events:
+        ev_text = f'事件: 第{ev.get("chapter_idx","?")}章 {ev["who"]} {ev["what"]}'
+        if ev.get('where_loc'):
+            ev_text += f' 地点: {ev["where_loc"]}'
+        if ev.get('why'):
+            ev_text += f' 原因: {ev["why"]}'
+        if ev.get('consequence'):
+            ev_text += f' 结果: {ev["consequence"]}'
+        if ev.get('story_time'):
+            ev_text += f' 时间: {ev["story_time"]}'
+        queue_chunk(f'ev_{ev["id"]}', ev_text, 'event', ev['id'])
 
     fss = list_foreshadowing(book_id)
-    if fss:
-        fs_text = '伏笔:\n'
-        for f in fss:
-            status = '未解' if f['status'] == 'open' else '已解'
-            fs_text += f'- [{status}] {f["hint"]}\n'
-        cid = 'foreshadowing_all'
-        queue_chunk(cid, fs_text, 'foreshadowing', 'all')
+    for f in fss:
+        status = '未解' if f['status'] == 'open' else '已解'
+        fs_text = f'伏笔 [{status}]: {f["hint"]}'
+        if f.get('resolution'):
+            fs_text += f' → 回收: {f["resolution"]}'
+        queue_chunk(f'fs_{f["id"]}', fs_text, 'foreshadowing', f['id'])
 
     rules = list_rules(book_id)
-    if rules:
-        r_text = '世界观规则:\n'
-        for r in rules:
-            r_text += f'- {r["name"]}: {r["body"]}\n'
-        cid = 'rules_all'
-        queue_chunk(cid, r_text, 'rules', 'all')
+    for r in rules:
+        r_text = f'规则: {r["name"]}: {r["body"]}'
+        queue_chunk(f'rule_{r["id"]}', r_text, 'rule', r['id'])
 
     if texts_to_embed:
         vecs = backend.embed(texts_to_embed)
-        collection.upsert(ids=ids_to_embed, embeddings=vecs,
-                          documents=texts_to_embed, metadatas=metadatas_to_embed)
+        embed_upsert_many(
+            book_id,
+            ids_to_embed,
+            texts_to_embed,
+            vecs,
+            metadatas_to_embed,
+        )
         from kb_storage import register_embedding_chunk
         for chunk_id, source_type, source_id, content_hash in hashes_to_register:
             register_embedding_chunk(book_id, chunk_id, source_type, source_id,
                                      content_hash, backend.backend_id)
+    prune_vector_entries(book_id, expected_ids)
 
 
 # ─── Phase 3: Readthrough Orchestrator ───
+
+# COO v2 卷次切换提示（契约 coo-format.md §5.4，文案两端必须一致）
+VOLUME_BOUNDARY_PROMPT = '新一卷《{book_title}》开始了。故事延续自世界观「{work_title}」。'
+
 
 def _build_prev_context(book_id, max_chars=6000):
     chapters = [c for c in list_chapters_db(book_id) if c.get('status') == 'done' and c.get('summary')]
@@ -788,6 +809,11 @@ def do_readthrough(book_id, settings, config=None, resume=False):
             existing = get_chapter(book_id, ch['id'])
             return bool(existing and existing['status'] == 'done' and existing['content_hash'] == hash_content(ch['content']))
 
+        def _is_reread(ch):
+            # 之前已通读完成、本次因正文改动需要重读的章 → 走二周目纠错（带旧记录），不参与批量
+            existing = get_chapter(book_id, ch['id'])
+            return bool(existing and existing['status'] == 'done')
+
         def _mark_empty_done(ch):
             rt_log(book_id, f'跳过空章节: {ch["title"]}')
             delete_chapter_artifacts(book_id, ch['id'])
@@ -813,16 +839,18 @@ def do_readthrough(book_id, settings, config=None, resume=False):
                 rt_log(book_id, '用户暂停')
                 return False
 
-            set_rt_state(book_id, current_idx=ch['idx'], phase=f'读: {ch["title"]}',
+            reread_prior = _chapter_kb_records_for_reread(book_id, ch['id']) if _is_reread(ch) else None
+            set_rt_state(book_id, current_idx=ch['idx'],
+                         phase=(f'重读纠错: {ch["title"]}' if reread_prior else f'读: {ch["title"]}'),
                          active_start_idx=ch['idx'], active_end_idx=ch['idx'],
-                         stream_buffer=f'正在思考第 {ch["idx"] + 1} 章：{ch["title"]}')
+                         stream_buffer=(f'第 {ch["idx"] + 1} 章有改动，带着旧笔记重读纠错…' if reread_prior else f'正在思考第 {ch["idx"] + 1} 章：{ch["title"]}'))
             upsert_chapter(book_id, ch['id'], idx=ch['idx'], title=ch['title'],
                           content_hash=hash_content(ch['content']), status='processing', error='')
 
             try:
                 prev_ctx = _build_prev_context(book_id, max_chars=_prev_context_limit(read_context_window))
                 structured = ai_read_chapter_structured(
-                    settings, ch, prev_context=prev_ctx,
+                    settings, ch, prev_context=prev_ctx, prior_records=reread_prior,
                     on_token=lambda _tk: set_rt_state(book_id, stream_buffer='模型已返回，正在写入知识库...'),
                     should_stop_fn=stop_check,
                 )
@@ -881,12 +909,12 @@ def do_readthrough(book_id, settings, config=None, resume=False):
 
             prev_ctx = _build_prev_context(book_id, max_chars=_prev_context_limit(read_context_window))
             batch = [ch]
-            if use_batch and current_max_batch > 1:
+            if use_batch and current_max_batch > 1 and not _is_reread(ch):
                 used = _chapter_input_cost(ch)
                 scan = pos + 1
                 while scan < len(chapters) and len(batch) < current_max_batch:
                     nxt = chapters[scan]
-                    if stop_check() or _unchanged_done(nxt) or _is_content_empty(nxt['content']):
+                    if stop_check() or _unchanged_done(nxt) or _is_content_empty(nxt['content']) or _is_reread(nxt):
                         break
                     nxt_cost = _chapter_input_cost(nxt)
                     if not _batch_fits(read_context_window, prev_ctx, used + nxt_cost, len(batch) + 1):
@@ -986,6 +1014,319 @@ def do_readthrough(book_id, settings, config=None, resume=False):
         err = f'通读崩溃: {str(e)[:200]}'
         rt_log(book_id, err)
         set_rt_state(book_id, status='error', phase='崩溃', error=err + '\n' + traceback.format_exc()[-500:])
+
+
+# ─── COO v2: 世界观级通读（按 reading_order 遍历） ───
+
+def _resolve_reading_order(work_id, books_meta, reading_order=None):
+    """解析阅读线。若未提供则按缺省规则推导（coo-format.md §5.3）。
+
+    返回有序列表，每项为:
+      {type, book_id?, chapter_id?, chapter_title?, book_title?, work_title?, lore_ref?, prompt_override?}
+    """
+    m = _main()
+    ordered_books = sorted(books_meta, key=lambda b: b.get('order', 0))
+    book_map = {b.get('id'): b for b in ordered_books if b.get('id')}
+    raw_order = list(reading_order or [])
+    if not raw_order:
+        for b in ordered_books:
+            meta = m['get_book_meta'](b['id']) or {}
+            for cid in meta.get('chapter_order', []):
+                raw_order.append({'type': 'chapter', 'book': b['id'], 'chapter': cid})
+
+    result = []
+    previous_chapter_book = None
+    boundary_for_next_book = None
+    chapter_position = 0
+    for raw in raw_order:
+        if not isinstance(raw, dict):
+            continue
+        item_type = raw.get('type', 'chapter')
+        if item_type == 'volume_boundary':
+            bid = raw.get('book') or raw.get('book_id')
+            if bid not in book_map:
+                continue
+            item = {
+                'type': 'volume_boundary',
+                'book_id': bid,
+                'book_title': book_map[bid].get('title', ''),
+                'prompt_override': raw.get('prompt_override', ''),
+            }
+            result.append(item)
+            boundary_for_next_book = bid
+            continue
+        if item_type == 'lore':
+            ref = raw.get('ref')
+            if not ref:
+                continue
+            lore_path = os.path.join(m['get_work_dir'](work_id), 'lore', f'{ref}.json')
+            lore = m['load_json'](lore_path, dict) if os.path.isfile(lore_path) else {}
+            if not lore:
+                continue
+            result.append({
+                'type': 'lore',
+                'ref': ref,
+                'title': lore.get('title', '未命名设定'),
+                'kind': lore.get('kind', ''),
+                'content': lore.get('content', ''),
+                'note': raw.get('note', ''),
+            })
+            continue
+        if item_type != 'chapter':
+            continue
+        bid = raw.get('book') or raw.get('book_id')
+        cid = raw.get('chapter') or raw.get('chapter_id')
+        if bid not in book_map or not cid:
+            continue
+        ch = m['_read_chapter_file'](bid, cid)
+        if not ch:
+            continue
+        if previous_chapter_book and previous_chapter_book != bid and boundary_for_next_book != bid:
+            result.append({
+                'type': 'volume_boundary',
+                'book_id': bid,
+                'book_title': book_map[bid].get('title', ''),
+                'prompt_override': '',
+            })
+        result.append({
+            'type': 'chapter',
+            'book_id': bid,
+            'book_title': book_map[bid].get('title', ''),
+            'chapter_id': cid,
+            'chapter_title': ch.get('title', f'第{chapter_position + 1}章'),
+            'chapter_idx': chapter_position,
+        })
+        chapter_position += 1
+        previous_chapter_book = bid
+        boundary_for_next_book = None
+    return result
+
+
+def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_title='', config=None, resume=False):
+    """COO v2 世界观级通读：按 reading_order 遍历所有子书章节 + lore + 卷次边界。
+
+    work_id: 世界观 ID（用作共享知识库的 book_id）
+    books_meta: [{id, title, order, ...}] 子书列表
+    reading_order: 阅读线数组（可选，缺省自动推导）
+    work_title: 世界观标题（用于卷次提示）
+    """
+    m = _main()
+    set_conn_meta = m['set_conn_meta']
+    _read_chapter_file = m['_read_chapter_file']
+    _get_effective_context_length = m['_get_effective_context_length']
+    _is_content_empty = m['_is_content_empty']
+    render_markdown_views_fn = render_markdown_views
+
+    set_conn_meta('readthrough', '世界观通读', work_id)
+    cfg = config or {}
+    now = int(time.time())
+
+    try:
+        init_db(work_id)
+
+        # 解析阅读线
+        order = _resolve_reading_order(work_id, books_meta, reading_order)
+        # 回填 work_title 到 volume_boundary 条目
+        for item in order:
+            if item.get('type') == 'volume_boundary':
+                item['work_title'] = work_title
+
+        if not order:
+            set_rt_state(work_id, status='error', phase='没有章节', error='阅读线为空')
+            return
+
+        total = len([x for x in order if x['type'] in ('chapter', 'lore')])
+        set_rt_state(work_id, status='running', phase='准备中', total=total,
+                     current_idx=-1, active_start_idx=-1, active_end_idx=-1,
+                     pause_requested=0, stream_buffer='', error='')
+        rt_log(work_id, f'世界观通读: {len(order)} 个阅读单元 ({total} 章)')
+
+        context_window = _get_effective_context_length(settings)
+        try:
+            context_window = int(context_window or 0)
+        except Exception:
+            context_window = 0
+        read_context_window = context_window if context_window > 0 else 65536
+
+        def stop_check():
+            st = get_rt_state(work_id)
+            return bool(st and st['pause_requested'])
+
+        # 注入卷次边界系统消息
+        def _inject_boundary(item):
+            """在 AI 上下文中注入卷次切换提示。"""
+            prompt = item.get('prompt_override') or VOLUME_BOUNDARY_PROMPT
+            msg = prompt.format(
+                book_title=item.get('book_title', ''),
+                work_title=item.get('work_title', work_title),
+            )
+            rt_log(work_id, f'📖 {msg}')
+            # 将提示作为上下文的一部分注入（通过追加到 stream_buffer 可见）
+            set_rt_state(work_id, stream_buffer=msg)
+
+        # 逐单元处理
+        chapter_count = 0
+        for pos, item in enumerate(order):
+            if stop_check():
+                set_rt_state(work_id, status='paused', phase='已暂停',
+                             current_idx=pos, active_start_idx=-1, active_end_idx=-1,
+                             stream_buffer='通读已暂停，进度已保存。')
+                rt_log(work_id, '用户暂停')
+                return
+
+            item_type = item.get('type', 'chapter')
+
+            if item_type == 'volume_boundary':
+                _inject_boundary(item)
+                # volume_boundary 不清空记忆，仅注入提示后继续
+                continue
+
+            elif item_type == 'lore':
+                lore_ref = item.get('ref', '')
+                lore_title = item.get('title') or lore_ref or '未命名设定'
+                content = item.get('content', '')
+                storage_id = f'lore::{lore_ref}'
+                if _is_content_empty(content):
+                    rt_log(work_id, f'跳过空设定: {lore_title}')
+                    continue
+                existing = get_chapter(work_id, storage_id)
+                if existing and existing['status'] == 'done' and existing.get('content_hash') == hash_content(content):
+                    rt_log(work_id, f'跳过已完成设定: {lore_title}')
+                    chapter_count += 1
+                    continue
+                set_rt_state(
+                    work_id, current_idx=pos, phase=f'读设定: {lore_title}',
+                    active_start_idx=pos, active_end_idx=pos,
+                    stream_buffer=f'正在阅读设定: {lore_title}',
+                )
+                upsert_chapter(
+                    work_id, storage_id, idx=chapter_count,
+                    title=f'[设定] {lore_title}',
+                    content_hash=hash_content(content), status='processing', error='',
+                )
+                try:
+                    prev_ctx = _build_prev_context(work_id, max_chars=6000)
+                    structured = ai_read_chapter_structured(
+                        settings,
+                        {
+                            'idx': chapter_count,
+                            'id': storage_id,
+                            'title': f'[设定] {lore_title}',
+                            'content': content,
+                        },
+                        prev_context=prev_ctx,
+                        on_token=lambda _tk: set_rt_state(
+                            work_id, stream_buffer='模型已返回，正在写入知识库...'
+                        ),
+                        should_stop_fn=stop_check,
+                    )
+                except StoppedException:
+                    upsert_chapter(work_id, storage_id, status='pending')
+                    set_rt_state(work_id, status='paused', phase='已暂停')
+                    return
+                except Exception as e:
+                    upsert_chapter(work_id, storage_id, status='failed', error=str(e)[:500])
+                    rt_log(work_id, f'失败: {lore_title} ({str(e)[:100]})')
+                    chapter_count += 1
+                    continue
+                apply_structured_result(work_id, storage_id, structured, chapter_idx=chapter_count)
+                upsert_chapter(
+                    work_id, storage_id, idx=chapter_count, title=f'[设定] {lore_title}',
+                    status='done', summary=structured['summary'],
+                    content_hash=hash_content(content), error='',
+                )
+                chapter_count += 1
+                rt_log(work_id, f'完成 ({chapter_count}/{total}) 设定: {lore_title}')
+                continue
+
+            elif item_type == 'chapter':
+                book_id = item['book_id']
+                chapter_id = item['chapter_id']
+                ch = _read_chapter_file(book_id, chapter_id)
+                if not ch:
+                    rt_log(work_id, f'跳过缺失章节: {book_id}/{chapter_id}')
+                    continue
+
+                ch_idx = item.get('chapter_idx', chapter_count)
+                ch_title = item.get('chapter_title', ch.get('title', f'第{chapter_count+1}章'))
+                content = ch.get('content', '')
+
+                if _is_content_empty(content):
+                    rt_log(work_id, f'跳过空章节: {ch_title}')
+                    continue
+
+                # 检查是否已处理
+                storage_id = f'{book_id}::{chapter_id}'
+                existing = get_chapter(work_id, storage_id)
+                if existing and existing['status'] == 'done' and existing.get('content_hash') == hash_content(content):
+                    rt_log(work_id, f'跳过已完成: {ch_title}')
+                    chapter_count += 1
+                    continue
+
+                reread_prior = _chapter_kb_records_for_reread(work_id, storage_id) if (existing and existing['status'] == 'done') else None
+                set_rt_state(work_id, current_idx=pos,
+                             phase=(f'重读纠错: {ch_title}' if reread_prior else f'读: {ch_title}'),
+                             active_start_idx=pos, active_end_idx=pos,
+                             stream_buffer=(f'{ch_title} 有改动，带着旧笔记重读纠错…' if reread_prior else f'正在思考: {ch_title}（{book_id}）'))
+                upsert_chapter(work_id, storage_id, idx=ch_idx, title=ch_title,
+                              content_hash=hash_content(content), status='processing', error='')
+
+                try:
+                    prev_ctx = _build_prev_context(work_id, max_chars=6000)
+                    structured = ai_read_chapter_structured(
+                        settings,
+                        {'idx': ch_idx, 'id': chapter_id, 'title': ch_title, 'content': content},
+                        prev_context=prev_ctx, prior_records=reread_prior,
+                        on_token=lambda _tk: set_rt_state(work_id, stream_buffer='模型已返回，正在写入知识库...'),
+                        should_stop_fn=stop_check,
+                    )
+                except StoppedException:
+                    upsert_chapter(work_id, storage_id, status='pending')
+                    set_rt_state(work_id, status='paused', phase='已暂停',
+                                 current_idx=pos, active_start_idx=-1, active_end_idx=-1,
+                                 stream_buffer='通读已暂停。')
+                    return
+                except Exception as e:
+                    if stop_check():
+                        upsert_chapter(work_id, storage_id, status='pending')
+                        set_rt_state(work_id, status='paused', phase='已暂停')
+                        return
+                    upsert_chapter(work_id, storage_id, status='failed', error=str(e)[:500])
+                    rt_log(work_id, f'失败: {ch_title} ({str(e)[:100]})')
+                    chapter_count += 1
+                    continue
+
+                apply_structured_result(work_id, storage_id, structured, chapter_idx=ch_idx)
+                upsert_chapter(work_id, storage_id, idx=ch_idx, title=ch_title,
+                              status='done',
+                              summary=structured['summary'],
+                              content_hash=hash_content(content),
+                              error='')
+                chapter_count += 1
+                rt_log(work_id, f'完成 ({chapter_count}/{total}) {ch_title}')
+
+        # 通读完成，建立索引
+        set_rt_state(work_id, phase='建立索引', active_start_idx=-1, active_end_idx=-1,
+                     stream_buffer='正文已经通读完，正在统一建立检索索引。')
+        rt_log(work_id, '统一建立检索索引')
+        incremental_embed(work_id, settings)
+        render_markdown_views_fn(work_id)
+
+        failed = [c for c in list_chapters_db(work_id) if c.get('status') == 'failed']
+        if failed:
+            msg = f'{len(failed)} 章失败，可点击继续重试'
+            set_rt_state(work_id, status='error', phase=msg, current_idx=-1, error=msg)
+            rt_log(work_id, msg)
+            return
+
+        set_rt_state(work_id, status='done', phase='完成', current_idx=-1)
+        rt_log(work_id, '世界观通读完成')
+
+    except Exception as e:
+        import traceback
+        err = f'世界观通读崩溃: {str(e)[:200]}'
+        rt_log(work_id, err)
+        set_rt_state(work_id, status='error', phase='崩溃', error=err + '\n' + traceback.format_exc()[-500:])
 
 
 # ─── Phase 4: Chapter Complete ───
@@ -1876,7 +2217,7 @@ def reread_passages(book_id, chapter_ids, correction, focus_texts, settings):
 {{
   "delete": {{"mentions":["旧mention id"],"events":["旧event id"],"rules":["旧rule id"],"foreshadowing":["旧foreshadowing id"]}},
   "add": {{
-    "entities":[{{"canonical_name":"人物/实体名","type":"人物/物品/地点/势力/概念","aliases_in_chapter":[],"facts":[{{"fact":"正确事实","snippet":"原文片段"}}]}}],
+    "entities":[{{"canonical_name":"人物/实体名","type":"该实体的类别，自由词。常见：人物/势力/地点/物品/概念/种族/功法/组织…但不限于此，按本作世界观自拟","aliases_in_chapter":[],"facts":[{{"fact":"正确事实","snippet":"原文片段"}}]}}],
     "events":[{{"story_time":"故事内时间，不能确定就写时间未定","who":"参与者","what":"正确事件","where":"地点","why":"原因","consequence":"后果","snippet":"原文片段"}}],
     "foreshadowing_new":[{{"hint":"新伏笔","snippet":"原文片段"}}],
     "foreshadowing_resolved":[{{"earlier_hint":"被回收的旧伏笔","resolution":"如何回收","snippet":"原文片段"}}],

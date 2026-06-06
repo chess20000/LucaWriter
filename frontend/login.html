@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -233,7 +233,7 @@ var rememberActive=false;
 function toggleRemember(){rememberActive=!rememberActive;var el=$('rememberToggle');el.classList.toggle('active',rememberActive);el.setAttribute('aria-checked',rememberActive)}
 function api(m,p,d,cb){var x=new XMLHttpRequest();x.onload=function(){try{cb(JSON.parse(this.responseText),this.status)}catch(e){cb({error:'err'},this.status)}};x.onerror=function(){cb({error:'err'},0)};x.open(m,p);x.setRequestHeader('Cache-Control','no-cache');x.setRequestHeader('Pragma','no-cache');if(d!==undefined){x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(d))}else x.send()}
 
-api('GET','/api/auth/status',undefined,function(d){if(!d.has_users){isSetup=true;$('mainCard').classList.add('setup-mode');$('submitBtn').textContent='创建账户';$('username').placeholder='用户名';$('pwHint').textContent='创建你的账户';return}if(d.logged_in){location.href='/';return}$('forgotPwd').style.display='block'});
+api('GET','/api/auth/status',undefined,function(d){if(!d.has_users){isSetup=true;$('mainCard').classList.add('setup-mode');$('submitBtn').textContent='创建账户';$('username').placeholder='用户名';$('pwHint').textContent='创建你的账户';return}if(d.logged_in){try{localStorage.removeItem('lucawriter_state')}catch(e){}location.href='/';return}$('forgotPwd').style.display='block'});
 
 function $(id){return document.getElementById(id)}
 
@@ -242,8 +242,9 @@ $('authForm').addEventListener('submit',function(e){
   if(!u){showErr('请输入用户名');return}
   $('submitBtn').disabled=true;
   var body={username:u,password:p,remember:rememberActive};
-  if(isSetup){api('POST','/api/auth/setup',body,function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Failed')})}
-  else{api('POST','/api/auth/login',body,function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)location.href='/';else showErr(d.error||'Login failed')})}
+  var _goHome=function(){try{localStorage.removeItem('lucawriter_state')}catch(e){}location.href='/'};
+  if(isSetup){api('POST','/api/auth/setup',body,function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)_goHome();else showErr(d.error||'Failed')})}
+  else{api('POST','/api/auth/login',body,function(d,s){$('submitBtn').disabled=false;if(s===200&&d.ok)_goHome();else showErr(d.error||'Login failed')})}
 });
 
 function showErr(t){var e=$('errMsg');e.textContent=t;e.style.display='block'}

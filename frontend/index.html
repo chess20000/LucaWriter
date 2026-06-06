@@ -98,8 +98,8 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 .topbar-center-logo{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:5}
 .topbar-center-logo img{width:20px;height:20px;opacity:.7}
 .topbar-back:hover{color:var(--t-on-surface);border-color:var(--accent-a25);background:var(--accent-a12)}
-.topbar-back svg{display:block;transform:translateX(-2px)}
-.topbar-back svg:last-child{transform:translateX(-2px) translateY(1px)}
+.topbar-back svg{display:block}
+.topbar-back svg:first-child{transform:translateX(-2px)}
 .topbar-breadcrumb{display:flex;align-items:center;gap:6px;font-size:13px;overflow:hidden;flex:1;min-width:0}
 .topbar-breadcrumb .bc-book{color:var(--t-on-surface);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;flex-shrink:1;min-width:48px;font-weight:650}
 .topbar-breadcrumb .bc-sep{color:var(--t3);flex-shrink:0;font-size:12px}
@@ -117,9 +117,8 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 .topbar-chapter-slot.active .topbar-ch-dot{background:var(--accent);border-color:var(--accent);border-width:2px;width:10px;height:10px}
 .topbar-status{display:none;align-items:center;gap:6px;flex:0 0 auto;min-width:0;height:26px;margin-left:auto;padding:0;border:none;background:transparent}
 .topbar-status:not(.has-chapter) .save-indicator{display:none}
-.topbar-actions{display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:0}
+.topbar-actions{display:flex;align-items:center;gap:6px;flex-shrink:0;margin-left:auto}
 .topbar.topbar-compact .topbar-status{display:none!important}
-.topbar.topbar-compact .topbar-actions{margin-left:auto}
 .topbar.topbar-narrow #themeToggleBtn,
 .topbar.topbar-narrow #topbarSettingsBtn,
 .topbar.topbar-narrow #topbarActionDivider{display:none!important}
@@ -134,7 +133,6 @@ body{font-family:var(--font-sans);background:var(--page-bg);color:var(--t1);-web
 @media(max-width:1040px){
  .topbar{gap:8px}
  .topbar-location{flex-basis:min(var(--topbar-book-width,260px),260px);width:min(var(--topbar-book-width,260px),260px);max-width:min(var(--topbar-book-width,260px),260px)}
- .topbar.topbar-series-mode .topbar-location{flex-basis:min(var(--topbar-book-width,520px),calc(100vw - 24px));width:min(var(--topbar-book-width,520px),calc(100vw - 24px));max-width:min(var(--topbar-book-width,520px),calc(100vw - 24px))}
  .topbar-device{display:none!important}
  .topbar-btn{padding-left:9px;padding-right:9px}
 }
@@ -221,14 +219,14 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
   border:1px solid var(--panel-border);
   border-radius:calc(var(--r2) + 2px);
 }
-.modal, .confirm-box, .prompt-box, .series-summary, .task-detail-panel {
+.modal, .confirm-box, .prompt-box, .task-detail-panel {
   background: var(--card-bg);
   background-image: var(--paper-texture);
   background-repeat:repeat;
   background-blend-mode: overlay;
   border:1px solid var(--panel-border);
 }
-.series-chat .msg, .task-detail-panel .content {
+.task-detail-panel .content {
   background: var(--card-bg);
   background-image: var(--paper-texture), var(--card-bg);
   background-repeat:repeat;
@@ -342,6 +340,8 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .book-empty-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
 .book-empty-btn{background:var(--accent-dim);color:var(--accent);border:2px dashed var(--accent-a25);padding:12px 28px;border-radius:var(--r2);font-size:14px;font-weight:600;cursor:pointer;transition:0s}
 .book-empty-btn:hover{border-color:var(--accent);background:var(--accent-a03)}
+.bookshelf-watermark{grid-column:1/-1;display:flex;align-items:center;justify-content:center;min-height:50vh;pointer-events:none;user-select:none}
+.bookshelf-watermark span{font-family:var(--font-serif);font-size:clamp(48px,8vw,120px);font-weight:200;color:var(--t3);opacity:.12;letter-spacing:.04em}
 .book-list-panel{padding:6px}
 .book-list-item{padding:10px 12px;border-radius:var(--r2);font-size:13px;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:8px;margin:2px 0;transition:0s;border:1px solid transparent}
 .book-list-item:hover{color:var(--t1);background:var(--surface2)}
@@ -587,6 +587,7 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .ai-reasoning-toggle:hover{color:var(--accent2)}
 .ai-reasoning-body{display:none;font-size:11px;color:var(--t3);white-space:pre-wrap;padding:6px 8px;background:var(--surface3);border-radius:var(--r1);margin-top:4px;line-height:1.6;border-left:2px solid var(--accent);overflow:hidden}
 .ai-reasoning-body.open{display:block;cursor:pointer}
+.ai-reasoning-body.open.live{max-height:3.6em;overflow-y:auto;cursor:auto;scrollbar-width:thin}
 .generate-pane{flex-direction:column;height:100%;align-items:center;justify-content:center}
 .generate-body{display:flex;flex-direction:column;align-items:center;gap:8px;padding:40px 20px}
 .generate-btns{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
@@ -770,6 +771,21 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(6px) saturate(160%);-webkit-backdrop-filter:blur(6px) saturate(160%);z-index:100;justify-content:center;align-items:center}
 .modal-bg.open{display:flex}
 .modal{background:var(--surface);border:1px solid var(--border2);border-radius:var(--r4);padding:24px 20px;width:90%;max-width:480px;max-height:80vh;overflow-y:auto;scrollbar-width:none}
+.meta-modal{max-width:820px;width:92%;height:78vh;display:flex;flex-direction:column;padding:0;overflow:hidden;border-radius:var(--r4)}
+.meta-head{display:flex;align-items:center;padding:12px 18px;border-bottom:1px solid var(--border);flex-shrink:0}
+.meta-head h2{flex:1;font-size:15px;font-weight:700}
+.meta-body{flex:1;display:flex;min-height:0;overflow:hidden}
+.meta-console{width:44%;min-width:260px;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);background:var(--bg)}
+.meta-db{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:10px;gap:6px;background:var(--bg)}
+.meta-section-title{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;text-transform:uppercase;flex-shrink:0}
+.meta-ch-row{display:flex;align-items:center;gap:8px;padding:3px 0}
+.meta-ch-label{flex-shrink:0;width:90px;display:flex;align-items:baseline;gap:4px;overflow:hidden}
+.meta-ch-book-title{font-size:11px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.meta-ch-stat{font-size:10px;color:var(--t3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.meta-ch-bar{flex:1;display:flex;gap:2px;height:16px;align-items:center}
+.meta-ch-seg{flex:1;height:100%;border-radius:2px;background:var(--border);transition:background .2s;min-width:2px}
+.meta-ch-seg.done{background:var(--accent)}
+.meta-ch-seg:hover{opacity:.8}
 
 
 /* 导入校验弹窗 */
@@ -975,62 +991,168 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 .local-llm-info-panel{display:none;margin:10px 0 0;padding:10px;border:1px solid var(--border);border-radius:var(--r1);background:var(--surface);font-size:11px;color:var(--t3);line-height:1.55;text-align:left}
 .local-llm-info-panel.open{display:block}
 
-/* === Series & Cover === */
-.book-card-series{border-color:var(--border)}
-.series-icon{position:absolute;top:8px;left:8px;background:var(--accent-dim);border:1px solid var(--accent-a20);border-radius:var(--r1);width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--accent);z-index:2}
-/* Series stacked covers */
-.book-cover-stack{position:relative;aspect-ratio:3/4;overflow:visible!important;background:transparent!important}
-.book-cover-stack .stack-front{position:absolute;inset:14% 0 0 0;z-index:2;border-radius:var(--r2);overflow:hidden}
-.book-cover-stack .stack-front img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(0.5)}
-.book-cover-stack .stack-behind{position:absolute;border-radius:3px;overflow:hidden}
-.book-cover-stack .stack-behind img{width:100%;height:100%;object-fit:cover;display:block;filter:saturate(0.5)}
-/* Behind book 1 - back left, rotated counter-clockwise */
-.book-cover-stack .stack-b1{width:64%;height:64%;top:0;left:4%;z-index:0;transform:rotate(-6deg)}
-/* Behind book 2 - back right, rotated clockwise */
-.book-cover-stack .stack-b2{width:64%;height:64%;top:2%;right:4%;z-index:0;transform:rotate(5deg)}
-/* Behind book 3 - mid left, slight rotation */
-.book-cover-stack .stack-b3{width:70%;height:70%;top:8%;left:10%;z-index:1;transform:rotate(-3deg)}
-/* When only 2 behind books, hide the 3rd */
-.book-cover-stack.stack-2 .stack-b3{display:none}
-.book-cover-stack .stack-count{position:absolute;bottom:6px;right:6px;z-index:4;font-size:10px;font-weight:700;color:var(--accent);background:rgba(0,0,0,.75);padding:2px 7px;border-radius:var(--r1);border:1px solid var(--accent-a20);letter-spacing:.5px}
-.series-view{display:none;flex:1;flex-direction:column;padding:24px 32px;overflow:hidden}
-.series-view.active{display:flex}
-.series-view-header{display:flex;align-items:center;gap:12px;margin-bottom:4px;flex-shrink:0}
-.series-view-header h2{font-size:18px;font-weight:700;color:var(--t1);letter-spacing:-.3px;flex:1}
-.series-add-hint{font-size:12px;color:var(--t3);margin-bottom:16px;flex-shrink:0}
-.series-list{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:0 0 16px 0;min-width:0}
-.series-body{flex:1;display:flex;gap:16px;overflow:hidden;min-height:0}
-.series-chat{width:320px;flex-shrink:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden}
-.series-chat-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;color:var(--t1);flex-shrink:0}
-.series-chat-messages{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:8px 12px;min-height:0}
-.series-chat-input-row{display:flex;gap:6px;padding:8px;border-top:1px solid var(--border);flex-shrink:0}
-.series-summary{width:320px;flex-shrink:0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden}
-.series-rt-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;color:var(--accent);flex-shrink:0}
-.series-rt-header .ai-send{padding:2px 8px;font-size:10px}
-.series-book-item{display:flex;align-items:stretch;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);padding:12px;transition:0s;cursor:pointer;position:relative;min-height:110px}
-.series-book-item:hover{border-color:var(--accent)}
-.series-book-item .sbi-cover{width:64px;flex-shrink:0;border-radius:var(--r2);background:var(--surface2);position:relative;overflow:hidden;aspect-ratio:3/4;align-self:center}
-.series-book-item .sbi-cover img{width:100%;height:100%;object-fit:cover;filter:saturate(0.5)}
-.series-book-item .sbi-info{flex-shrink:0;display:flex;flex-direction:column;justify-content:center;gap:4px;min-width:0;max-width:140px}
-.series-book-item .sbi-title{font-size:14px;font-weight:600;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.series-book-item .sbi-meta{font-size:11px;color:var(--t3);display:flex;align-items:center;gap:4px}
-.series-book-item .sbi-chapters{flex:1;min-width:0;display:flex;flex-direction:row;gap:6px;overflow:hidden;padding:0;align-items:flex-start;border-left:1px solid var(--border);margin-left:4px;padding-left:10px}
-.series-book-item .sbi-ch-item{writing-mode:vertical-lr;font-size:12px;color:var(--t3);line-height:1.5;letter-spacing:2px;transition:0s;cursor:pointer;padding:4px 2px;border-radius:var(--r1);white-space:nowrap;flex-shrink:0}
-.series-book-item .sbi-ch-item:hover{color:var(--accent);background:var(--accent-dim)}
-.series-book-item .sbi-ch-ellipsis{writing-mode:vertical-lr;font-size:10px;color:var(--t3);opacity:.4;letter-spacing:4px;flex-shrink:0;padding:4px 2px;line-height:1;user-select:none}
-.series-book-item .sbi-drag{flex-shrink:0;display:flex;align-items:center;padding:0 4px;cursor:grab;color:var(--t3);font-size:14px;user-select:none;transition:0s}
-.series-book-item .sbi-drag:hover{color:var(--t1)}
-.series-book-item .sbi-drag:active{cursor:grabbing}
-.series-book-item.drag-over{border-color:var(--accent)}
-.series-book-item .sbi-menu-btn{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.5);border:none;color:var(--t3);width:22px;height:22px;border-radius:var(--r1);font-size:10px;cursor:pointer;display:none;align-items:center;justify-content:center;z-index:5;line-height:1}
-.series-book-item:hover .sbi-menu-btn{display:flex}
-.series-book-item .sbi-menu-btn:hover{color:var(--t1);background:var(--accent-a15)}
-.series-book-item .book-menu-dropdown{top:32px;right:6px;z-index:200}
-.series-book-item.series-book-add{border:1px dashed var(--border);cursor:pointer;justify-content:center;align-items:center;min-height:80px;transition:0s}
-.series-book-item.series-book-add:hover{border-color:var(--accent);background:var(--accent-a03)}
-.series-book-item.series-book-add .sba-inner{font-size:13px;color:var(--t3);text-align:center}
-.series-book-empty{text-align:center;padding:20px 20px;color:var(--t3)}
-.series-book-empty h3{font-size:16px;margin-bottom:8px;color:var(--t2)}
+/* === Work reading line === */
+.work-view{display:none;flex:1;min-height:0;padding:22px 28px;gap:20px;overflow:hidden}
+.work-view.active{display:grid;grid-template-columns:260px 1fr;gap:16px;overflow:hidden}
+.work-panel,.work-reread{min-height:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;display:flex;flex-direction:column}
+.work-hero{display:grid;grid-template-columns:84px 1fr;gap:14px;padding:16px;border-bottom:1px solid var(--border)}
+.work-cover-button{width:84px;aspect-ratio:3/4;border:0;padding:0;border-radius:var(--r2);overflow:hidden;background:var(--surface2);cursor:pointer}
+.work-cover-button img{width:100%;height:100%;display:block;object-fit:cover}
+.work-title-input{width:100%;border:0;border-bottom:1px solid transparent;background:transparent;color:var(--t1);font-size:19px;font-weight:700;padding:2px 0 5px;outline:none}
+.work-title-input:focus{border-color:var(--accent)}
+.work-meta-line{font-size:11px;color:var(--t3);margin-top:7px}
+.work-actions{display:flex;gap:4px;margin-top:12px}
+.work-actions button,.reading-head button,.work-book-add{border:1px solid var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r1);cursor:pointer}
+.work-actions button{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;padding:5px}
+.work-actions button svg{width:100%;height:100%}
+.work-actions button:hover,.reading-head button:hover,.work-book-add:hover{border-color:var(--accent);color:var(--accent)}
+.work-lore-btn{display:block;width:100%;margin-top:10px;border:1px dashed var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r2);padding:10px;font-size:13px;font-weight:600;cursor:pointer;text-align:center;transition:0s}
+.work-lore-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-a8)}
+.work-progress{height:3px;background:var(--surface3);margin:0 12px;border-radius:2px;overflow:hidden;flex-shrink:0}
+.work-progress-fill{height:100%;background:var(--accent);border-radius:2px;width:0;transition:width .4s ease}
+.work-progress-fill.busy{background:linear-gradient(90deg,var(--accent),var(--accent-dim),var(--accent));background-size:200% 100%;animation:wp-busy 1.2s ease infinite}
+@keyframes wp-busy{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.work-books{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.work-book{display:grid;grid-template-columns:20px 48px minmax(0,1fr) auto;gap:6px;align-items:center;padding:8px;border:1px solid var(--border);border-radius:var(--r2);cursor:pointer;background:var(--surface2)}
+.work-book:hover{border-color:var(--accent)}
+.work-book.active{border-color:var(--accent);background:var(--accent-a8)}
+.work-book.dragging{opacity:.35}
+.work-book.drag-over{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-a20)}
+.work-book-handle{cursor:grab;color:var(--t3);display:flex;align-items:center;justify-content:center;opacity:.35;font-size:14px;line-height:1;user-select:none}
+.work-book-handle:hover{opacity:.8}
+.work-book img{width:48px;aspect-ratio:3/4;object-fit:cover;border-radius:var(--r1)}
+.work-title-row{display:flex;align-items:center;gap:8px}
+.work-title-row .work-title-input{flex:1}
+.work-del-btn{font-size:10px;color:var(--t3);background:none;border:none;cursor:pointer;padding:2px 4px;flex-shrink:0}
+.work-del-btn:hover{color:var(--danger)}
+.work-book-title{font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.work-book-meta{font-size:10px;color:var(--t3);margin-top:4px}
+.work-book-tools{display:flex;flex-direction:column;gap:4px}
+.work-book-tools button{border:0;background:transparent;color:var(--t3);font-size:11px;cursor:pointer}
+.work-book-tools button:hover{color:var(--accent)}
+.work-reread-btn{border:1px solid var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r1);padding:6px 9px;font-size:11px;cursor:pointer;text-align:center;flex:1}
+.work-reread-btn:hover{border-color:var(--accent);color:var(--accent)}
+.work-import-volume-btn{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;padding:5px;border:1px solid var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r1);cursor:pointer}
+.work-import-volume-btn svg{width:100%;height:100%}
+.work-import-volume-btn:hover{border-color:var(--accent);color:var(--accent)}
+.work-export-btn{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;padding:5px;border:1px solid var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r1);cursor:pointer}
+.work-export-btn svg{width:100%;height:100%}
+.work-export-btn:hover{border-color:var(--accent);color:var(--accent)}
+.work-book-add{margin:2px 12px 12px;border-style:dashed}
+.reading-head{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.reading-head h2{font-size:16px;flex:1}
+.work-chat{min-height:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;display:flex;flex-direction:column;position:relative}
+.work-chat-head{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;font-weight:650;color:var(--t1)}
+.work-chat-msgs{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
+.work-chat-msgs .ai-msg{max-width:100%;padding:8px 10px;border-radius:var(--r2);font-size:12px;line-height:1.5}
+.work-chat-msgs .ai-msg.user{background:var(--accent-dim);color:var(--t1);margin-left:20px}
+.work-chat-msgs .ai-msg.ai{background:var(--surface2);color:var(--t2);margin-right:20px}
+.work-chat-msgs .ai-msg .ai-msg-body{white-space:pre-wrap;word-break:break-word}
+.work-chat-msgs .ai-msg .ai-thinking{font-size:10px;color:var(--t3);margin-bottom:4px;font-style:italic}
+.work-chat-msgs .ai-msg .ai-thinking.live{max-height:3.6em;overflow-y:auto;scrollbar-width:thin}
+.work-chat-msgs .ai-msg .ai-thinking.done{display:none}
+.work-chat-msgs .ai-msg .ai-reasoning-body{padding:6px 8px;background:var(--surface3);border-radius:var(--r1);font-size:11px;color:var(--t3);max-height:120px;overflow-y:auto;margin-bottom:6px;white-space:pre-wrap;word-break:break-word}
+.work-chat-msgs:empty::after{content:'开始与 Luca 对话';display:block;text-align:center;color:var(--t3);font-size:12px;padding:40px 20px}
+.work-chat-history-overlay{position:absolute;inset:34px 0 36px 0;background:var(--surface);z-index:5;overflow-y:auto;padding:4px}
+.work-chat-history-overlay .luca-history-list{background:transparent;border:none}
+.work-chat-history-overlay .luca-history-item{padding:6px 8px;font-size:11px;border-radius:var(--r1);cursor:pointer;color:var(--t1)}
+.work-chat-history-overlay .luca-history-item:hover{background:var(--surface2)}
+.work-chat-history-overlay .luca-history-item.active{background:var(--accent-a12);color:var(--accent)}
+.work-chat-history-overlay .luca-history-title{font-weight:600;margin-bottom:2px}
+.work-chat-history-overlay .luca-history-time{font-size:9px;color:var(--t3)}
+.work-chat-input-row{display:flex;align-items:stretch;border-top:1px solid var(--border);flex-shrink:0}
+.work-chat-input{border:none;background:var(--surface2);color:var(--t1);padding:8px 10px;font-size:12px;outline:none;flex:1;min-width:0}
+.work-chat-input::placeholder{color:var(--t3)}
+.work-chat-send{width:34px;display:flex;align-items:center;justify-content:center;border:none;background:var(--accent);color:var(--on-accent);cursor:pointer;flex-shrink:0;padding:6px}
+.work-chat-send svg{width:16px;height:16px}
+.work-chat-send:hover{background:var(--accent-dim);color:var(--accent)}
+.work-sub-head{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--border);font-size:13px;font-weight:650;color:var(--t1)}
+.work-ch-actions{display:flex;gap:4px;margin-left:auto}
+.work-ch-actions button{border:1px solid var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r1);padding:4px 10px;font-size:11px;cursor:pointer;line-height:1.3}
+.work-ch-actions button:hover{border-color:var(--accent);color:var(--accent)}
+.work-chapter-list{overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:4px;flex:1}
+.work-chapter-item{padding:8px 10px;border-radius:var(--r1);font-size:12px;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:8px}
+.work-chapter-item:hover{background:var(--surface2);color:var(--t1)}
+.work-chapter-item .ch-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.work-chapter-item .ch-words{font-size:10px;color:var(--t3);flex-shrink:0}
+.work-chapter-item .ch-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.work-chapter-item .ch-dot.green{background:#4caf50}
+.work-chapter-item .ch-dot.yellow{background:#ff9800}
+.work-chapter-item .ch-dot.yellow-blink{background:#ff9800;animation:ch-dot-blink 1.2s ease-in-out infinite}
+@keyframes ch-dot-blink{0%,100%{opacity:1}50%{opacity:.2}}
+.work-chapter-empty{padding:20px;text-align:center;color:var(--t3);font-size:12px}
+.work-ch-trash{border-top:1px solid var(--border);max-height:160px;overflow-y:auto;padding:6px 8px;display:flex;flex-direction:column;gap:3px;flex-shrink:0}
+.work-ch-trash .trash-header{font-size:10px;color:var(--t3);padding:4px 8px;font-weight:600}
+.work-reread{min-height:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;display:flex;flex-direction:column}
+.work-reread .work-sub-head .reread-incremental-btn{border:1px solid var(--accent);background:var(--accent-dim);color:var(--accent);border-radius:999px;padding:4px 14px;font-size:11px;font-weight:600;cursor:pointer;margin-left:auto;line-height:1.3;transition:0s}
+.work-reread .work-sub-head .reread-incremental-btn:hover{background:var(--accent);color:var(--on-accent)}
+.work-reread .work-sub-head .reread-incremental-btn.reread-updated{border-color:#4caf50;color:#4caf50;background:rgba(76,175,80,.1);width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:0}
+.work-reread .work-sub-head .reread-incremental-btn.reread-updated:hover{background:rgba(76,175,80,.2);color:#4caf50}
+.work-reread-body{overflow-y:auto;padding:8px 0;font-size:12px;color:var(--t2);line-height:1.7;flex:1}
+.reread-empty{padding:40px 20px;text-align:center;color:var(--t3);font-size:12px}
+/* --- reread timeline --- */
+.work-reread-timeline{position:relative;padding:6px 0 6px 28px;min-height:100%}
+.work-reread-timeline::before{content:'';position:absolute;left:18px;top:0;bottom:0;width:2px;background:var(--border);border-radius:1px}
+.work-reread-node{position:relative;margin:0 8px 8px 0;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r2);cursor:pointer;transition:0s;margin-left:16px}
+.work-reread-node:hover{border-color:var(--accent);background:var(--accent-a03)}
+.work-reread-node.active{border-color:var(--accent);background:var(--accent-a08)}
+.work-reread-node::before{content:'';position:absolute;left:-24px;top:50%;transform:translateY(-50%);width:12px;height:12px;border-radius:50%;background:var(--surface);border:2.5px solid var(--border);z-index:1;transition:0s}
+.work-reread-node.active::before{border-color:var(--accent);background:var(--accent)}
+.work-reread-node.done::before{background:#4caf50;border-color:#4caf50}
+.work-reread-node.done.active::before{box-shadow:0 0 0 2px var(--accent-a20)}
+.work-reread-node.partial::before{background:#ff9800;border-color:#ff9800}
+.work-reread-node-title{font-size:12px;font-weight:650;color:var(--t1)}
+.work-reread-node-meta{font-size:10px;color:var(--t3);margin-top:2px;display:flex;gap:6px;align-items:center}
+.work-reread-node-stats{display:flex;gap:5px;margin-top:4px;flex-wrap:wrap}
+.work-reread-node-stat{font-size:10px;display:flex;align-items:center;gap:2px;color:var(--t2)}
+.work-reread-node-stat .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.work-rt-status{font-size:11px;color:var(--t3);padding:0 16px 12px}
+@media(max-width:900px){.work-view.active{grid-template-columns:1fr;overflow-y:auto}}
+
+.lore-view{display:none;flex:1;min-height:0;padding:22px 28px;overflow:hidden;flex-direction:column}
+.lore-view.active{display:flex}
+.lore-head{display:flex;align-items:center;gap:12px;padding-bottom:16px;border-bottom:1px solid var(--border);margin-bottom:16px}
+.lore-back-btn{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r1);cursor:pointer;padding:6px;flex-shrink:0}
+.lore-back-btn svg{width:100%;height:100%}
+.lore-back-btn:hover{border-color:var(--accent);color:var(--accent)}
+.lore-title{font-size:18px;font-weight:700;color:var(--t1);flex:1}
+
+/* locker grid - the cabinet itself */
+.lore-grid{padding:18px 22px;overflow-y:auto;flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:20px;align-content:start;position:relative}
+/* locker door – each cell is a cabinet door with 3D bevel */
+.lore-locker{border-radius:5px;position:relative;min-height:190px;display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(160deg,var(--surface2),color-mix(in srgb,var(--surface2) 85%,var(--t1) 15%));border:1px solid var(--border);box-shadow:0 1px 0 rgba(255,255,255,.06)inset,0 -1px 0 rgba(0,0,0,.07)inset,1px 0 0 rgba(255,255,255,.04)inset,-1px 0 0 rgba(0,0,0,.04)inset,0 6px 14px rgba(0,0,0,.10),0 2px 4px rgba(0,0,0,.06)}
+/* recessed inner panel */
+.lore-locker-inner{position:absolute;inset:7px;border-radius:3px;background:var(--surface);border:1px solid var(--border);box-shadow:inset 0 2px 5px rgba(0,0,0,.05);display:flex;flex-direction:column;overflow:hidden}
+.lore-locker-content{flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;position:relative;z-index:1}
+/* classification bar nested inside panel top */
+.lore-locker-bar{height:3px;flex-shrink:0;border-radius:0}
+.lore-locker-bar.k-default{background:var(--accent)}
+.lore-locker-bar.k-char{background:#4bb8b6}
+.lore-locker-bar.k-place{background:#cb9a5e}
+.lore-locker-bar.k-rule{background:#8f66c9}
+.lore-locker-bar.k-object{background:#e0853e}
+.lore-locker-bar.k-concept{background:#5db85c}
+.lore-locker-bar.k-event{background:#e05c5c}
+/* id + kind row */
+.lore-locker-meta{display:flex;align-items:center;justify-content:flex-end;padding:7px 10px 0;font-family:var(--font-mono);font-size:9px;color:var(--t3);letter-spacing:.2px}
+.lore-locker-kind{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:1px 6px;border-radius:2px}
+.lore-locker-kind.k-default{background:var(--accent-a12);color:var(--accent)}
+.lore-locker-kind.k-char{background:rgba(75,184,182,.15);color:#4bb8b6}
+.lore-locker-kind.k-place{background:rgba(203,154,94,.15);color:#cb9a5e}
+.lore-locker-kind.k-rule{background:rgba(143,102,201,.15);color:#8f66c9}
+.lore-locker-kind.k-object{background:rgba(224,133,62,.15);color:#e0853e}
+.lore-locker-kind.k-concept{background:rgba(93,184,92,.15);color:#5db85c}
+.lore-locker-kind.k-event{background:rgba(224,92,92,.15);color:#e05c5c}
+/* title */
+.lore-locker-title{padding:3px 10px 1px;font-size:13px;font-weight:700;color:var(--t1);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* body */
+.lore-locker-body{padding:2px 10px 6px;font-size:11px;color:var(--t2);line-height:1.55;flex:1;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+/* empty locker – shows inner recess but no content */
+.lore-locker.empty .lore-locker-inner{display:flex;align-items:center;justify-content:center}
+.lore-locker.empty .lore-locker-inner::after{content:'+';font-size:20px;font-weight:200;color:var(--t3);opacity:.3}
+.lore-locker.empty:hover .lore-locker-inner::after{opacity:.6;color:var(--accent)}
+.lore-locker.empty{cursor:pointer}
+
 /* cover upload modal */
 .cover-upload-area{width:100%;aspect-ratio:3/4;max-height:320px;border-radius:var(--r2);background:var(--surface2);display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;border:1px dashed var(--border2);transition:0s;position:relative;margin:0 auto}
 .cover-upload-area:hover{border-color:var(--accent)}
@@ -1075,17 +1197,17 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  <span class="topbar-ch-dot"></span>
  <input id="chTitleInput" class="topbar-ch-title" placeholder="章节标题" oninput="onTitleChange()" onkeydown="if(event.key==='Enter'){$('editorArea').focus();event.preventDefault()}" style="display:none">
  </div>
- <div class="topbar-status" id="topbarStatus" style="display:none">
- <span class="editor-wc" id="wordCount" style="display:none">0</span>
- <span class="save-indicator" id="saveIndicator">已保存</span>
- <div class="ai-active-dots" id="aiActiveDots"></div>
- </div>
- <div class="topbar-actions">
-    <button class="topbar-btn topbar-complete-btn" id="topbarCompleteBtn" onclick="completeChapter()" title="创建下一章并跳转" style="display:none">&#10003; 下一章</button>
-    <span class="topbar-divider" id="topbarActionDivider" style="display:none"></span>
-    <button class="topbar-btn" id="topbarSettingsBtn" onclick="openSettings()">设置</button>
-    </div>
-    <div class="win-controls" id="winControls">
+  <div class="topbar-status" id="topbarStatus" style="display:none">
+  <span class="editor-wc" id="wordCount" style="display:none">0</span>
+  <span class="save-indicator" id="saveIndicator">已保存</span>
+  <div class="ai-active-dots" id="aiActiveDots"></div>
+  </div>
+  <div class="topbar-actions">
+     <button class="topbar-btn topbar-complete-btn" id="topbarCompleteBtn" onclick="completeChapter()" title="创建下一章并跳转" style="display:none">&#10003; 下一章</button>
+     <span class="topbar-divider" id="topbarActionDivider" style="display:none"></span>
+     <button class="topbar-btn" id="topbarSettingsBtn" onclick="openSettings()">设置</button>
+     </div>
+     <div class="win-controls" id="winControls">
       <button class="wc-min" onclick="electronAPI.minimize()" title="最小化"><svg viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5"/></svg></button>
       <button class="wc-max" id="wcMax" onclick="electronAPI.maximize()" title="最大化"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9"/></svg></button>
       <button class="wc-close" onclick="electronAPI.close()" title="关闭"><svg viewBox="0 0 10 10"><line x1="0" y1="0" x2="10" y2="10"/><line x1="10" y1="0" x2="0" y2="10"/></svg></button>
@@ -1096,40 +1218,54 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  <div class="bookshelf-header">
         <h2></h2>
         <div style="display:flex;align-items:center;gap:8px">
-          <button class="topbar-btn shelf-settings-btn" onclick="openSettings()">设置</button>
-          <button class="bookshelf-new-btn outline" onclick="createSeries()">+ 系列</button>
+          <button class="bookshelf-new-btn" onclick="createBook()">新建</button>
+          <button class="bookshelf-new-btn outline" onclick="openImportNew()">导入</button>
         </div>
  </div>
  <div class="bookshelf-grid" id="bookshelfGrid"></div>
  </div>
 
-<div class="series-view" id="seriesView">
- <div class="series-view-header">
-        <h2 id="seriesViewTitle">系列名称</h2>
-        <div style="display:flex;align-items:center;gap:8px">
-          <button class="topbar-btn shelf-settings-btn" onclick="openSettings()">设置</button>
-        </div>
- </div>
-        <div class="series-add-hint" id="seriesAddHint">从书架拖放书本到此处可加入系列。拖拽书本右侧 <strong>⋮⋮</strong> 可调整顺序。</div>
- <div class="series-body">
-  <div class="series-list" id="seriesList"></div>
-  <div class="series-chat" id="seriesChatPanel">
-   <div class="series-chat-header"><span>Luca</span><button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="clearSeriesAIChat()">清空</button></div>
-   <div class="series-chat-messages" id="seriesAIMessages"></div>
-   <div class="series-chat-input-row"><input class="ai-input" id="seriesAIInput" placeholder="问 Luca 关于系列规划、世界观..." autocomplete="off" data-form-type="other" style="flex:1" onkeydown="if(event.key==='Enter')sendSeriesAI()"><button class="ai-send" onclick="sendSeriesAI()">发送</button></div>
+  <div class="work-view" id="workView">
+   <section class="work-panel">
+     <div class="work-hero">
+      <button class="work-cover-button" onclick="openWorkCoverUpload()" title="设置作品封面">
+       <img id="workCoverImg" src="" alt="作品封面">
+      </button>
+      <div>
+       <div class="work-title-row">
+        <input class="work-title-input" id="workTitleInput" value="" onchange="saveWorkTitle()">
+        <button class="work-del-btn" onclick="deleteCurrentWork()" title="删除作品">删除</button>
+       </div>
+       <div class="work-meta-line" id="workMetaLine"></div>
+         <div class="work-actions">
+           <button class="work-import-volume-btn" onclick="openWorkImportVolume()" title="导入文件作为新卷"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><polyline points="9,14 12,17 15,14"/></svg></button>
+           <button class="work-export-btn" onclick="openWorkExportModal()" title="导出/上传"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+           <button class="work-reread-btn" onclick="startWorkReread()">元数据</button>
+          </div>
+         <button class="work-lore-btn" onclick="openWorkLore()">档案馆</button>
+       </div>
+      </div>
+       <div class="work-progress" id="workProgress"><div class="work-progress-fill" id="workProgressFill"></div></div>
+       <div class="work-books" id="workBooks"></div>
+      <button class="work-book-add" onclick="addBookToWork()">+ 新建卷</button>
+    </section>
+    <section class="work-chat" id="workChat">
+     <div class="work-chat-head"><span>Luca</span><div class="luca-brand-actions"><button class="luca-act-btn" onclick="toggleWorkChatHistory()" title="历史对话"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 4h10M3 8h10M3 12h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button><button class="luca-act-btn" onclick="newChatSession()" title="新建对话"><svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 5v6M5 8h6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></button></div></div>
+     <div class="work-chat-msgs" id="workChatMessages"></div>
+     <div class="work-chat-history-overlay" id="workChatHistory" style="display:none"><div class="luca-history-list" id="workChatHistoryList"></div></div>
+     <div class="work-chat-input-row">
+      <input class="work-chat-input" id="workChatInput" placeholder="问 Luca" autocomplete="off" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendWorkChat()}">
+      <button class="work-chat-send" onclick="sendWorkChat()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+     </div>
+    </section>
   </div>
-  <div class="series-summary" id="seriesRT" style="display:none">
-   <div class="series-rt-header"><span>系列摘要</span><button class="ai-send" style="padding:4px 10px;font-size:11px;background:var(--surface3);color:var(--t3);border-color:var(--border)" onclick="toggleSeriesSummary()">&#10005;</button></div>
-   <pre id="seriesRTStream" style="flex:1;margin:0;padding:8px 12px;font-size:11px;line-height:1.7;font-family:var(--font-mono);color:var(--t2);white-space:pre-wrap;word-break:break-word;overflow-y:auto">等待开始...</pre>
-   <div style="display:flex;gap:8px;padding:8px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
-    <div style="flex:1;display:flex;flex-direction:column;gap:3px">
-     <div style="height:4px;background:var(--surface3);border-radius:var(--r1);overflow:hidden"><div id="seriesRTProgress" style="height:100%;background:var(--accent);width:0%;transition:0s"></div></div>
-     <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3)"><span id="seriesRTPhase">准备中...</span><span id="seriesRTChapters">0/0</span></div>
-    </div>
-    <button class="ai-send" onclick="startSeriesRT()" id="seriesRTStartBtn">开始系列摘要</button>
-   </div>
+
+ <div class="lore-view" id="loreView">
+  <div class="lore-head">
+   <button class="lore-back-btn" onclick="closeWorkLore()" title="返回作品"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></button>
+    <span class="lore-title">档案馆</span>
   </div>
- </div>
+  <div class="lore-grid" id="loreGrid"></div>
  </div>
 
  <div class="sidebar-trigger" id="sidebarTrigger" title="展开章节栏">
@@ -1146,10 +1282,9 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
  </div>
 
  <div class="left-sidebar collapsed" id="leftSidebar">
- <div class="sidebar-search" id="sidebar-search">
-          <input id="chSearch" placeholder="搜索..." oninput="filterChapters()">
-          <button class="sidebar-search-action" onclick="openChapterManager()" title="目录管理">目录</button>
- </div>
+  <div class="sidebar-search" id="sidebar-search">
+           <input id="chSearch" placeholder="搜索..." oninput="filterChapters()">
+  </div>
         <div class="sidebar-footer">
           <button onclick="addChapter()">+ 新建章节</button>
           <button class="trash-toggle" onclick="toggleTrash()" id="trashToggleBtn">回收站</button>
@@ -1186,18 +1321,9 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 
   <div class="bottom-panel" id="bottomPanel">
   <div class="bottom-handle" id="bottomHandle">
-	    <div class="bottom-tabs-wrap flyout-mode" id="bottomTabsWrap">
-          <div class="bottom-tabs-flyout" id="bottomTabsFlyout">
-            <button class="bottom-tab-fly" data-btab="timeline" onclick="switchBottomTab('timeline')" title="时间线"><svg viewBox="0 0 16 16" class="bicon"><circle cx="8" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8 4v2.5l1.5 1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 12.5h5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab-fly" data-btab="prediction" onclick="switchBottomTab('prediction')" title="预言"><svg viewBox="0 0 16 16" class="bicon"><circle cx="5" cy="6.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 11.5c1 1.5 3 1.5 4.5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M9 5.5c.7.8.7 2.2 0 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M11 4c1.2 1.5 1.2 4 0 5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab-fly" data-btab="outline" onclick="switchBottomTab('outline')" title="大纲"><svg viewBox="0 0 16 16" class="bicon"><path d="M4 2h8v10l-4-2-4 2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 5.5h4M6 8h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab-fly" data-btab="inspiration" onclick="switchBottomTab('inspiration')" title="灵感"><svg viewBox="0 0 16 16" class="bicon"><path d="M11.5 2L5 10.5l.5 2 2-.5L13 3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 4.5L6.5 9" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linecap="round"/></svg></button>
-          </div>
-          <button class="bottom-pill" id="bottomPill" data-btab="summary" onclick="pillClick()" title="摘要"><svg viewBox="0 0 16 16" class="bicon"><circle cx="8" cy="8" r="1.3" fill="currentColor" opacity="0.55"/><path d="M9 7C10.5 4.5 7 2.5 4.5 4 2 5.5 2.5 9.5 5 11" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M7 9C5.5 11.5 9 13.5 11.5 12 14 10.5 13.5 6.5 11 5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+	    <div class="bottom-tabs-wrap" id="bottomTabsWrap">
           <div class="bottom-tabs-inline">
-            <button class="bottom-tab" data-btab="timeline" onclick="switchBottomTab('timeline')" title="时间线"><svg viewBox="0 0 16 16" class="bicon"><circle cx="8" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M8 4v2.5l1.5 1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M5.5 12.5h5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab" data-btab="prediction" onclick="switchBottomTab('prediction')" title="预言"><svg viewBox="0 0 16 16" class="bicon"><circle cx="5" cy="6.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M3.5 11.5c1 1.5 3 1.5 4.5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M9 5.5c.7.8.7 2.2 0 3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M11 4c1.2 1.5 1.2 4 0 5.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-            <button class="bottom-tab" data-btab="outline" onclick="switchBottomTab('outline')" title="大纲"><svg viewBox="0 0 16 16" class="bicon"><path d="M4 2h8v10l-4-2-4 2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 5.5h4M6 8h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+            <button class="bottom-tab active" data-btab="outline" onclick="switchBottomTab('outline')" title="大纲"><svg viewBox="0 0 16 16" class="bicon"><path d="M4 2h8v10l-4-2-4 2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 5.5h4M6 8h3" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
             <button class="bottom-tab" data-btab="inspiration" onclick="switchBottomTab('inspiration')" title="灵感"><svg viewBox="0 0 16 16" class="bicon"><path d="M11.5 2L5 10.5l.5 2 2-.5L13 3z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M10 4.5L6.5 9" fill="none" stroke="currentColor" stroke-width="0.8" stroke-linecap="round"/></svg></button>
           </div>
 	    </div>
@@ -1228,25 +1354,8 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
   </div>
  <div class="bottom-body">
 
-        <!-- 时间线 -->
- <div class="bottom-pane timeline-pane" id="timelinePane">
- <div class="timeline-toolbar">
-  <div class="timeline-title"><span class="kb-muted" id="timelineMeta"></span></div>
- </div>
- <div class="timeline-river" id="timelineRiver" onwheel="timelineWheel(event)">
-  <div class="tl-empty">通读或本章写完后，时间线会在这里汇成一条长河。</div>
- </div>
- </div>
-
-        <!-- 预言 -->
- <div class="bottom-pane prediction-pane" id="predictionPane">
- <div class="kb-view" id="predictionResultBody">
-  <div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>
- </div>
- </div>
-
  <!-- -->
- <div class="bottom-pane outline-pane" id="outlinePane">
+ <div class="bottom-pane outline-pane active" id="outlinePane">
  <div class="panel-layout">
  <div class="panel-left">
  <div class="panel-left-head"><span>吃书雷达</span><span class="rt-head-pill">只提醒</span></div>
@@ -1268,68 +1377,6 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
    <textarea class="insp-input" id="inspirationInput" rows="1" placeholder="写下转瞬即逝的灵感。" oninput="autoGrowInspirationInput()" onkeydown="inspirationKeydown(event)"></textarea>
    <button class="topbar-btn accent" onclick="addInspiration()">写入</button>
   </div>
- </div>
- <div class="bottom-pane active summary-pane" id="summaryPane">
- <div class="panel-layout">
- <div class="panel-left">
-               <div class="panel-left-head"><span>通读运行</span><span class="rt-head-pill" id="rtModePill">批量通读</span></div>
- <div class="panel-left-body" style="padding:0">
-                <div class="rt-console" id="rtConsole">
-                 <div class="rt-dialogue">
-                  <div class="rt-avatar">L</div>
-                  <div class="rt-message">
-                   <div class="rt-message-name">Luca</div>
-                   <div class="rt-turn-body" id="rtStream">等待开始...</div>
-                   <div class="rt-thinking" id="rtThinking"><span></span><span></span><span></span></div>
-                  </div>
-                 </div>
-                 <div class="rt-action-line" id="rtSystemLine">等待通读任务</div>
-                 <div class="rt-log-list" id="rtLogs"></div>
-                </div>
- </div>
- </div>
- <div class="panel-right">
-              <div class="panel-right-head"><span>本书数据库</span><span class="rt-head-pill">聊天检索用</span></div>
- <div class="panel-right-body">
-                <div class="rt-db">
-                 <div class="rt-stats" id="rtStats"></div>
-                 <div class="rt-db-section">
-                  <div class="rt-db-section-head"><span>当前状态</span><span id="rtCurrentBadge"></span></div>
-                  <div class="rt-db-section-body" id="rtCurrentInfo">等待通读任务</div>
-                 </div>
-                 <div class="rt-db-section archives">
-                  <div class="rt-db-section-head">
-                   <span>历史版本</span>
-                   <span class="rt-archive-toggle" id="rtArchiveToggle" onclick="toggleKbArchives()" style="cursor:pointer;font-size:10px;color:var(--accent)" data-count="0">展开 0</span>
-                  </div>
-                  <div class="rt-db-section-body" id="rtArchiveList" style="display:none"></div>
-                 </div>
-                 <div class="rt-db-section notes">
-                  <div class="rt-db-section-head"><span>笔记预览</span><span id="rtLatestBadge"></span></div>
-                  <div class="rt-db-section-body" style="padding:0">
-                   <textarea class="rt-source" id="rtSource" readonly placeholder="摘要完成后此处显示笔记..." style="width:100%;resize:none;border:none"></textarea>
-                  </div>
-                 </div>
-                </div>
- </div>
- </div>
- </div>
-  <div class="rt-generate-bar" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
-             <span style="font-size:11px;color:var(--t2);white-space:nowrap">通读入库后，本章大纲会自动从数据库刷新；预言在"本章写完"后更新。</span>
-  </div>
-  <div class="rt-mode-bar" style="display:flex;gap:4px;padding:4px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0;flex-wrap:wrap">
-   <button type="button" class="rt-mode-btn active" data-mode="batch" id="rtModeBtnBatch" onclick="setReadMode('batch')">批量通读</button>
-   <button type="button" class="rt-mode-btn" data-mode="chapter" id="rtModeBtnChapter" onclick="setReadMode('chapter')">逐章精读</button>
-   <span class="rt-mode-hint" id="rtModeHint">速度优先，一次塞多章给模型读</span>
-  </div>
-  <div class="rt-controls" style="display:flex;gap:8px;padding:8px 14px;border-top:1px solid var(--border);align-items:center;flex-shrink:0">
- <div class="rt-progress-wrap" style="flex:1;display:flex;flex-direction:column;gap:4px">
- <div class="rt-bar"><div class="rt-buffer" id="rtBuffer"></div><div class="rt-fill" id="rtProgress"></div></div>
- <div class="rt-info" style="display:flex;justify-content:space-between;font-size:10px;color:var(--t3)"><span id="rtPhase">准备中...</span><span id="rtChapters">0/0 章</span></div>
- </div>
-            <button class="ai-send" onclick="startRT()" id="rtStartBtn">开始通读</button>
-            <button class="ai-send" onclick="resetRT()" id="rtClearBtn" style="display:none" title="归档当前数据库后重来">归档重来</button>
- </div>
  </div>
 
  </div>
@@ -1472,9 +1519,9 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 
 <div class="modal-bg" id="importModal">
 <div class="modal">
-<h2>导入书本</h2>
+<h2 id="importModalTitle">导入作品</h2>
 <p style="font-size:12px;color:var(--t2);margin-bottom:10px">支持 TXT / MD / DOCX / PDF / EPUB / COO</p>
- <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.coo"></div>
+  <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.coo"></div>
  <div class="imp-progress-wrap" id="impProgressWrap" style="display:none">
  <div class="imp-progress-bar"><div class="imp-progress-fill" id="impProgressFill"></div></div>
     <div class="imp-progress-text" id="impProgressText">准备中...</div>
@@ -1485,9 +1532,9 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 
 <div class="modal-bg" id="createBookModal">
 <div class="modal" style="text-align:center">
-<h2 style="margin-bottom:20px">新建书本</h2>
+<h2 style="margin-bottom:20px">新建作品</h2>
 <div style="display:flex;flex-direction:column;gap:12px;align-items:center">
- <button class="bookshelf-new-btn" style="width:100%;padding:14px 20px;font-size:15px;border-radius:var(--r3)" onclick="doCreateBookFromModal()">+ 新建空白书本</button>
+ <button class="bookshelf-new-btn" style="width:100%;padding:14px 20px;font-size:15px;border-radius:var(--r3)" onclick="doCreateBookFromModal()">+ 新建空白作品</button>
  <button class="prompt-cancel" style="width:auto;padding:6px 16px;font-size:12px;background:transparent;border:none;color:var(--t3);cursor:pointer;text-decoration:underline" onclick="closeModal('createBookModal');openImportNew()">导入现有文稿</button>
 </div>
 </div></div>
@@ -1537,16 +1584,83 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 </div></div>
 
 <div class="modal-bg" id="cooExportModal">
-<div class="modal">
-<h2>导出 COO</h2>
-<p style="font-size:12px;color:var(--t2);margin-bottom:12px">带有完整章节、封面、摘要、知识库和向量数据，建议上传前运行一遍通读全书以确保数据库最新。</p>
+<div class="modal" style="max-width:400px">
+<h2>导出 / 上传作品</h2>
+<p style="font-size:12px;color:var(--t2);margin-bottom:12px">带有完整章节、封面、摘要、知识库和向量数据。</p>
+<div style="margin-bottom:16px">
+  <button class="prompt-ok" style="width:100%;padding:14px 10px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px" onclick="doExportCoo()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>保存到本地</button>
+</div>
+<div style="border-top:1px solid var(--border);padding-top:14px">
+<p style="font-size:12px;color:var(--t2);margin-bottom:10px;font-weight:600">上传到 Coobox 服务器</p>
+<div class="mg">
+<label>网站地址</label>
+  <input id="cooServerUrl" type="text" placeholder="例如: http://192.168.1.5:8000">
+</div>
+<div class="mg">
+<label>邮箱</label>
+  <input id="cooEmail" type="email" placeholder="你的 Coobox 账号邮箱">
+</div>
+<div class="mg">
+<label>密码</label>
+  <input id="cooPassword" type="password" placeholder="你的 Coobox 账号密码">
+</div>
 <div class="mg">
 <label>笔名</label>
   <input id="cooPenName" type="text" placeholder="写入 COO 文件的作者笔名">
 </div>
-<div class="ma">
-  <button class="prompt-ok" onclick="doExportCoo()">导出</button>
-  <button class="prompt-cancel" onclick="closeModal('cooExportModal')">取消</button>
+<div class="ma" style="margin-top:6px">
+  <button class="prompt-ok" onclick="doPushCoo()" style="background:var(--accent-a15);color:var(--accent);width:100%">推送到 Coobox</button>
+</div>
+</div>
+</div></div>
+
+<div class="modal-bg" id="metaModal">
+<div class="modal meta-modal">
+ <div class="meta-head">
+  <h2>元数据</h2>
+  <button class="prompt-cancel" onclick="closeModal('metaModal')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:16px;color:var(--t3)">✕</button>
+ </div>
+ <div class="meta-body">
+  <div class="meta-console">
+   <div class="meta-section-title">通读日志</div>
+   <div class="rt-console" id="rtConsole" style="flex:1;overflow-y:auto">
+    <div class="rt-dialogue">
+     <div class="rt-avatar">L</div>
+     <div class="rt-message">
+      <div class="rt-message-name">Luca</div>
+      <div class="rt-turn-body" id="rtStream">开始通读以处理全部书本</div>
+      <div id="rtSystemLine"></div>
+      <div class="rt-thinking" id="rtThinking"><span></span><span></span><span></span></div>
+     </div>
+    </div>
+    <div class="rt-log-list" id="rtLogs"></div>
+   </div>
+   <div class="meta-section-title" style="margin-top:8px">笔记预览</div>
+   <div class="rt-db-section notes" style="flex:1;min-height:80px">
+    <div class="rt-db-section-body" style="flex:1;padding:0"><textarea class="rt-source" id="rtSource" readonly placeholder="通读完成后此处显示全书笔记..." style="width:100%;height:100%;resize:none;border:none"></textarea></div>
+   </div>
+  </div>
+   <div class="meta-db">
+    <div class="meta-section-title">章节通读进度</div>
+    <div class="meta-chapter-grid" id="metaChapterGrid" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px 0"></div>
+    <div style="display:flex;gap:6px;flex-shrink:0;padding:2px 0">
+     <button class="rt-mode-btn" id="rtWorkUpdateBtn" onclick="startWorkRT()" style="flex:1">更新</button>
+    </div>
+   </div>
+ </div>
+</div></div>
+
+<div class="modal-bg" id="loreEditModal">
+<div class="modal" style="max-width:680px">
+<h2>编辑档案</h2>
+<input id="loreEditId" type="hidden">
+<div class="mg"><label>标题</label><input id="loreEditTitle" type="text"></div>
+<div class="mg"><label>分类</label><input id="loreEditKind" type="text" placeholder="人物、地点、概念……"></div>
+<div class="mg"><label>内容</label><textarea id="loreEditContent" rows="14" placeholder="Markdown 档案内容"></textarea></div>
+<div class="ma" style="gap:8px">
+   <button class="prompt-cancel" onclick="deleteLoreEdit()" style="color:var(--danger);margin-right:auto">删除档案</button>
+ <button class="prompt-ok" onclick="saveLoreEdit()">保存</button>
+ <button class="prompt-cancel" onclick="closeModal('loreEditModal')">取消</button>
 </div>
 </div></div>
 
@@ -1637,7 +1751,8 @@ if(window.electronAPI&&window.electronAPI.onMaximizeChange){
  var _tb=document.querySelector('.topbar');
  if(_tb&&!_isMac)_tb.addEventListener('dblclick',function(e){if(e.target.closest('.win-controls')||e.target.closest('button')||e.target.closest('input'))return;window.electronAPI.maximize()});
 }
-var bookId=null,chapterId=null,settings={};
+var workId=null,bookId=null,chapterId=null,settings={};
+var _rereadingBooks=null;
 var inTrash=false;
 var charCount=0;
 var _autoCommentTimer=null;
@@ -1650,7 +1765,7 @@ var aiMessages=[];
 var currentChatSessionId='';
 var chatSessionList=[];
 var currentChapter=null;
-var currentBottomTab='summary';
+var currentBottomTab='outline';
 function _appHeight(){var tb=$('topbar');var tbh=tb?tb.offsetHeight:38;return window.innerHeight-tbh}
 function _syncBpMaxHeight(){var a=$('app');if(a)a.style.setProperty('--bp-max-h',_appHeight()+'px')}
 function _onWindowResize(){scheduleChapterSidebarWidthSync();var panel=$('bottomPanel');if(!panel||panel.classList.contains('collapsed'))return;var maxH=_appHeight();var curH=panel.offsetHeight;if(curH>maxH){panel.style.height=maxH+'px';bottomPanelHeight=maxH;savedBottomPanelHeight=maxH;localStorage.setItem('lw_bottom_panel_h',maxH);_syncSidebarBottom(maxH)}}
@@ -1663,14 +1778,14 @@ var pendingSave=null;
 var currentBookTitle='';
 var apiLoadingCount=0;
 var cachedBooks=null;
-var seriesId=null;
-var seriesTitle='';
-var seriesBooks=[];
-var seriesBookOrder=[];
-var seriesAIMessages=[];
-var seriesAIChatTimer=null;
+var cachedWorks=null;
+var currentWork=null;
+var currentWorkDetail=null;
+
+var _readingDragIndex=-1;
 var dragSrcIndex=null;
 var coverUploadBookId=null;
+var coverUploadKind='book';
 var rtLastDoneChapters=0;
 var rtLastStatus='idle';
 var _rtCurrentArchived=false;
@@ -1818,9 +1933,10 @@ function _updateTopbarStatusVisibility(){
  var hasChapter=!!(bookId&&chapterId);
  var aiEl=$('aiActiveDots');
  var hasAI=!!(aiEl&&aiEl.classList.contains('show'));
- st.classList.toggle('has-chapter',hasChapter);
- st.style.display=(hasChapter||hasAI)?'flex':'none';
- syncTopbarChapterAlign();
+  st.classList.toggle('has-chapter',hasChapter);
+  st.style.display=(hasChapter||hasAI)?'flex':'none';
+
+  syncTopbarChapterAlign();
 }
 
 function _updateTopbarPanelButton(){
@@ -1838,24 +1954,21 @@ function syncTopbarChapterAlign(){
  if(!tb)return;
  var tbRect=tb.getBoundingClientRect();
  tb.classList.toggle('topbar-book-mode',!!bookId);
- tb.classList.toggle('topbar-series-mode',!bookId&&!!seriesId);
- tb.classList.toggle('topbar-shelf-mode',!bookId&&!seriesId);
+ tb.classList.toggle('topbar-shelf-mode',!bookId);
  tb.classList.toggle('topbar-compact',!!bookId&&tbRect.width<760);
  tb.classList.toggle('topbar-narrow',!!bookId&&tbRect.width<620);
  tbRect=tb.getBoundingClientRect();
  if(!bookId){
-  var nonBookW=seriesId?Math.min(Math.max(260,Math.round(tbRect.width-24)),520):Math.min(Math.max(180,Math.round(tbRect.width-24)),320);
+  var nonBookW=Math.min(Math.max(180,Math.round(tbRect.width-24)),320);
   tb.style.setProperty('--topbar-chapter-left','180px');
   tb.style.setProperty('--topbar-chapter-right','12px');
   tb.style.setProperty('--topbar-book-width',nonBookW+'px');
   return;
  }
- var left=18;
- var actions=document.querySelector('.topbar-actions');
- var st=$('topbarStatus');
- var rightStart=tbRect.right;
- if(st&&getComputedStyle(st).display!=='none')rightStart=st.getBoundingClientRect().left;
- else if(actions)rightStart=actions.getBoundingClientRect().left;
+  var left=18;
+  var st=$('topbarStatus');
+  var rightStart=tbRect.right;
+  if(st&&getComputedStyle(st).display!=='none')rightStart=st.getBoundingClientRect().left;
  var maxLeft=Math.max(180,Math.round(rightStart-tbRect.left-120));
  left=Math.max(180,Math.min(left,maxLeft));
  var right=Math.max(12,Math.round(tbRect.right-rightStart+12));
@@ -1884,31 +1997,19 @@ function _bindBookMenu(container,b,mode){
  }
  bind(function(){openCoverUpload(b.id)});
  bind(function(){renameBook(b.id,b.title||'')});
- if(mode==='series-card'){
-  bind(function(){delBook(b.id)});
-  return;
- }
  bind(function(){doExportBook(b.id,'md')});
  bind(function(){doExportBook(b.id,'txt')});
  bind(function(){openEpubExport(b.id,b.title||'')});
  bind(function(){doExportBook(b.id,'zip')});
  bind(function(){openCooExport(b.id,b.title||'')});
- if(mode==='series-item')bind(function(){removeFromSeries(b.id)});
- else bind(function(){delBook(b.id)});
+ bind(function(){delBook(b.id)});
 }
 
 
 
-function _activeLucaMessages(){
- if(!bookId&&seriesId)return seriesAIMessages;
- if(bookId)return aiMessages;
- return null;
-}
+function _activeLucaMessages(){return bookId?aiMessages:null}
 
-function _renderAndSaveActiveLucaMessages(){
- if(!bookId&&seriesId){renderSeriesAIMessages();saveSeriesAIMessages();return}
- if(bookId){renderAIMessages();saveAIMessages();}
-}
+function _renderAndSaveActiveLucaMessages(){if(bookId){renderAIMessages();saveAIMessages();}}
 
 
 
@@ -1961,7 +2062,7 @@ function checkAuth(){api('GET','/api/auth/status',undefined,function(d){if(!d.ha
 
 function saveAppState(){
  try{
- var state={bookId:bookId,chapterId:chapterId};
+ var state={workId:workId,bookId:bookId,chapterId:chapterId,selectedVolumeId:_selectedVolumeId};
  localStorage.setItem('lucawriter_state',JSON.stringify(state));
  }catch(e){}
 }
@@ -1992,7 +2093,7 @@ function setWritingViewActive(on){
  }
 }
 
-function init(){initAllCS();loadSettings();loadThemedIcon();_startAIActivity();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();window.addEventListener('resize',_onWindowResize);document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.bookId){api('GET','/api/books',undefined,function(d){var books=d.books||[];cachedBooks=books;var found=books.some(function(b){return b.id===saved.bookId});if(found){var b=books.find(function(x){return x.id===saved.bookId});if(b)currentBookTitle=b.title;openBook(saved.bookId)}else{clearAppState();showBookShelf()}})}else{showBookShelf()}}
+function init(){initAllCS();loadSettings();loadThemedIcon();_startAIActivity();setupImport();setupBottomPanelDrag();setupResizeHandles();setupModals();closeBottomPanel();_syncBpMaxHeight();window.addEventListener('resize',_onWindowResize);document.addEventListener('click',function(){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})});$('editorArea').addEventListener('scroll',function(){$('highlightContent').style.marginTop=(-this.scrollTop)+'px'});var si=$('searchInput');if(si){si.addEventListener('input',function(){doSearch()});si.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();_searchNavMode=true;searchNav(e.shiftKey?-1:1)}else if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();_searchNavMode=true;searchNav(1)}else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();_searchNavMode=true;searchNav(-1)}})}var ri=$('searchReplaceInput');if(ri){ri.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();closeSearch()}else if(e.key==='Enter'){e.preventDefault();searchReplaceOne()}})}var saved=loadAppState();if(saved&&saved.workId){openWork(saved.workId,function(){if(saved.bookId){var b=(currentWorkDetail.books||[]).find(function(x){return x.id===saved.bookId});if(b){currentBookTitle=b.title;openBook(saved.bookId);if(saved.chapterId)setTimeout(function(){selectChapter(saved.chapterId)},250)}}})}else{showBookShelf()}}
 
 function setupModals(){
  document.querySelectorAll('.modal-bg,.confirm-bg,.prompt-bg').forEach(function(bg){
@@ -2019,12 +2120,11 @@ function setupModals(){
 
 function showBookShelf(){
 	 setWritingViewActive(false);
-	 bookId=null;chapterId=null;currentChapter=null;currentBookTitle='';
- seriesId=null;seriesTitle='';seriesBooks=[];seriesBookOrder=[];
+	 workId=null;bookId=null;chapterId=null;currentChapter=null;currentBookTitle='';currentWork=null;currentWorkDetail=null;
+
  var tsb=$('topbarSummaryBtn');if(tsb)tsb.style.display='none';
- $('editorView').classList.remove('active');$('editorView').style.display='none';$('bottomPanel').style.display='none';closeLucaPopup();closeLucaFloat();
+ $('workView').classList.remove('active');$('editorView').classList.remove('active');$('editorView').style.display='none';$('bottomPanel').style.display='none';closeLucaPopup();closeLucaFloat();
  $('bookshelfView').classList.add('active');
- $('seriesView').classList.remove('active');
  setEditorLoading(false);
  updateBreadcrumb();
  renderBookShelf();
@@ -2032,101 +2132,34 @@ function showBookShelf(){
 
 function renderBookShelf(){
  var grid=$('bookshelfGrid');grid.innerHTML='';
- if(cachedBooks){
- _renderBookShelfCards(cachedBooks);
+ if(cachedWorks){
+ _renderBookShelfCards(cachedWorks);
  }else{
- api('GET','/api/books',undefined,function(d){
- cachedBooks=d.books||[];
- _renderBookShelfCards(cachedBooks);
+ api('GET','/api/works',undefined,function(d){
+ cachedWorks=d.works||[];
+ _renderBookShelfCards(cachedWorks);
  });
  }
 }
 
-function _renderBookShelfCards(books){
+function _renderBookShelfCards(works){
  var grid=$('bookshelfGrid');grid.innerHTML='';
- var seriesBooksList=[];
- var regularBooks=[];
- var booksInSeries={};
- books.forEach(function(b){
-  if(b.type==='series'){
-   seriesBooksList.push(b);
-   var sbs=b.series_books||[];
-   sbs.forEach(function(sbid){booksInSeries[sbid]=true});
-  }else{
-   regularBooks.push(b);
-  }
- });
- // 过滤掉已在系列中的书本
- var independentBooks=regularBooks.filter(function(b){return !booksInSeries[b.id]});
- var allToRender=seriesBooksList.concat(independentBooks);
- if(!allToRender.length){
-  grid.innerHTML='<div class="book-empty" style="grid-column:1/-1"><h3>还没有书本</h3><p>创建一本空白书或导入现有文稿</p><div class="book-empty-actions"><button class="book-empty-btn" onclick="createBook()">新建书本</button><button class="book-empty-btn" onclick="openCreateBookModal()">导入文稿</button></div></div>';
+ if(!works.length){
+  grid.innerHTML='<div class="bookshelf-watermark"><span>LucaWriter</span></div>';
   return;
  }
- allToRender.forEach(function(b){
+ works.forEach(function(w){
  var card=document.createElement('div');
- var isSeries=b.type==='series';
- card.className='book-card'+(isSeries?' book-card-series':'');
- var coverHtml='';
- if(isSeries){
-  var sbs=b.series_books||[];
-  var behindIds=[];
-  for(var bi=0;bi<sbs.length&&behindIds.length<3;bi++){
-   if(sbs[bi])behindIds.push(sbs[bi]);
-  }
-  var behindHtml='';
-  var bc=['stack-b1','stack-b2','stack-b3'];
-  for(var bi=0;bi<behindIds.length;bi++){
-   behindHtml+='<div class="stack-behind '+bc[bi]+'"><img src="/api/book/'+esc(behindIds[bi])+'/cover?t='+Date.now()+'" alt="cover"></div>';
-  }
-  var extraCls=behindIds.length<=2?' stack-2':'';
-  var sc='<span class="stack-count">'+sbs.length+' 本</span>';
-  coverHtml='<div class="book-cover book-cover-stack'+extraCls+'">'+behindHtml+'<div class="stack-front"><img src="/api/book/'+esc(b.id)+'/cover?t='+Date.now()+'" alt="cover"></div>'+sc+'</div>';
- }else{
-  coverHtml='<div class="book-cover"><img src="/api/book/'+esc(b.id)+'/cover?t='+Date.now()+'" alt="cover" style="width:100%;height:auto;display:block;border-radius:var(--r2)"></div>';
- }
- var metaHtml='';
- if(isSeries){
-  metaHtml='<div class="book-card-meta"><span>系列</span><span>&#8226;</span><span>'+_formatDate(b.updated)+'</span></div>';
- }else{
-  metaHtml='<div class="book-card-meta"><span>'+(b.chapter_count||0)+' 章</span><span>&#8226;</span><span>'+_formatDate(b.updated)+'</span></div>';
- }
- card.innerHTML=coverHtml+'<div class="book-card-title">'+esc(b.title||'未命名')+'</div>'+metaHtml+'<button class="book-card-menu" onclick="event.stopPropagation();toggleBookMenu(\''+esc(b.id)+'\',this)">&#8943;</button><div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'"><button onclick="event.stopPropagation();openCoverUpload(\''+esc(b.id)+'\')">'+(b.has_cover?'更换封面':'上传封面')+'</button><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button>'+(isSeries?'':'<button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button onclick="event.stopPropagation();openCooExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 COO</button>')+'<button class="danger-item" onclick="event.stopPropagation();delBook(\''+esc(b.id)+'\')">删除'+(isSeries?'系列':'书本')+'</button></div>';
- _bindBookMenu(card,b,isSeries?'series-card':'book-card');
- if(isSeries){
-  card.onclick=function(e){if(e.target.closest('.book-card-menu,.book-menu-dropdown'))return;openSeries(b.id,b.title)};
-  card.addEventListener('dragover',function(e){
-   e.preventDefault();
-   var bid=e.dataTransfer.getData('text/plain');
-   if(bid&&bid.startsWith('series_')){e.dataTransfer.dropEffect='none';return}
-   e.dataTransfer.dropEffect='move';
-   card.style.borderColor='var(--accent)';
-  });
-  card.addEventListener('dragleave',function(e){card.style.borderColor=''});
-  card.addEventListener('drop',function(e){
-   e.preventDefault();card.style.borderColor='';
-   var bid=e.dataTransfer.getData('text/plain');
-   if(!bid)return;
-   if(bid.startsWith('series_')){toast('不能把系列放进系列','warn');return}
-   api('POST','/api/series/add-book',{series_id:b.id,book_id:bid},function(){
-    cachedBooks=null;renderBookShelf();toast('已添加到系列','success');
-   });
-  });
- }else{
-  card.draggable=true;
-  card.addEventListener('dragstart',function(e){
-   e.dataTransfer.effectAllowed='move';
-   e.dataTransfer.setData('text/plain',b.id);
-   card.style.opacity='0.4';
-  });
-  card.addEventListener('dragend',function(e){card.style.opacity='1'});
-  card.onclick=function(e){if(e.target.closest('.book-card-menu,.book-menu-dropdown'))return;currentBookTitle=b.title;openBook(b.id)};
- }
+ card.className='book-card';
+ var coverHtml='<div class="book-cover"><img src="/api/work/'+esc(w.id)+'/cover?t='+Date.now()+'" alt="cover" style="width:100%;height:auto;display:block;border-radius:var(--r2)"></div>';
+ var metaHtml='<div class="book-card-meta"><span>'+(w.book_count||0)+' 本</span><span>&#8226;</span><span>'+(w.chapter_count||0)+' 章</span><span>&#8226;</span><span>'+_formatDate(w.updated)+'</span></div>';
+ card.innerHTML=coverHtml+'<div class="book-card-title">'+esc(w.title||'未命名作品')+'</div>'+metaHtml;
+ card.onclick=function(){openWork(w.id)};
  grid.appendChild(card);
  });
  var impCard=document.createElement('div');impCard.className='book-import-card';
    impCard.innerHTML='<span class="import-icon">+</span>';
- impCard.onclick=function(){openCreateBookModal()};
+ impCard.onclick=function(){openImportNew()};
  grid.appendChild(impCard);
 }
 
@@ -2138,20 +2171,550 @@ function _formatDate(ts){
 
 function showBookList(){
  if(bookId){backToBooks();return}
+ if(workId){showBookShelf();return}
  showBookShelf();
 }
 
 function loadBooks(){showBookShelf()}
 
-function showBookCreate(){showPrompt('新建书本','书名','新建书本',function(t){if(!t)return;api('POST','/api/books/create',{title:t},function(d){if(d.book){cachedBooks=null;currentBookTitle=d.book.title;openBook(d.book.id)}})})}
+function showBookCreate(){createBook()}
+
+function openWork(id,cb){
+ setWritingViewActive(false);
+  workId=id;bookId=null;chapterId=null;currentChapter=null;_selectedVolumeId=null;
+ $('bookshelfView').classList.remove('active');
+ $('editorView').classList.remove('active');$('editorView').style.display='none';
+ $('bottomPanel').style.display='none';
+ $('workView').classList.add('active');
+ updateBreadcrumb();
+ api('GET','/api/work/'+id,undefined,function(d,s){
+   if(s!==200||!d.work){toast(d.error||'作品加载失败','error');clearAppState();showBookShelf();return}
+  currentWork=d.work;currentWorkDetail=d;
+   renderWorkView();
+   saveAppState();
+  if(cb)cb();
+ });
+}
+
+function renderWorkView(){
+ if(!currentWorkDetail)return;
+ currentWork=currentWorkDetail.work;
+ $('workTitleInput').value=currentWork.title||'';
+ $('workMetaLine').textContent=(currentWork.book_count||0)+' 本 · '+(currentWork.chapter_count||0)+' 章';
+
+  $('workCoverImg').src='/api/work/'+encodeURIComponent(workId)+'/cover?t='+Date.now();
+  var box=$('workBooks');box.innerHTML='';
+  (currentWorkDetail.books||[]).forEach(function(b){
+   var row=document.createElement('div');row.className='work-book'+(b.id===_selectedVolumeId?' active':'');
+   row.draggable=true;
+    row.innerHTML='<span class="work-book-handle">⠿</span><img src="/api/book/'+esc(b.id)+'/cover?t='+Date.now()+'" alt="">'+
+     '<div><div class="work-book-title">'+esc(b.title||'未命名书本')+'</div><div class="work-book-meta">'+(b.chapter_count||0)+' 章 · '+_formatDate(b.updated)+'</div></div>'+
+     '<div class="work-book-tools"><button title="封面" onclick="event.stopPropagation();openCoverUpload(\''+esc(b.id)+'\',\'book\')">封面</button><button title="改名" onclick="event.stopPropagation();renameWorkBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改名</button><button title="删除" onclick="event.stopPropagation();deleteWorkBook(\''+esc(b.id)+'\')">删除</button></div>';
+   row.addEventListener('dragstart',function(e){_workVolumeDragIndex=parseInt(this.dataset.volIndex,10);this.classList.add('dragging');_workVolumeDragged=true;e.dataTransfer.effectAllowed='move'});
+   row.addEventListener('dragend',function(){this.classList.remove('dragging');document.querySelectorAll('.work-book.drag-over').forEach(function(x){x.classList.remove('drag-over')});_workVolumeDragIndex=-1;setTimeout(function(){_workVolumeDragged=false},50)});
+   row.addEventListener('dragover',function(e){e.preventDefault();this.classList.add('drag-over')});
+   row.addEventListener('dragleave',function(){this.classList.remove('drag-over')});
+   row.addEventListener('drop',function(e){
+    e.preventDefault();this.classList.remove('drag-over');
+    var dst=parseInt(this.dataset.volIndex,10);if(_workVolumeDragIndex<0||dst===_workVolumeDragIndex)return;
+    var ids=currentWork.book_ids.slice();var moved=ids.splice(_workVolumeDragIndex,1)[0];
+    if(_workVolumeDragIndex<dst)dst--;
+    ids.splice(dst,0,moved);
+    api('POST','/api/work/'+workId+'/book-order',{order:ids},function(d2,s2){
+     if(s2!==200){toast(d2.error||'排序保存失败','error');return}
+     loadCurrentWork();
+    });
+   });
+   row.dataset.volIndex=box.children.length;
+   row.dataset.volId=b.id;
+   row.onclick=function(){if(_workVolumeDragged)return;currentBookTitle=b.title;openBook(b.id)};
+   box.appendChild(row);
+  });
+  if(!_selectedVolumeId||!currentWorkDetail.books.some(function(x){return x.id===_selectedVolumeId})){
+   var sv=loadAppState();
+   if(sv&&sv.selectedVolumeId&&currentWorkDetail.books.some(function(x){return x.id===sv.selectedVolumeId}))
+    _selectedVolumeId=sv.selectedVolumeId;
+   else if(currentWorkDetail.books.length)
+    _selectedVolumeId=currentWorkDetail.books[0].id;
+  }
+    if(_selectedVolumeId&&currentWorkDetail.books.some(function(x){return x.id===_selectedVolumeId})){
+     selectWorkVolume(_selectedVolumeId,true);
+    }
+    updateWorkProgress();
+   }
+ 
+function selectWorkVolume(bookId){
+ _selectedVolumeId=bookId;
+ saveAppState();
+ document.querySelectorAll('.work-book').forEach(function(r){r.classList.toggle('active',r.dataset.volId===bookId)});
+}
+
+function renderVolumeChapters(book){
+ var list=$('workChapterList');list.innerHTML='';
+ if(!book.chapters||!book.chapters.length){
+  list.innerHTML='<div class="work-chapter-empty">这卷还没有章节</div>';return;
+ }
+ book.chapters.forEach(function(ch){
+  var row=document.createElement('div');row.className='work-chapter-item';
+  var dotCls='';
+  if(ch.reread_status==='unchanged')dotCls='green';
+  else if(ch.reread_status==='changed')dotCls='yellow';
+  else if(ch.reread_status==='rereading')dotCls='yellow-blink';
+  var dotHtml=dotCls?'<span class="ch-dot '+dotCls+'"></span>':'';
+  row.innerHTML=dotHtml+'<span class="ch-title">'+esc(ch.title||'')+'</span><span class="ch-words">'+(ch.word_count||0)+' 字</span>';
+  row.onclick=function(){currentBookTitle=book.title;openBookChapter(book.id,ch.id)};
+  list.appendChild(row);
+ });
+}
+
+function renderWorkRereadTimeline(){
+ var body=$('workRereadBody');
+ var books=currentWorkDetail.books||[];
+ if(!books.length){body.innerHTML='<div class="reread-empty">暂无书本</div>';return;}
+ var html='<div class="work-reread-timeline">';
+ books.forEach(function(b){
+  var isActive=b.id===_selectedVolumeId;
+  var cls='work-reread-node'+(isActive?' active':'');
+  html+='<div class="'+cls+'" data-vol-id="'+esc(b.id)+'" onclick="selectWorkVolume(\''+esc(b.id)+'\')">'
+   +'<div class="work-reread-node-title">'+esc(b.title||'未命名书本')+'</div>'
+   +'<div class="work-reread-node-meta">'+(b.chapter_count||0)+' 章 · '+_formatDate(b.updated)+'</div>'
+   +'<div class="work-reread-node-stats" id="rtStats_'+esc(b.id)+'">'
+   +'<span class="work-reread-node-stat"><span class="dot" style="background:var(--t3)"></span> 加载中...</span>'
+   +'</div></div>';
+ });
+ html+='</div>';
+ body.innerHTML=html;
+ var _rtPending=books.length;
+ var _rtAllDone=true;
+ books.forEach(function(b){
+  api('GET','/api/book/'+b.id+'/reread-status',undefined,function(d,s){
+   _rtPending--;
+   if(s!==200||!d){_rtAllDone=false;}
+   else{
+    var stats=d.stats||{total:0,unchanged:0,changed:0,unread:0};
+    var el=$('rtStats_'+b.id);
+    if(el){
+     var parts=[];
+     if(stats.unchanged>0)parts.push('<span class="work-reread-node-stat"><span class="dot" style="background:#4caf50"></span> '+stats.unchanged+' 未变</span>');
+     if(stats.changed>0)parts.push('<span class="work-reread-node-stat"><span class="dot" style="background:#ff9800"></span> '+stats.changed+' 已改</span>');
+     if(stats.unread>0)parts.push('<span class="work-reread-node-stat"><span class="dot" style="background:var(--t3)"></span> '+stats.unread+' 未读</span>');
+     parts.push('<span style="color:var(--t3)">共 '+stats.total+' 章</span>');
+     el.innerHTML=parts.join('');
+     var node=el.closest('.work-reread-node');
+     if(node){
+      if(stats.total>0&&stats.unchanged===stats.total)node.classList.add('done');
+      else{node.classList.add('partial');_rtAllDone=false}
+     }
+    }
+   }
+   if(_rtPending<=0){
+    var btn=$('rereadIncrementalBtn');
+    if(btn){
+     if(_rtAllDone){
+      btn.innerHTML='<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px"><circle cx="10" cy="10" r="8"/><path d="M6.5 10.5l2.5 2.5 4.5-5.5"/></svg>';
+      btn.title='数据库已最新，包含整个世界观的设定';
+      btn.className='reread-incremental-btn reread-updated';
+      btn.onclick=function(){toast('数据库已最新，包含整个世界观的设定','success')};
+     }else{
+      btn.textContent='更新';
+      btn.title='';
+      btn.className='reread-incremental-btn';
+      btn.onclick=function(){startIncrementalReread()};
+     }
+    }
+   }
+  });
+ });
+}
+
+var _workVolumeDragIndex=-1;
+var _workVolumeDragged=false;
+var _selectedVolumeId=null;
+var _workTrashOpen=false;
+function loadCurrentWork(){if(!workId)return;api('GET','/api/work/'+workId,undefined,function(d,s){if(s===200){currentWorkDetail=d;currentWork=d.work;renderWorkView()}})}
+function addChapterToVolume(){
+ if(!_selectedVolumeId){toast('请先在左侧选中一卷','info');return;}
+ var book=currentWorkDetail.books.find(function(x){return x.id===_selectedVolumeId});
+ showPrompt('新建章节','章节标题','新章节',function(t){
+  if(!t)return;
+  var id='ch_'+Date.now();
+  api('POST','/api/book/'+_selectedVolumeId+'/chapter',{id:id,title:t,content:''},function(d,s){
+   if(s===200){loadCurrentWork()}else toast(d.error||'创建失败','error')
+  });
+ });
+}
+function toggleWorkTrash(){
+ _workTrashOpen=!_workTrashOpen;
+ var trash=$('workChTrash');
+ var btn=$('workTrashBtn');
+ if(!_workTrashOpen||!_selectedVolumeId){trash.style.display='none';btn.textContent='回收站';return}
+ btn.textContent='关闭回收站';
+ trash.innerHTML='<div class="trash-header">回收站</div>';
+ trash.style.display='flex';
+ api('GET','/api/book/'+_selectedVolumeId+'/trash',undefined,function(d,s){
+  if(s!==200||!d.chapters){trash.innerHTML+='<div style="padding:10px;text-align:center;color:var(--t3);font-size:11px">暂无数据</div>';return;}
+  if(!d.chapters.length){trash.innerHTML+='<div style="padding:10px;text-align:center;color:var(--t3);font-size:11px">回收站为空</div>';return;}
+  d.chapters.forEach(function(ch){
+   var item=document.createElement('div');item.style.cssText='display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:var(--r1);font-size:11px;color:var(--t2)';
+   item.innerHTML='<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(ch.title||'')+'</span>'
+    +'<button style="border:0;background:transparent;color:var(--accent);cursor:pointer;font-size:10px" onclick="restoreTrashChapter(\''+esc(ch.id)+'\')">恢复</button>';
+   trash.appendChild(item);
+  });
+ });
+}
+function restoreTrashChapter(chapterId){
+ api('POST','/api/book/'+_selectedVolumeId+'/restore',{id:chapterId},function(d,s){
+  if(s===200){toggleWorkTrash();loadCurrentWork()}else toast(d.error||'恢复失败','error')
+ });
+}
+function saveWorkTitle(){var title=$('workTitleInput').value.trim();if(!title)return;api('POST','/api/work/'+workId+'/update',{title:title},function(d,s){if(s===200){currentWork=d.work;cachedWorks=null;updateBreadcrumb()}else toast(d.error||'保存失败','error')})}
+function addBookToWork(){showPrompt('新建卷','卷名','新卷',function(t){if(!t)return;api('POST','/api/work/'+workId+'/add-book',{title:t},function(d,s){if(s===200){cachedBooks=null;loadCurrentWork()}else toast(d.error||'创建失败','error')})})}
+function renameWorkBook(id,title){showPrompt('修改卷名','卷名',title,function(t){if(!t)return;api('POST','/api/books/rename',{book_id:id,title:t},function(){cachedBooks=null;loadCurrentWork()})})}
+function deleteWorkBook(id){showConfirm('删除卷','确定删除这卷和其中所有章节？',function(){api('POST','/api/books/delete',{book_id:id},function(d,s){if(s===200){cachedBooks=null;loadCurrentWork()}else toast(d.error||'删除失败','error')})},true)}
+function addLoreToWork(){showPrompt('新档案','档案标题','新档案',function(t){if(!t)return;api('POST','/api/work/'+workId+'/lore-create',{title:t},function(d,s){if(s===200){if($('loreView').classList.contains('active'))openWorkLore();else loadCurrentWork()}else toast(d.error||'创建失败','error')})})}
+function editLore(id){var l=(currentWorkDetail.lore||[]).find(function(x){return x.id===id});if(!l)return;$('loreEditId').value=id;$('loreEditTitle').value=l.title||'';$('loreEditKind').value=l.kind||'';$('loreEditContent').value=l.content||'';openModal('loreEditModal')}
+function saveLoreEdit(){var id=$('loreEditId').value;api('POST','/api/work/'+workId+'/lore-update',{lore_id:id,title:$('loreEditTitle').value,kind:$('loreEditKind').value,content:$('loreEditContent').value},function(d,s){if(s===200){closeModal('loreEditModal');if($('loreView').classList.contains('active'))openWorkLore();else loadCurrentWork()}else toast(d.error||'保存失败','error')})}
+function deleteLoreEdit(){var id=$('loreEditId').value;showConfirm('删除档案','确定删除这份档案？',function(){api('POST','/api/work/'+workId+'/lore-delete',{lore_id:id},function(d,s){if(s===200){closeModal('loreEditModal');if($('loreView').classList.contains('active'))openWorkLore();else loadCurrentWork()}else toast(d.error||'删除失败','error')})},true)}
+function openWorkLore(){
+ if(!workId)return;
+ $('workView').classList.remove('active');
+ $('editorView').style.display='none';
+ $('bottomPanel').style.display='none';
+ $('loreView').classList.add('active');
+ api('GET','/api/work/'+workId,undefined,function(d,s){
+  if(s!==200||!d.work){toast('加载档案失败','error');return}
+  currentWorkDetail=d;
+  currentWork=d.work;
+  renderLoreCards(d.lore||[]);
+ });
+}
+function closeWorkLore(){
+ $('loreView').classList.remove('active');
+ openWork(workId);
+}
+function renderMetaEditLog(){
+ var el=$('rtEditLog');
+ if(!el)return;
+ el.innerHTML='<span style="color:var(--t3);font-size:11px">加载中...</span>';
+ api('GET','/api/work/'+workId+'/edit-log',undefined,function(d,s){
+  if(s!==200||!d.logs){el.innerHTML='<span style="color:var(--t3);font-size:11px">暂无修改记录</span>';return;}
+  if(!d.logs.length){el.innerHTML='<span style="color:var(--t3);font-size:11px">暂无修改记录</span>';return;}
+  var html='';
+  d.logs.forEach(function(l){
+   var time=(l.created_at||'').replace('T',' ').slice(0,16);
+   var bookTitle=l.book_title||'';
+   var reason=l.reason||l.field||'';
+   html+='<div style="font-size:11px;padding:5px 0;border-bottom:1px solid var(--border);display:flex;gap:6px">'
+    +'<span style="color:var(--t3);white-space:nowrap">'+esc(time)+'</span>'
+    +'<span style="color:var(--accent);flex-shrink:0">'+esc(bookTitle)+'</span>'
+    +'<span style="color:var(--t2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(reason)+'</span>'
+    +'</div>';
+  });
+  el.innerHTML=html;
+ });
+}
+function renderLoreCards(lore){
+ var grid=$('loreGrid');grid.innerHTML='';
+ var total=lore.length;
+ if(total===0){
+  for(var i=0;i<6;i++){
+   var box=document.createElement('div');box.className='lore-locker empty';
+   box.onclick=function(){addLoreToWork()};
+   box.innerHTML='<div class="lore-locker-inner"></div>';
+   grid.appendChild(box);
+  }
+  return;
+ }
+ lore.forEach(function(l,i){
+   var box=document.createElement('div');box.className='lore-locker';
+   var kind=esc(l.kind||'设定');
+   var title=esc(l.title||'未命名');
+   var body=esc((l.content||'').slice(0,500));
+   var lid=esc(l.id);
+   var kc=_loreKindClass(l.kind);
+   box.onclick=function(){editLore(l.id)};
+   box.innerHTML=
+    '<div class="lore-locker-inner">'+
+     '<div class="lore-locker-content">'+
+      '<div class="lore-locker-bar '+kc+'"></div>'+
+      '<div class="lore-locker-meta"><span class="lore-locker-kind '+kc+'">'+kind+'</span></div>'+
+      '<div class="lore-locker-title">'+title+'</div>'+
+      '<div class="lore-locker-body">'+body+'</div>'+
+     '</div>'+
+    '</div>';
+   grid.appendChild(box);
+ });
+}
+function _loreKindClass(k){
+ var kk=(k||'').toLowerCase();
+ if(kk.indexOf('人物')>-1||kk.indexOf('角色')>-1)return'k-char';
+ if(kk.indexOf('地点')>-1||kk.indexOf('场景')>-1||kk.indexOf('位置')>-1)return'k-place';
+ if(kk.indexOf('规则')>-1||kk.indexOf('法则')>-1)return'k-rule';
+ if(kk.indexOf('物品')>-1||kk.indexOf('道具')>-1||kk.indexOf('器物')>-1)return'k-object';
+ if(kk.indexOf('概念')>-1||kk.indexOf('理念')>-1)return'k-concept';
+ if(kk.indexOf('事件')>-1)return'k-event';
+ return'k-default';
+}
+function deleteLoreDirect(id){
+ var l=(currentWorkDetail.lore||[]).find(function(x){return x.id===id});
+ showConfirm('删除档案','确定删除「'+(l?esc(l.title):'')+'」？',function(){
+  api('POST','/api/work/'+workId+'/lore-delete',{lore_id:id},function(d,s){
+   if(s===200)openWorkLore();
+   else toast(d.error||'删除失败','error');
+  });
+ },true);
+}
+function placeLore(id){api('POST','/api/work/'+workId+'/lore-place',{lore_id:id},function(){loadCurrentWork()})}
+function unplaceLore(id){api('POST','/api/work/'+workId+'/lore-unplace',{lore_id:id},function(){loadCurrentWork()})}
+function openWorkCoverUpload(){openCoverUpload(workId,'work')}
+function openWorkExportModal(){_cooExportBid=workId;$('cooPenName').value=(currentWork&&currentWork.author)||'';$('cooServerUrl').value='';$('cooEmail').value='';$('cooPassword').value='';openModal('cooExportModal');api('GET','/api/work/'+workId+'/coo-remote',undefined,function(d){if(d){if(d.server_url)$('cooServerUrl').value=d.server_url;if(d.email)$('cooEmail').value=d.email}})}
+function exportWorkDirect(){var wid=workId;if(!wid)return;var penName=(currentWork&&currentWork.author)||'';closeModal('cooExportModal');openExportModal('导出 COO');addExportLog('正在打包整个作品、卷、设定与阅读线...');var x=new XMLHttpRequest();x.open('POST','/api/work/'+wid+'/export-coo',true);x.responseType='blob';x.setRequestHeader('Content-Type','application/json');x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn)fn='work.coo';setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');_downloadBlob(blob,fn);toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'导出失败','error')}catch(e){addExportLog('HTTP '+x.status)}};r.readAsText(x.response);showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');toast('导出失败','error');showExportSaveBtn()};x.send(JSON.stringify({pen_name:penName}))}
+function openWorkImportVolume(){_workImportMode=true;$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';$('importModalTitle').textContent='导入文件作为新卷';$('impDrop').innerHTML='拖拽文件到此处或点击上传（TXT / MD / DOCX / PDF / EPUB）<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub">';openModal('importModal');setupImport()}
+function openWorkMerge(){if(!workId)return;$('workMergeFile').click()}
+function mergeWorkCoo(file){
+ if(!file||!workId)return;
+ if(!file.name.toLowerCase().endsWith('.coo')){toast('请选择 .coo 文件','warn');return}
+ if(file.size>500*1024*1024){toast('COO 文件超过 500MB','error');return}
+ showConfirm('合并 COO','仅能合并 work_uid 相同的分支。导入分支的同 ID 内容优先，目标分支独有内容保留；合并后会清空生成数据库并重新通读。',function(){
+  var reader=new FileReader();
+  reader.onerror=function(){toast('读取 COO 文件失败','error')};
+  reader.onload=function(){
+   var result=String(reader.result||'');var comma=result.indexOf(',');
+   if(comma<0){toast('COO 文件编码失败','error');return}
+   toast('正在校验并合并...','info');
+   api('POST','/api/work/'+workId+'/merge-coo',{data:result.slice(comma+1)},function(d,s){
+    if(s!==200||!d.ok){toast(d.error||'合并失败','error');return}
+    cachedWorks=null;
+    loadCurrentWork();
+    if(d.readthrough_started){toast('合并完成，已开始重新通读','success')}
+    else toast('合并完成，请配置 AI 后重新通读','success');
+   });
+  };
+  reader.readAsDataURL(file);
+ });
+}
+function deleteCurrentWork(){showConfirm('删除作品','确定删除整个作品、旗下所有书和章节？',function(){api('POST','/api/work/'+workId+'/delete',{},function(d,s){if(s===200){cachedWorks=null;clearAppState();showBookShelf()}else toast(d.error||'删除失败','error')})},true)}
+
+function startWorkReread(){
+ if(!workId)return;
+ openModal('metaModal');
+ renderMetaChapterGrid();
+}
+function renderMetaChapterGrid(){
+ var grid=$('metaChapterGrid');
+ if(!grid)return;
+ var books=currentWorkDetail&&currentWorkDetail.books||[];
+ grid.innerHTML='';
+ if(books.length===0){
+  grid.innerHTML='<div style="font-size:12px;color:var(--t3);text-align:center;padding:20px 0">无书本数据</div>';
+  return;
+ }
+ var allUnread=true;
+ books.forEach(function(b,i){
+  var row=document.createElement('div');
+  row.className='meta-ch-row';
+  var label=document.createElement('div');
+  label.className='meta-ch-label';
+  var total=b.chapters.length;
+  var done=0;
+  b.chapters.forEach(function(ch){if(ch.reread_status&&ch.reread_status!=='unread')done++});
+  if(done>0)allUnread=false;
+  label.innerHTML='<span class="meta-ch-book-title">'+esc(b.title||'')+'</span><span class="meta-ch-stat">'+done+'/'+total+'</span>';
+  var bar=document.createElement('div');
+  bar.className='meta-ch-bar';
+  b.chapters.forEach(function(ch){
+   var seg=document.createElement('div');
+   seg.className='meta-ch-seg'+(ch.reread_status&&ch.reread_status!=='unread'?' done':'');
+   seg.title=esc(ch.title||'');
+   bar.appendChild(seg);
+  });
+  row.appendChild(label);
+  row.appendChild(bar);
+  grid.appendChild(row);
+ });
+ // update button text
+ var btn=$('rtWorkUpdateBtn');
+ if(btn)btn.textContent=allUnread?'开始通读':'更新';
+}
+function startWorkRT(){
+ if(!workId)return;
+ var btn=$('rtWorkUpdateBtn');
+ if(btn)btn.disabled=true;
+ api('POST','/api/work/'+workId+'/readthrough/start',{},function(d,s){
+  if(btn)btn.disabled=false;
+  if(s===200){
+   toast('通读已启动','success');
+   $('rtStream').textContent='通读已启动，请稍候...';
+   if($('rtThinking'))$('rtThinking').classList.add('active');
+   // start polling
+   _startWorkRTPoll();
+  }else{
+   toast(d&&d.error||'启动失败','error');
+  }
+ });
+}
+function _startWorkRTPoll(){
+ clearInterval(_workRTPollTimer);
+ _workRTPollTimer=setInterval(function(){
+  api('GET','/api/work/'+workId+'/readthrough',function(d,s){
+   if(s!==200)return;
+   var stream=$('rtStream');
+   if(stream)stream.textContent=d.stream_buffer||'处理中...';
+   if(d.status==='done'){
+    clearInterval(_workRTPollTimer);
+    _workRTPollTimer=null;
+    if($('rtThinking'))$('rtThinking').classList.remove('active');
+    // reload chapter data
+    loadCurrentWork();
+    // toggle back to show grid instead of wait
+    renderMetaChapterGrid();
+    toast('通读完成','success');
+   }else if(d.status==='error'){
+    clearInterval(_workRTPollTimer);
+    _workRTPollTimer=null;
+    if($('rtThinking'))$('rtThinking').classList.remove('active');
+    toast('通读出错','error');
+   }
+  });
+ },2000);
+}
+var _workRTPollTimer=null;
+function updateWorkProgress(){
+ var bar=$('workProgressFill');
+ if(!bar)return;
+ var total=0,done=0;
+ (currentWorkDetail&&currentWorkDetail.books||[]).forEach(function(b){
+  (b.chapters||[]).forEach(function(ch){
+   total++;
+   if(ch.reread_status&&ch.reread_status!=='unread')done++;
+   });
+ });
+ var pct=total>0?(done/total*100):0;
+ bar.style.width=pct+'%';
+ $('workProgress').title=done+'/'+total+' 章';
+}
+var _rereadPollTimers={};
+function _startRereadPoll(bid){
+ _stopRereadPoll(bid);
+ _rereadPollTimers[bid]=setInterval(function(){
+  api('GET','/api/book/'+bid+'/reread-status',undefined,function(d,s){
+   if(s!==200||!d.rt_state||d.rt_state.status!=='running'){
+    _stopRereadPoll(bid);
+    delete _rereadingBooks[bid];
+    loadCurrentWork();
+   }
+  });
+ },3000);
+}
+function _stopRereadPoll(bid){
+ if(_rereadPollTimers[bid]){clearInterval(_rereadPollTimers[bid]);delete _rereadPollTimers[bid];}
+}
+
+function toggleWorkChatHistory(){
+ var hp=$('workChatHistory');
+ if(!hp)return;
+ if(hp.style.display==='none'){
+  loadChatSessions(function(){
+   renderWorkChatHistory();
+   hp.style.display='';
+  });
+ }else{
+  hp.style.display='none';
+ }
+}
+
+function renderWorkChatHistory(){
+ var c=$('workChatHistoryList');if(!c)return;
+ if(!chatSessionList.length){c.innerHTML='<div style="padding:8px;font-size:11px;color:var(--t3)">暂无历史对话</div>';return}
+ var html='';
+ chatSessionList.forEach(function(s){
+  var active=s.id===currentChatSessionId?' active':'';
+  var title=esc(s.title||s.preview||'新对话');
+  var t='';
+  if(s.updated_at){
+   var d=new Date(s.updated_at*1000);
+   var month=d.getMonth()+1;var day=d.getDate();
+   t=month+'/'+day;
+  }
+  html+='<div class="luca-history-item'+active+'" onclick="switchWorkChatSession(\''+s.id+'\')"><div class="luca-history-title">'+title+'</div><div class="luca-history-time">'+t+'</div></div>';
+ });
+ c.innerHTML=html;
+}
+
+function switchWorkChatSession(sid){
+ if(sid===currentChatSessionId)return;
+ currentChatSessionId=sid;_saveChatSessionId();
+ var hp=$('workChatHistory');if(hp)hp.style.display='none';
+ api('GET','/api/chat-session/'+sid+'/messages',undefined,function(d,s){
+  if(s===200&&d.messages){aiMessages=d.messages}else{aiMessages=[]}
+  renderAIMessages();
+  _checkPendingChat();
+  _updateSessionTitleDisplay();
+ });
+}
+
+function sendWorkChat(){
+ var text=$('workChatInput').value.trim();
+ if(!text||!workId)return;
+ var ap=providerPresets[currentPresetIdx];
+ if(!ap||!ap.base_url||!ap.base_url.trim()){openModal('noProviderModal');return;}
+ $('workChatInput').value='';
+ var bid=(currentWorkDetail.books||[])[0]&&currentWorkDetail.books[0].id;
+ if(!bid)return;
+ aiMessages.push({text:text,type:'user'});
+ aiMessages.push({text:'',type:'ai',reasoning:'',_pending:true});
+ renderAIMessages();
+ var history=[];
+ for(var i=0;i<aiMessages.length-2;i++){
+  var m=aiMessages[i];
+  if(m.type==='system'&&m.subtype==='compressed_summary') history.push({role:'system',content:m.text});
+  else if(m.type==='user') history.push({role:'user',content:m.text});
+  else if(m.type==='ai' && !m._pending && !m._streaming && m.text) history.push({role:'assistant',content:m.text});
+ }
+ var msgIdx=aiMessages.length-1;
+ _stopChatPoll();
+ api('POST','/api/book/'+bid+'/comment',{text:text,history:history,session_id:currentChatSessionId},function(d,s){
+  if(s!==200||!d.task_id){
+   var m=aiMessages[msgIdx];if(m){m._pending=false;m.text='[错误: '+(d.error||'')+']';m.reasoning='';}
+   renderAIMessages();return;
+  }
+  var tid=d.task_id;
+  var m=aiMessages[msgIdx];if(m)m._pollTid=tid;
+  var pollTimer=setInterval(function(){
+   api('GET','/api/book/'+bid+'/task/status?task_id='+tid,undefined,function(st){
+    if(!st||!st.status){clearInterval(pollTimer);return;}
+    var m=aiMessages[msgIdx];
+    if(st.status==='done'){
+     clearInterval(pollTimer);
+     if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';}
+     renderAIMessages();
+    }else if(st.status==='error'){
+     clearInterval(pollTimer);
+     if(m){m._pending=false;m.text='[错误: '+(st.error||'生成失败')+']';m.reasoning='';}
+     renderAIMessages();
+    }else if(st.status==='running'){
+     if(m){m.text=st.result||'';m.reasoning=st.reasoning||'';m._pollTick=(m._pollTick||0)+1;}
+     renderAIMessages();
+    }
+   });
+  },600);
+ });
+}
+
+function startIncrementalReread(){
+ if(!_selectedVolumeId){toast('请先在左侧选中一卷','info');return;}
+ api('POST','/api/book/'+_selectedVolumeId+'/reread-incremental',{},function(d,s){
+  if(s===200){toast('更新已启动','success');loadCurrentWork()}
+  else toast(d.error||'启动失败','error');
+ });
+}
 
 function openBook(id){
 	 setWritingViewActive(true);
 	 bookId=id;chapterId=null;currentChapter=null;inTrash=false;
 	 bookAnnotations={};
  var tsb=$('topbarSummaryBtn');if(tsb)tsb.style.display='';
-  $('bookshelfView').classList.remove('active');
-  $('seriesView').classList.remove('active');
+  $('bookshelfView').classList.remove('active');$('workView').classList.remove('active');
   $('editorView').classList.add('active');$('editorView').style.display='flex';$('bottomPanel').style.display='flex';
   closeBottomPanel();setTimeout(syncInputWidth,50);
  $('trashList').classList.remove('open');$('trashToggleBtn').textContent='回收站';$('trashToggleBtn').classList.remove('open');
@@ -2164,28 +2727,12 @@ function openBook(id){
 	 $('outlineSource').innerHTML='打开章节后显示本章相关人物、设定、事件和伏笔。';
 	 $('outlineLog').textContent='当前没有提醒。';
 	 _radarDeepStates={};
-	 _timelineData=null;
-	 if($('timelineRiver'))$('timelineRiver').innerHTML='<div class="tl-empty">通读或本章写完后，时间线会在这里汇成一条长河。</div>';
-	 if($('timelineMeta'))$('timelineMeta').textContent='';
-	 $('predictionResultBody').innerHTML='<div class="tl-empty">写完新章节后，Luca 会自动更新一段短预言</div>';
-  $('rtProgress').style.width='0%';if($('rtBuffer'))$('rtBuffer').style.width='0%';$('rtPhase').textContent='准备中...';
-  $('rtChapters').textContent='0/0 章';
-  _rtCurrentArchived=false;
-  _setRTButtonUI('idle', -1);
- rtLastDoneChapters=0;
- rtLastChapterIdx=-1;
+ 	 _timelineData=null;
  updateBreadcrumb();
  saveAppState();
  setEditorLoading(true);
 	 loadChapters();
 	 if(!currentChatSessionId)loadAIMessages();
-	 loadTimelineRiver();
-	 loadPredictionCurrent();
-  loadSourceToRT();
-  loadReadModeConfig();
-  loadAnnotations();
-  pollRTStatus();
-  loadKbArchives();
  }
 
  function openBookChapter(bid,cid){
@@ -2198,42 +2745,29 @@ function openBook(id){
 
 function backToBooks(){
  if(bookId&&chapterId&&currentChapter){doSaveNow()}
- clearAppState();
  setEditorLoading(false);
-	 if(seriesId){
-	  bookId=null;chapterId=null;currentChapter=null;currentBookTitle='';
-	  setWritingViewActive(false);
-	  var tsb=$('topbarSummaryBtn');if(tsb)tsb.style.display='none';
-	  $('bookshelfView').classList.remove('active');
-  $('editorView').classList.remove('active');$('editorView').style.display='none';$('bottomPanel').style.display='none';closeLucaPopup();closeLucaFloat();
-  $('seriesView').classList.add('active');
-  updateBreadcrumb();
-  renderSeriesBooks();
- }else{
-  showBookShelf();
- }
+ if(workId){bookId=null;chapterId=null;currentChapter=null;openWork(workId)}
+ else{clearAppState();showBookShelf()}
 }
 
 function showBookListInSidebar(){
  $('bookListPanel').style.display='flex';$('chapterList').style.display='none';$('sidebar-search').style.display='none';
- api('GET','/api/books',undefined,function(d){
  var panel=$('bookListPanel');panel.innerHTML='';
- (d.books||[]).forEach(function(b){
+ ((currentWorkDetail&&currentWorkDetail.books)||[]).forEach(function(b){
  var div=document.createElement('div');div.className='book-list-item'+(bookId===b.id?' active':'');
  div.innerHTML='<span class="bl-title">'+esc(b.title)+'</span><span class="bl-count">'+b.chapter_count+' ch</span><button class="bl-del" onclick="event.stopPropagation();delBook(\''+esc(b.id)+'\')">&#10005;</button>';
  div.onclick=function(){currentBookTitle=b.title;openBook(b.id)};panel.appendChild(div);
  });
- var n=document.createElement('div');n.className='book-list-new';n.innerHTML='+ 新建书本';n.onclick=createBook;panel.appendChild(n);
- });
+ var n=document.createElement('div');n.className='book-list-new';n.innerHTML='+ 新建卷';n.onclick=addBookToWork;panel.appendChild(n);
 }
 
 function hideBookListInSidebar(){$('bookListPanel').style.display='none';$('chapterList').style.display='';$('sidebar-search').style.display=''}
 
-function createBook(){showPrompt('新建书本','书名','新建书本',function(t){if(!t)return;api('POST','/api/books/create',{title:t},function(d){if(d.book){cachedBooks=null;currentBookTitle=d.book.title;openBook(d.book.id)}})})}
+function createBook(){showPrompt('新建作品','作品标题','新作品',function(t){if(!t)return;api('POST','/api/works/create',{title:t,first_book_title:t},function(d,s){if(s===200&&d.work){cachedWorks=null;openWork(d.work.id)}else toast(d.error||'创建失败','error')})})}
 
 function renameBook(id,currentTitle){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});showPrompt('','',currentTitle,function(t){if(!t||t===currentTitle)return;api('POST','/api/books/rename',{book_id:id,title:t},function(){cachedBooks=null;if(bookId===id){currentBookTitle=t;updateBreadcrumb()}renderBookShelf()})})}
 
-function delBook(id){showConfirm('删除'+(cachedBooks&&cachedBooks.find(function(b){return b.id===id&&b.type==='series'})?'系列':'书本'),'确定删除这本书及所有章节？',function(){api('POST','/api/books/delete',{book_id:id},function(){cachedBooks=null;if(seriesId){seriesId=null;seriesTitle='';seriesBooks=[];seriesBookOrder=[];$('seriesView').classList.remove('active')}if(bookId===id){backToBooks()}else{renderBookShelf()}})},true)}
+function delBook(id){deleteWorkBook(id)}
 
 function loadChapters(){
  api('GET','/api/book/'+bookId+'/chapters',undefined,function(d){
@@ -2308,8 +2842,9 @@ function syncChapterSidebarWidth(){
 }
 
 function topbarBack(){
- if(seriesId&&!bookId){closeSeriesView();return}
- backToBooks();
+ if(bookId){backToBooks();return}
+ if(workId){showBookShelf();return}
+ showBookShelf();
 }
 
 function updateBreadcrumb(){
@@ -2318,43 +2853,32 @@ function updateBreadcrumb(){
  var settEl=$('topbarSettingsBtn');
  if(!bc)return;
  if(bookId){
- if(divEl)divEl.style.display='';
- if(settEl)settEl.style.display='';
- backEl.style.display='inline-flex';
- backEl.innerHTML=`<svg class="back-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
- backEl.title=seriesId?'返回系列':'返回书架';
- bookEl.style.display='inline';
- bookEl.textContent=currentBookTitle||'未命名书本';
- if(chapterId){
- sepEl.style.display='none';
- chEl.style.display='none';if(slotEl)slotEl.classList.add('active');chIn.style.display='';
- wcEl.style.display='';cbEl.style.display='';
- }else{
- sepEl.style.display='none';
- chEl.style.display='none';if(slotEl)slotEl.classList.remove('active');chIn.style.display='none';
- wcEl.style.display='none';cbEl.style.display='none';
- }
- }else if(seriesId){
- if(divEl)divEl.style.display='none';
-  if(settEl)settEl.style.display='none';
+  if(divEl)divEl.style.display='';
+  if(settEl)settEl.style.display='';
   backEl.style.display='inline-flex';
-  backEl.innerHTML=`<svg class="back-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
-  backEl.title='返回书架';
-  bookEl.style.display='none';
-  bookEl.textContent='';
-  sepEl.style.display='none';
-  chEl.textContent='';
-  chEl.style.display='none';if(slotEl)slotEl.classList.remove('active');chIn.style.display='none';
-  wcEl.style.display='none';cbEl.style.display='none';
-  }else{
+   backEl.innerHTML=`<svg class="back-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>`;
+  backEl.title='返回作品阅读线';
+  bookEl.style.display='inline';bookEl.textContent=currentBookTitle||'未命名书本';
+  sepEl.style.display='none';chEl.style.display='none';
+  if(chapterId){if(slotEl)slotEl.classList.add('active');chIn.style.display='';wcEl.style.display='';cbEl.style.display=''}
+  else{if(slotEl)slotEl.classList.remove('active');chIn.style.display='none';wcEl.style.display='none';cbEl.style.display='none'}
+ }else if(workId){
   if(divEl)divEl.style.display='none';
-  if(settEl)settEl.style.display='none';
- backEl.style.display='none';
- bookEl.style.display='none';sepEl.style.display='none';
- chEl.textContent='LucaWriter';chEl.style.display='';
+  if(settEl)settEl.style.display='';
+  backEl.style.display='inline-flex';
+  backEl.innerHTML=`<svg class="back-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>`;
+  backEl.title='返回作品书架';
+  bookEl.style.display='none';sepEl.style.display='none';
+  chEl.textContent=(currentWork&&currentWork.title)||'作品';chEl.style.display='';
   if(slotEl)slotEl.classList.remove('active');chIn.style.display='none';wcEl.style.display='none';cbEl.style.display='none';
-  }
-  _updateTopbarStatusVisibility();
+ }else{
+  if(divEl)divEl.style.display='none';
+  if(settEl)settEl.style.display='';
+  backEl.style.display='none';bookEl.style.display='none';sepEl.style.display='none';
+  chEl.textContent='LucaWriter';chEl.style.display='';
+  if(slotEl)slotEl.classList.remove('active');chIn.style.display='none';wcEl.style.display='none';cbEl.style.display='none';
+ }
+ _updateTopbarStatusVisibility();
  _updateTopbarPanelButton();
 }
 
@@ -2734,7 +3258,7 @@ function _startThinkingRotation(){
 function _stopThinkingRotation(){if(_thinkingTimer){clearInterval(_thinkingTimer);_thinkingTimer=null;}}
 function _hasLiveChatMessage(list){return (list||[]).some(function(x){return x&&(x._streaming||x._pending)})}
 function _syncThinkingRotation(){
-  if(_hasLiveChatMessage(aiMessages)||_hasLiveChatMessage(seriesAIMessages))_startThinkingRotation();
+  if(_hasLiveChatMessage(aiMessages))_startThinkingRotation();
   else _stopThinkingRotation();
 }
 
@@ -2815,7 +3339,8 @@ function _buildAIMsgEl(m,idx,scope){
  var header='<div class="ai-msg-header" onclick="toggleReasoningFromHeader(this)" data-has-reasoning="'+(hasReasoning||isLive?'1':'0')+'"><img class="ai-msg-logo" src="logo-white.png" alt="">'+statusText+'</div>';
  var reasonHtml='';
  if(m.reasoning){
- reasonHtml='<div class="ai-reasoning"><div class="ai-reasoning-body'+(m._reasoningOpen?' open':'')+'" onclick="collapseReasoning(this)">'+esc(String(m.reasoning))+'</div></div>';
+ var reasonOpen=isLive?'open'+(m._liveReasoning?' live':''):(m._reasoningOpen?' open':'');
+ reasonHtml='<div class="ai-reasoning"><div class="ai-reasoning-body'+reasonOpen+'" onclick="collapseReasoning(this)">'+esc(String(m.reasoning))+'</div></div>';
  }
  if(m._pending && !m.text && !m.reasoning){
  var dots=(m._pollTick||0)%3;var dotStr=''+(dots===0?'\u25CF':(dots===1?'\u25CF\u25CF':'\u25CF\u25CF\u25CF'));
@@ -2833,12 +3358,6 @@ function _buildAIMsgEl(m,idx,scope){
 }
 
 function _appendAIMsgCards(c,m,d){
- if(m.type==='ai' && m.needs_summary){
- var card=document.createElement('div');
- card.className='ai-summary-card';
- card.innerHTML='<div>AI 建议摘要全书</div><div class="rt-warning">可能会消耗很多token哦</div><button class="rt-btn" onclick="startRTFromChat()">开始摘要</button>';
- c.appendChild(card);
- }
  if(m.type==='ai' && m.pending_browse){
  var browse=document.createElement('div');
  browse.className='browse-confirm-card';
@@ -2910,7 +3429,7 @@ function _updateLiveAIMessage(msgIdx){
    var rb=rw.querySelector('.ai-reasoning-body');
    if(rb){
     rb.textContent=String(m.reasoning);
-    rb.className='ai-reasoning-body'+(m._reasoningOpen?' open':'');
+    rb.className='ai-reasoning-body open'+(m._liveReasoning?' live':'');
     rb.scrollTop=rb.scrollHeight;
    }
   }else{
@@ -2963,6 +3482,30 @@ function renderAIMessages(){
   if(nearBottom)c.scrollTop=c.scrollHeight;
   else c.scrollTop=savedScrollTop;
    _syncThinkingRotation();
+  var wc=$('workChatMessages');
+  if(wc){
+   wc.innerHTML='';
+   if(aiMessages.length){
+    aiMessages.forEach(function(m,idx){
+     if(m.type==='system')return;
+     var el=document.createElement('div');
+     el.className='ai-msg '+(m.type==='user'?'user':'ai');
+     var html='';
+      var isLive=m._pending||m._streaming;
+      if(m.type==='ai'&&m.reasoning){
+       var tc=isLive?'ai-thinking live':'ai-thinking done';
+       html+='<div class="'+tc+'">'+esc(m.reasoning)+'</div>';
+      }
+      html+='<div class="ai-msg-body">'+(m._pending?'':esc(m.text||''))+'</div>';
+      el.innerHTML=html;
+      if(isLive&&!m.text&&!m.reasoning){el.innerHTML='<div class="ai-msg-body"><span class="thinking-word"></span></div>'}
+     wc.appendChild(el);
+    });
+    var first=wc.firstElementChild;
+    if(first)first.style.marginTop='auto';
+    wc.scrollTop=wc.scrollHeight;
+   }
+  }
 }
 
 function kbJumpToChapter(chId){
@@ -3088,7 +3631,7 @@ function toggleReasoningFromHeader(el){
   var open=body.classList.toggle('open');
   var msgEl=el.closest('.ai-msg');
   if(msgEl&&msgEl.dataset.idx!==undefined){
-   var list=msgEl.dataset.scope==='series'?seriesAIMessages:aiMessages;
+   var list=aiMessages;
    var m=list[+msgEl.dataset.idx];if(m)m._reasoningOpen=open;
   }
 }
@@ -3097,7 +3640,7 @@ function collapseReasoning(el){
   el.classList.remove('streaming','open');
   var msgEl=el.closest('.ai-msg');
   if(msgEl&&msgEl.dataset.idx!==undefined){
-   var list=msgEl.dataset.scope==='series'?seriesAIMessages:aiMessages;
+   var list=aiMessages;
    var m=list[+msgEl.dataset.idx];if(m)m._reasoningOpen=false;
   }
 }
@@ -4923,9 +5466,10 @@ function openEpubExport(bid,title){_epubExportBid=bid;$('epubTitle').value=title
 function onEpubCoverChange(e){var f=e.target.files[0];if(!f)return;var r=new FileReader();r.onload=function(ev){$('epubCoverImg').src=ev.target.result;$('epubCoverImg').style.display='block';$('epubCoverPlaceholder').style.display='none'};r.readAsDataURL(f)}
 function doExportEpub(){var bid=_epubExportBid;if(!bid)return;var title=$('epubTitle').value.trim()||'';var author=$('epubAuthor').value.trim();var desc=$('epubDesc').value.trim();var cover=$('epubCoverImg').src||'';if(cover&&cover.indexOf('data:image')!==0)cover='';var payload={title:title,author:author,description:desc,cover_base64:cover};closeModal('epubExportModal');_runExport(bid,'epub','epub','EPUB',true,payload)}
 var _cooExportBid=null;
-function openCooExport(bid,title){_cooExportBid=bid;if($('cooPenName')){$('cooPenName').value=''}openModal('cooExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
-function doExportCoo(){var bid=_cooExportBid;if(!bid)return;var penName=$('cooPenName')?$('cooPenName').value.trim():'';closeModal('cooExportModal');openExportModal('导出 COO');addExportLog('开始导出 COO 格式...');addExportLog('笔名: '+(penName||'未填写'));var x=new XMLHttpRequest();var url='/api/book/'+bid+'/export-coo';x.open('POST',url,true);x.responseType='blob';x.setRequestHeader('Content-Type','application/json');x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn){var m2=disp.match(/filename="([^"]+)"/i);if(m2)fn=m2[1]}if(!fn)fn='book.coo';setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');_downloadBlob(blob,fn);addExportLog('下载已触发');toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'导出失败','error')}catch(e){addExportLog('HTTP '+x.status)}};r.readAsText(x.response);showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');toast('导出失败','error');showExportSaveBtn()};addExportLog('正在发送请求...');x.send(JSON.stringify({pen_name:penName}))}
-function openImportNew(){$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';openModal('importModal')}
+function openCooExport(wid,title){_cooExportBid=wid;$('cooPenName').value=(currentWork&&currentWork.author)||'';$('cooServerUrl').value='';$('cooEmail').value='';$('cooPassword').value='';openModal('cooExportModal');api('GET','/api/work/'+wid+'/coo-remote',undefined,function(d){if(d){if(d.server_url)$('cooServerUrl').value=d.server_url;if(d.email)$('cooEmail').value=d.email}})}
+function doExportCoo(){var wid=_cooExportBid;if(!wid)return;var penName=$('cooPenName').value.trim();closeModal('cooExportModal');openExportModal('导出 COO');addExportLog('正在打包整个作品、卷、设定与阅读线...');var x=new XMLHttpRequest();x.open('POST','/api/work/'+wid+'/export-coo',true);x.responseType='blob';x.setRequestHeader('Content-Type','application/json');x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn)fn='work.coo';setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');_downloadBlob(blob,fn);toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'导出失败','error')}catch(e){addExportLog('HTTP '+x.status)}};r.readAsText(x.response);showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');toast('导出失败','error');showExportSaveBtn()};x.send(JSON.stringify({pen_name:penName}))}
+function doPushCoo(){var wid=_cooExportBid;if(!wid)return;var serverUrl=$('cooServerUrl').value.trim();var email=$('cooEmail').value.trim();var password=$('cooPassword').value;var penName=$('cooPenName').value.trim();if(!serverUrl||!email||!password){toast('请填写网站地址、邮箱和密码','warn');return}closeModal('cooExportModal');openExportModal('推送到 Coobox');addExportLog('目标: '+serverUrl);addExportLog('账号: '+email);addExportLog('正在通过 Coobox 客户端接口登录并上传...');api('POST','/api/work/'+wid+'/coo-remote',{server_url:serverUrl,email:email},function(){api('POST','/api/work/'+wid+'/coo-push',{server_url:serverUrl,email:email,password:password,pen_name:penName},function(d,s){$('cooPassword').value='';if(s===200&&d.ok){setExportProgress(100,'推送成功');addExportLog((d.updated?'已更新已有作品':'已创建作品')+' · '+formatSize(d.size));addExportLog('网站直传与 LucaWriter 推送使用同一导入函数。');toast('推送成功','success')}else{setExportProgress(0,'推送失败');addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'推送失败','error')}showExportSaveBtn()})})}
+function openImportNew(){doImportVolumeCleanup();$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';openModal('importModal')}
 function openCreateBookModal(){openModal('createBookModal')}
 function doCreateBookFromModal(){closeModal('createBookModal');createBook()}
 function openImport(){openImportNew()}
@@ -4956,13 +5500,23 @@ function _pollImportTask(tid,startTime){
     clearInterval(timer);
     setImportProgress(100,'导入完成');
     $('impSt').textContent='已导入 '+(d.imported||0)+' 章';
-    cachedBooks=null;currentBookTitle=d.title;openBook(d.book_id);startImportVerify(d.book_id);
+    cachedBooks=null;cachedWorks=null;
+    if(d.work_id)openWork(d.work_id);else{currentBookTitle=d.title;openBook(d.book_id)}
+    startImportVerify(d.book_id);
     setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
    }
   });
  },1500);
 }
+var _workImportMode=false;
+function doImportVolumeCleanup(){
+ _workImportMode=false;
+ $('importModalTitle').textContent='导入作品';
+ $('impDrop').innerHTML='拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.coo">';
+ setupImport();
+}
 function doImport(file){
+ if(_workImportMode&&!workId){doImportVolumeCleanup();toast('请先打开一个作品','warn');$('impDrop').style.display='';$('impProgressWrap').style.display='none';return}
  if(file.size>512*1024*1024){$('impSt').textContent='文件超过 512MB，请拆分或压缩后重试';$('impSt').style.color='var(--danger)';return}
  $('impDrop').style.display='none';
  $('impProgressWrap').style.display='';
@@ -4977,15 +5531,35 @@ function doImport(file){
  var b64=reader.result.split(',')[1];
  var isCOO=file.name.toLowerCase().endsWith('.coo');
  if(isCOO){
+  if(_workImportMode){
+   doImportVolumeCleanup();
+   setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='不支持将 COO 文件导入为卷';$('impSt').style.color='var(--danger)';return;
+  }
   setImportProgress(35,'导入 COO 格式...');
   api('POST','/api/books/import-coo',{data:b64},function(d,s){
-  if(s===200&&d.book_id){
+  if(s===200&&d.work_id){
    setImportProgress(100,'导入完成');
    $('impSt').textContent='已导入 '+(d.imported||0)+' 章';
-   cachedBooks=null;currentBookTitle=d.title;openBook(d.book_id);
+   cachedBooks=null;cachedWorks=null;openWork(d.work_id);
    setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
   }else{
    setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'}
+  });
+  return;
+ }
+ if(_workImportMode){
+  setImportProgress(35,'导入为卷...');
+  api('POST','/api/work/'+workId+'/import-volume',{filename:file.name,data:b64},function(d,s){
+   var mode=_workImportMode;doImportVolumeCleanup();
+   if(s===200&&d.ok){
+    setImportProgress(100,'导入完成');
+    $('impSt').textContent='已导入 '+(d.chapters||0)+' 章';
+    cachedBooks=null;cachedWorks=null;
+    loadCurrentWork();
+    setTimeout(function(){closeModal('importModal');$('impDrop').style.display='';$('impProgressWrap').style.display='none';setImportProgress(0,'准备中...')},1200);
+   }else{
+    setImportProgress(0,'');$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='失败: '+(d.error||'未知错误');$('impSt').style.color='var(--danger)'
+   }
   });
   return;
  }
@@ -5295,19 +5869,13 @@ function inspirationKeydown(e){
 
 function switchBottomTab(tab){
 	currentBottomTab=tab;
-	document.querySelectorAll('.bottom-tab,.bottom-tab-fly,.bottom-pill').forEach(function(b){b.classList.toggle('active',b.dataset.btab===tab)});
-	$('timelinePane').classList.toggle('active',tab==='timeline');
-	$('predictionPane').classList.toggle('active',tab==='prediction');
+	document.querySelectorAll('.bottom-tab').forEach(function(b){b.classList.toggle('active',b.dataset.btab===tab)});
 	$('outlinePane').classList.toggle('active',tab==='outline');
 	$('inspirationPane').classList.toggle('active',tab==='inspiration');
-	$('summaryPane').classList.toggle('active',tab==='summary');
 	_updateTopbarPanelButton();
 	if(!bottomPanelOpen){openBottomPanel()}
-	if(tab==='timeline'){loadTimelineRiver()}
 	if(tab==='outline'){loadChapterOutline()}
-	if(tab==='prediction'){loadPredictionCurrent()}
 	if(tab==='inspiration'){loadInspirations();setTimeout(autoGrowInspirationInput,0)}
-	if(tab==='summary'){pollRTStatus();loadKbArchives()}
 }
 
 function clearAIChat(){aiMessages=[];renderAIMessages();saveAIMessages()}
@@ -5522,10 +6090,6 @@ function _mdToHtml(md){
  return html;
 }
 
-function pillClick(){
- if(bottomPanelOpen&&currentBottomTab==='summary'){closeBottomPanel()}
- else{switchBottomTab('summary')}
-}
 function toggleBottomPanel(){
  if(bottomPanelOpen)closeBottomPanel();
  else{
@@ -5549,7 +6113,6 @@ function openBottomPanel(){
  else{bottomPanelHeight=Math.round(full*0.6)}
  panel.style.height=bottomPanelHeight+'px';
  panel.classList.remove('collapsed');
- var wrap=$('bottomTabsWrap');if(wrap)wrap.classList.remove('flyout-mode');
  _updateTopbarPanelButton();
  _syncSidebarBottom(bottomPanelHeight);
 	 _syncLucaPopupPos();
@@ -5569,510 +6132,18 @@ function closeBottomPanel(){
   panel.style.height='30px';
   _syncSidebarBottom(30);
   _updateTopbarPanelButton();
-  var wrap=$('bottomTabsWrap');if(wrap)wrap.classList.add('flyout-mode');
   _collapseTimer=setTimeout(function(){panel.classList.add('collapsed')},220);
   _syncLucaPopupPos();
-}
-
-/* === 系列小说 === */
-function createSeries(){
- showPrompt('系列','系列名称','新系列',function(t){
-  if(!t)return;
-  api('POST','/api/series/create',{title:t},function(d){
-   cachedBooks=null;
-   renderBookShelf();
-   toast('系列已创建','success');
-  });
- });
-}
-
-function openSeries(id,title){
-	 setWritingViewActive(false);
-	 seriesId=id;seriesTitle=title;
- seriesAIMessages=[];
- if(seriesAIChatTimer){clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;}
- if(_seriesRTPoll){clearInterval(_seriesRTPoll);_seriesRTPoll=null;}
- $('seriesRT').style.display='none';$('seriesChatPanel').style.display='';
- $('seriesRTStream').textContent='等待开始...';
- $('seriesRTProgress').style.width='0%';$('seriesRTPhase').textContent='准备中...';
- $('seriesRTChapters').textContent='0/0';
- $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始系列摘要';
- var tsb=$('topbarSummaryBtn');if(tsb)tsb.style.display='none';
- $('bookshelfView').classList.remove('active');
- $('editorView').classList.remove('active');$('editorView').style.display='none';$('bottomPanel').style.display='none';closeLucaPopup();closeLucaFloat();
- $('seriesView').classList.add('active');
- $('seriesViewTitle').textContent=title;
- updateBreadcrumb();
- renderSeriesBooks();
- loadSeriesAIMessages();
-}
-
-function closeSeriesView(){
- if(seriesAIChatTimer){clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;}
- if(_seriesRTPoll){clearInterval(_seriesRTPoll);_seriesRTPoll=null;}
- $('seriesView').classList.remove('active');
- showBookShelf();
-}
-
-function renderSeriesBooks(){
- if(!seriesId)return;
- api('GET','/api/series/'+seriesId,undefined,function(d){
-  var books=d.books||[];
-  seriesBooks=books;
-  seriesBookOrder=(d.series&&d.series.series_books)?d.series.series_books:[];
-  var list=$('seriesList');list.innerHTML='';
- if(!books.length){
-  list.innerHTML='<div class="series-book-empty"><h3>系列中还没有书本</h3><p>从书架拖放书本到此处，或点击下方虚线框新建</p></div>';
- }else{
-  var bookMap={};
-  books.forEach(function(b){bookMap[b.id]=b});
-  seriesBookOrder.forEach(function(bid){
-   var b=bookMap[bid];
-   if(!b)return;
-   _addSeriesBookItem(b,list,false);
-  });
- }
- var addItem=document.createElement('div');
- addItem.className='series-book-item series-book-add';
- addItem.innerHTML='<div class="sba-inner">+ 在此系列中新建书本</div>';
- addItem.onclick=function(){_createBookInSeries()};
- addItem.addEventListener('dragover',function(e){
-  e.preventDefault();
-  var bid=e.dataTransfer.getData('text/plain');
-  if(bid&&bid.startsWith('series_')){e.dataTransfer.dropEffect='none';return}
-  e.dataTransfer.dropEffect='move';addItem.classList.add('drag-over')
- });
- addItem.addEventListener('dragleave',function(e){addItem.classList.remove('drag-over')});
- addItem.addEventListener('drop',function(e){
-  e.preventDefault();addItem.classList.remove('drag-over');
-  var bid=e.dataTransfer.getData('text/plain');
-  if(!bid)return;
-  if(bid.startsWith('series_')){toast('不能把系列放进系列','warn');return}
-  api('POST','/api/series/add-book',{series_id:seriesId,book_id:bid},function(){
-   cachedBooks=null;renderSeriesBooks();renderBookShelf();toast('已添加到系列','success');
-  });
- });
- list.appendChild(addItem);
- });
-}
-
-function _addSeriesBookItem(b,list,prepend){
- var item=document.createElement('div');
- item.className='series-book-item';
- item.dataset.bid=b.id;
- var coverHtml='<div class="sbi-cover"><img src="/api/book/'+esc(b.id)+'/cover?t='+Date.now()+'" alt="cover" style="width:100%;height:100%;object-fit:cover"></div>';
- var chNames=b.chapter_names||[];
- var chHtml='';
- if(chNames.length){
-  chHtml='<div class="sbi-chapters" data-ch-data="'+esc(JSON.stringify(chNames))+'" data-bid="'+esc(b.id)+'">';
-  chHtml+='</div>';
- }
- item.innerHTML=coverHtml+
-  '<div class="sbi-info"><div class="sbi-title">'+esc(b.title||'未命名')+'</div><div class="sbi-meta"><span>'+(b.chapter_count||0)+' 章</span><span>&#8226;</span><span>'+_formatDate(b.updated)+'</span></div></div>'+
-  chHtml+
-  '<button class="sbi-menu-btn" onclick="event.stopPropagation();toggleBookMenu(\''+esc(b.id)+'\',this)">&#8943;</button>'+
-  '<div class="book-menu-dropdown" id="bmenu_'+esc(b.id)+'" style="top:32px;right:6px"><button onclick="event.stopPropagation();openCoverUpload(\''+esc(b.id)+'\')">'+(b.has_cover?'更换封面':'上传封面')+'</button><button onclick="event.stopPropagation();renameBook(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">改书名</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'md\')">导出 Markdown</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'txt\')">导出 TXT</button><button onclick="event.stopPropagation();openEpubExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 EPUB</button><button onclick="event.stopPropagation();doExportBook(\''+esc(b.id)+'\',\'zip\')">导出 ZIP</button><button onclick="event.stopPropagation();openCooExport(\''+esc(b.id)+'\',\''+esc(b.title||'')+'\')">导出 COO</button><button class="danger-item" onclick="event.stopPropagation();removeFromSeries(\''+esc(b.id)+'\')">移出系列</button></div>'+
-  '<div class="sbi-drag" draggable="true" title="拖拽排序">&#8942;&#8942;</div>';
- _bindBookMenu(item,b,'series-item');
- item.querySelector('.sbi-info').onclick=function(){currentBookTitle=b.title;openBook(b.id)};
- item.onclick=function(e){if(e.target.closest('.sbi-ch-item,.sbi-ch-ellipsis,.sbi-menu-btn,.book-menu-dropdown,.sbi-drag'))return;currentBookTitle=b.title;openBook(b.id)};
- var dragHandle=item.querySelector('.sbi-drag');
- dragHandle.addEventListener('dragstart',function(e){
-  dragSrcIndex=Array.from(list.children).indexOf(item);
-  e.dataTransfer.effectAllowed='move';
-  e.dataTransfer.setData('text/plain',b.id);
-  item.style.opacity='0.4';
- });
- dragHandle.addEventListener('dragend',function(e){
-  item.style.opacity='1';
-  document.querySelectorAll('.series-book-item.drag-over').forEach(function(el){el.classList.remove('drag-over')});
-  dragSrcIndex=null;
-  _saveSeriesOrder();
- });
- item.addEventListener('dragover',function(e){
-  e.preventDefault();
-  e.dataTransfer.dropEffect='move';
-  if(!item.classList.contains('drag-over'))item.classList.add('drag-over');
- });
- item.addEventListener('dragleave',function(e){
-  item.classList.remove('drag-over');
- });
- item.addEventListener('drop',function(e){
-  e.preventDefault();
-  item.classList.remove('drag-over');
-  if(dragSrcIndex===null)return;
-  var items=Array.from(list.children);
-  var srcIdx=dragSrcIndex;
-  var dstIdx=items.indexOf(item);
-  if(srcIdx===dstIdx||srcIdx<0||dstIdx<0)return;
-  if(srcIdx<dstIdx){
-   list.insertBefore(items[srcIdx],items[dstIdx+1]);
-  }else{
-   list.insertBefore(items[srcIdx],items[dstIdx]);
-  }
- });
- if(prepend)list.insertBefore(item,list.firstChild);
- else list.appendChild(item);
- _renderChaptersAdaptive(item.querySelector('.sbi-chapters'));
-}
-
-var _chResizeObserver=null;
-function _initChResizeObserver(){
- if(_chResizeObserver)return;
- _chResizeObserver=new ResizeObserver(function(entries){
-  entries.forEach(function(e){
-   if(e.target.classList.contains('sbi-chapters')){
-    _renderChaptersAdaptive(e.target);
-   }
-  });
- });
-}
-
-function _renderChaptersAdaptive(container){
- if(!container)return;
- _initChResizeObserver();
- _chResizeObserver.observe(container);
- var bid=container.dataset.bid;
- try{var chNames=JSON.parse(container.dataset.chData||'[]')}catch(e){return}
- if(!chNames.length){container.innerHTML='';return}
- var availW=container.clientWidth;
- if(availW<=0){availW=container.offsetWidth||300}
- var itemW=24;
- var ellW=16;
- var gap=6;
- var total=chNames.length;
- var maxAll=total*itemW+(total-1)*gap;
- if(maxAll<=availW){
-  container.innerHTML=_buildChItemsHtml(chNames,bid);
-  return;
- }
- var n=1;
- for(var test=1;test<=total;test++){
-  var shown=Math.ceil(total/test);
-  var ellCount=shown-1;
-  var needW=shown*itemW+ellCount*(ellW+gap)+(shown-1+ellCount)*gap;
-  if(needW<=availW){n=test;break}
- }
- if(n<=1&&total>1)n=1;
- var html='';
- for(var i=0;i<total;i++){
-  if(i%n===0||i===total-1){
-   var ch=chNames[i];
-   var chId=typeof ch==='object'?ch.id:'';
-   var chTitle=typeof ch==='object'?(ch.title||'未命名'):(ch||'未命名');
-   html+='<div class="sbi-ch-item" data-bid="'+esc(bid)+'" data-cid="'+esc(chId)+'" onclick="event.stopPropagation();openBookChapter(this.dataset.bid,this.dataset.cid)">'+esc(chTitle)+'</div>';
-   if(i<total-1&&n>1){
-    html+='<div class="sbi-ch-ellipsis">⋮</div>';
-   }
-  }
- }
- container.innerHTML=html;
-}
-
-function _buildChItemsHtml(chNames,bid){
- var html='';
- for(var ci=0;ci<chNames.length;ci++){
-  var ch=chNames[ci];
-  var chId=typeof ch==='object'?ch.id:'';
-  var chTitle=typeof ch==='object'?(ch.title||'未命名'):(ch||'未命名');
-  html+='<div class="sbi-ch-item" data-bid="'+esc(bid)+'" data-cid="'+esc(chId)+'" onclick="event.stopPropagation();openBookChapter(this.dataset.bid,this.dataset.cid)">'+esc(chTitle)+'</div>';
- }
- return html;
-}
-
-function _saveSeriesOrder(){
- if(!seriesId)return;
- var items=$('seriesList').children;
- var order=[];
- for(var i=0;i<items.length;i++){
-  order.push(items[i].dataset.bid);
- }
- api('POST','/api/series/reorder',{series_id:seriesId,order:order},function(){
-  seriesBookOrder=order;
- });
-}
-
-function openSeriesAddBook(){
- if(!cachedBooks){
-  api('GET','/api/books',undefined,function(d){
-   cachedBooks=d.books||[];
-   _showSeriesAddBookModal(cachedBooks);
-  });
- }else{
-  _showSeriesAddBookModal(cachedBooks);
- }
-}
-
-function _showSeriesAddBookModal(books){
- var regularBooks=books.filter(function(b){return b.type!=='series'});
- var currentIds={};
- var items=seriesBookOrder.length?seriesBookOrder:seriesBooks.map(function(b){return b.id});
- items.forEach(function(id){currentIds[id]=true});
- var available=regularBooks.filter(function(b){return !currentIds[b.id]});
- if(!available.length){
-  toast('没有可添加的书本','warn');
-  return;
- }
- $('confirmTitle').textContent='添加书本到系列';
- var listHtml='<div style="max-height:300px;overflow-y:auto;text-align:left;margin-bottom:12px">';
- available.forEach(function(b){
-  listHtml+='<div style="padding:8px 12px;cursor:pointer;border-radius:var(--r1);margin:2px 0;transition:0s" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'transparent\'" onclick="doAddBookToSeries(\''+esc(b.id)+'\');closeConfirm()">'+esc(b.title)+' <span style="color:var(--t3);font-size:10px">'+(b.chapter_count||0)+' 章</span></div>';
- });
- listHtml+='</div>';
- $('confirmMsg').innerHTML=listHtml;
- $('confirmOkBtn').style.display='none';
- document.querySelector('#confirmBg .confirm-cancel').textContent='关闭';
- $('confirmBg').classList.add('open');
-}
-
-function doAddBookToSeries(bid){
- if(!seriesId)return;
- api('POST','/api/series/add-book',{series_id:seriesId,book_id:bid},function(){
-  cachedBooks=null;
-  renderSeriesBooks();
-  api('GET','/api/books',undefined,function(d){cachedBooks=d.books||[]});
-  toast('已添加到系列','success');
- });
-}
-
-function removeFromSeries(bid){
- document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});
- showConfirm('移出系列','确定将该书本从当前系列中移出？<br><small style="color:var(--t3)">不会删除书本本身。</small>',function(){
-  api('POST','/api/series/remove-book',{series_id:seriesId,book_id:bid},function(){
-   cachedBooks=null;
-   renderSeriesBooks();
-   toast('已移出系列','success');
-  });
- },true);
-}
-
-function _createBookInSeries(){
- if(!seriesId)return;
- showPrompt('新建书本','在「'+esc(seriesTitle)+'」中新建','新书本',function(t){
-  if(!t)return;
-  api('POST','/api/books/create',{title:t},function(d){
-   if(!d.book){toast(d.error||'创建失败','error');return}
-   api('POST','/api/series/add-book',{series_id:seriesId,book_id:d.book.id},function(){
-    cachedBooks=null;renderSeriesBooks();renderBookShelf();
-    toast('已创建并加入系列','success');
-   });
-  });
- });
-}
-
-/* === 系列AI对话 === */
-function loadSeriesAIMessages(){
- if(!seriesId){seriesAIMessages=[];renderSeriesAIMessages();return}
- api('GET','/api/book/'+seriesId+'/messages',undefined,function(d,s){
-  if(s===200&&d.messages&&d.messages.length)seriesAIMessages=d.messages;
-  else seriesAIMessages=[];
-  renderSeriesAIMessages();
-  _checkPendingSeriesChat();
- });
-}
-
-function saveSeriesAIMessages(){
- if(!seriesId)return;
- api('POST','/api/book/'+seriesId+'/messages',{messages:seriesAIMessages},function(){});
-}
-
-function renderSeriesAIMessages(){
- var c=$('seriesAIMessages');if(!c)return;
- var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
- var savedScrollTop=c.scrollTop;
- c.innerHTML='';
- if(!seriesAIMessages.length){
-  c.innerHTML='<div style="width:100%;text-align:center;font-size:10px;color:var(--t3);padding:40px 0">Luca 是你的系列规划顾问</div>';
-  _syncThinkingRotation();
-  return;
- }
- seriesAIMessages.forEach(function(m,idx){
-  if(m.type==='system'&&m.subtype==='compressed_summary')return;
-  var d=_buildAIMsgEl(m,idx,'series');
-  c.appendChild(d);
-  if(m.type==='ai'&&(m._streaming||m._pending)){
-   var rb=d.querySelector('.ai-reasoning-body');
-   if(rb)rb.scrollTop=rb.scrollHeight;
-  }
- });
- var first=c.firstElementChild;
- if(first)first.style.marginTop='auto';
- if(nearBottom)c.scrollTop=c.scrollHeight;
- else c.scrollTop=savedScrollTop;
- _syncThinkingRotation();
-}
-
-function _updateLiveSeriesAIMessage(msgIdx){
- var c=$('seriesAIMessages');
- if(!c){renderSeriesAIMessages();return}
- var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
- var m=seriesAIMessages[msgIdx];
- if(!m||m.type!=='ai')return;
- var oldEl=c.querySelector('[data-scope="series"][data-idx="'+msgIdx+'"]');
- var d=_buildAIMsgEl(m,msgIdx,'series');
- if(oldEl)oldEl.replaceWith(d);
- else c.appendChild(d);
- if(m._streaming||m._pending){
-  var rb=d.querySelector('.ai-reasoning-body');
-  if(rb)rb.scrollTop=rb.scrollHeight;
- }
- if(nearBottom)c.scrollTop=c.scrollHeight;
- _syncThinkingRotation();
- _applyThinkingWord();
-}
-
-function sendSeriesAI(){
- var text=$('seriesAIInput').value.trim();
- if(!text||!seriesId)return;
- $('seriesAIInput').value='';
- seriesAIMessages.push({text:text,type:'user'});
- seriesAIMessages.push({text:'',type:'ai',reasoning:'',_pending:true});
- renderSeriesAIMessages();
- var history=[];
- for(var i=0;i<seriesAIMessages.length-2;i++){
-  var m=seriesAIMessages[i];
-  if(m.type==='system'&&m.subtype==='compressed_summary')history.push({role:'system',content:m.text});
-  else if(m.type==='user')history.push({role:'user',content:m.text});
-  else if(m.type==='ai'&&!m._pending&&!m._streaming&&m.text)history.push({role:'assistant',content:m.text});
- }
- var msgIdx=seriesAIMessages.length-1;
- api('POST','/api/series/chat',{series_id:seriesId,text:text,history:history},function(d,s){
-  if(s!==200||!d.task_id){
-   var m=seriesAIMessages[msgIdx];if(m){m._pending=false;m.text='[错误: '+(d.error||'')+']';m.reasoning='';}
-   renderSeriesAIMessages();saveSeriesAIMessages();return;
-  }
-  var tid=d.task_id;
-  var m=seriesAIMessages[msgIdx];if(m)m.task_id=tid;
-  if(seriesAIChatTimer)clearInterval(seriesAIChatTimer);
-  seriesAIChatTimer=setInterval(function(){
-   api('GET','/api/book/'+seriesId+'/task/status?task_id='+tid,undefined,function(st){
-    if(!st||!st.status){clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;return}
-    var m=seriesAIMessages[msgIdx];
-    if(st.status==='done'){
-     clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;
-     if(m){m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';}
-     renderSeriesAIMessages();saveSeriesAIMessages();
-     if(st.needs_series_summary){
-      toggleSeriesSummary();
-      setTimeout(function(){startSeriesRT()},500);
-     }
-    }else if(st.status==='error'){
-     clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;
-     if(m){m._pending=false;m.text='[错误: '+(st.error||'生成失败')+']';m.reasoning='';}
-     renderSeriesAIMessages();saveSeriesAIMessages();
-    }else if(st.status==='running'){
-     if(m){m.text=st.result||'';m.reasoning=st.reasoning||'';m._pollTick=(m._pollTick||0)+1;}
-     _updateLiveSeriesAIMessage(msgIdx);
-    }
-   });
-  },600);
-  setTimeout(function(){if(seriesAIChatTimer){clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;}},180000);
- });
-}
-
-function clearSeriesAIChat(){
- seriesAIMessages=[];
- renderSeriesAIMessages();
- api('POST','/api/book/'+seriesId+'/clear-chat',{},function(){});
-}
-
-function _checkPendingSeriesChat(){
- for(var i=0;i<seriesAIMessages.length;i++){
-  var m=seriesAIMessages[i];
-  if(m.type==='ai'&&m._pending&&m.task_id){
-   var tid=m.task_id;
-   if(seriesAIChatTimer)clearInterval(seriesAIChatTimer);
-   seriesAIChatTimer=setInterval(function(){
-    api('GET','/api/book/'+seriesId+'/task/status?task_id='+tid,undefined,function(st){
-     if(!st||!st.status){clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;return}
-     if(st.status==='done'){
-      clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;
-      m._pending=false;m.text=st.result||'';m.reasoning=st.reasoning||'';
-      renderSeriesAIMessages();saveSeriesAIMessages();
-      if(st.needs_series_summary){
-       toggleSeriesSummary();
-       setTimeout(function(){startSeriesRT()},500);
-      }
-     }else if(st.status==='error'){
-      clearInterval(seriesAIChatTimer);seriesAIChatTimer=null;
-      m._pending=false;m.text='[错误: '+(st.error||'')+']';m.reasoning='';
-      renderSeriesAIMessages();saveSeriesAIMessages();
-     }else if(st.status==='running'){
-       m.text=st.result||'';m.reasoning=st.reasoning||'';m._pollTick=(m._pollTick||0)+1;
-       _updateLiveSeriesAIMessage(i);
-      }
-    });
-   },600);
-   return;
-  }
- }
-}
-
-/* === 系列摘要 === */
-var _seriesRTPoll=null;
-function toggleSeriesSummary(){
- if(!seriesId)return;
- var rt=$('seriesRT');var chat=$('seriesChatPanel');
- var open=(rt.style.display!=='none');
- if(open){
-  rt.style.display='none';chat.style.display='';
- }else{
-  chat.style.display='none';rt.style.display='';
-  if(!_seriesRTPoll)_pollSeriesRT();
- }
-}
-
-function _pollSeriesRT(){
- if(_seriesRTPoll)return;
- _seriesRTPoll=setInterval(function(){
-  api('GET','/api/series/'+seriesId+'/summary/status',undefined,function(d){
-   if(!d||d.status==='idle'){
-    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始系列摘要';
-    return;
-   }
-   if(d.stream_buffer)$('seriesRTStream').textContent=d.stream_buffer||'';
-   $('seriesRTProgress').style.width=(d.progress||0)+'%';
-   $('seriesRTPhase').textContent=d.phase||'';
-   $('seriesRTChapters').textContent=(d.done_chapters||0)+'/'+(d.total_chapters||0);
-   if(d.status==='done'){
-    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='重新摘要';
-    $('seriesRTPhase').textContent='完成';
-    toast('系列摘要完成！','success');
-   }else if(d.status==='error'){
-    $('seriesRTStartBtn').style.display='';$('seriesRTStartBtn').textContent='开始系列摘要';
-    $('seriesRTPhase').textContent=(d.error||'错误');
-   }else if(d.status==='running'){
-    $('seriesRTStartBtn').textContent='摘要中...';
-   }
-  });
- },500);
-}
-
-function startSeriesRT(){
- if(!seriesId){toast('请先进入系列','warn');return}
- api('GET','/api/series/'+seriesId+'/readthrough/status',undefined,function(d){
-  if(d&&d.status==='running'){
-   api('POST','/api/series/'+seriesId+'/readthrough/stop',{},function(){
-    toast('正在停止...','warn');
-   });
-   return;
-  }
-  $('seriesRTStream').textContent='';
-  $('seriesRTProgress').style.width='0%';$('seriesRTPhase').textContent='启动中...';$('seriesRTChapters').textContent='0/0';
-  $('seriesRTStartBtn').textContent='摘要中...';
-  api('POST','/api/series/'+seriesId+'/readthrough/start',{},function(d){
-   if(!d||d.error){toast(d&&d.error||'启动失败','error');$('seriesRTStartBtn').textContent='开始系列摘要';return}
-   _pollSeriesRT();
-  });
- });
 }
 
 /* === 封面上传 + 裁剪 === */
 var _cropImg=null,_cropRect=null,_cropMode=null,_cropDragX=0,_cropDragY=0,_cropRatioW=3,_cropRatioH=4,_cropHandleR=10;
 
-function openCoverUpload(bid){
+function openCoverUpload(bid,kind){
  document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});
  coverUploadBookId=bid;
+ coverUploadKind=kind||'book';
+ var heading=document.querySelector('#coverUploadModal h2');if(heading)heading.textContent=coverUploadKind==='work'?'上传作品封面':'上传书本封面';
  _cropImg=null;_cropRect=null;_cropMode=null;_cropRatioW=3;_cropRatioH=4;
  $('coverUploadArea').style.display='';
  $('coverCropContainer').style.display='none';
@@ -6083,9 +6154,10 @@ function openCoverUpload(bid){
  document.querySelectorAll('.cover-crop-ratio-btn').forEach(function(b){b.classList.remove('active')});
  var fb=document.querySelector('.cover-crop-ratio-btn[data-w="3"]');
  if(fb)fb.classList.add('active');
- api('GET','/api/book/'+bid+'/cover',undefined,function(d,s){
+ var coverUrl='/api/'+(coverUploadKind==='work'?'work':'book')+'/'+bid+'/cover';
+ api('GET',coverUrl,undefined,function(d,s){
   if(s===200){
-   $('coverUploadPreview').src='/api/book/'+bid+'/cover?t='+Date.now();
+   $('coverUploadPreview').src=coverUrl+'?t='+Date.now();
    $('coverUploadPreview').style.display='';
    $('coverUploadHint').style.display='none';
    $('coverSaveBtn').style.display='';
@@ -6266,11 +6338,12 @@ function doUploadCover(){
   src=oc.toDataURL('image/jpeg',0.9);
  }else{src=$('coverUploadPreview').src}
  if(!src||src===''||src===location.href){toast('请先选择图片','warn');return}
- api('POST','/api/book/'+coverUploadBookId+'/upload-cover',{cover:src},function(d){
+ var uploadUrl='/api/'+(coverUploadKind==='work'?'work':'book')+'/'+coverUploadBookId+'/upload-cover';
+ api('POST',uploadUrl,{cover:src},function(d){
   if(d.ok){
-   closeModal('coverUploadModal');cachedBooks=null;coverUploadBookId=null;
+   closeModal('coverUploadModal');cachedBooks=null;cachedWorks=null;coverUploadBookId=null;
    _cropImg=null;_cropRect=null;_cropMode=null;
-   renderBookShelf();if(seriesId)renderSeriesBooks();
+   if(workId)loadCurrentWork();else renderBookShelf();
    toast('封面已保存','success');
   }else{toast(d.error||'上传失败','error')}
  });
@@ -6542,6 +6615,7 @@ function loadOutlineSource(){
 }
 function loadSourceToRT(){
  if(!bookId)return;
+ if(!$('rtSource'))return;
  api('GET','/api/book/'+bookId+'/readthrough/file?type=source',undefined,function(d,s){
  var ss=$('rtSource');
  if(s===200 && d.exists && d.text){
@@ -6813,6 +6887,7 @@ function _setRTButtonUI(status, currentIdx, doneCount, totalCount){
  }
 }
 function pollRTStatus(){
+ if(!$('rtPhase')||!$('rtStartBtn'))return;
  clearInterval(rtPollTimer);
  rtPollTimer=setInterval(function(){api('GET','/api/book/'+bookId+'/readthrough/status',undefined,updateRTUI);},400);
  api('GET','/api/book/'+bookId+'/readthrough/status',undefined,updateRTUI);
@@ -7159,13 +7234,6 @@ function findEntity(name){
  openSearch(name);
 }
 
-function startRTFromChat(){
- if(!bookId)return;
- showConfirm('','确认开始摘要吗？',function(){
- switchBottomTab('summary');
- startRT();
- });
-}
 
 var _editorCursorPos=null;
 document.addEventListener('keydown',function(e){
