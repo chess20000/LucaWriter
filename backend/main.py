@@ -2286,6 +2286,17 @@ def _work_detail(work_id):
                 kb_hash = kb_ch.get('content_hash') or ''
                 if kb_status == 'done':
                     rr_status = 'unchanged' if kb_hash == ch_hash else 'changed'
+            # Also check work-level KB (COO v2 shared knowledge base)
+            if rr_status == 'unread':
+                try:
+                    kb_storage.init_db(work_id)
+                    w_ch = kb_storage.get_chapter(work_id, f'{bid}::{cid}')
+                except: w_ch = None
+                if w_ch:
+                    w_status = w_ch.get('status') or 'pending'
+                    w_hash = w_ch.get('content_hash') or ''
+                    if w_status == 'done':
+                        rr_status = 'unchanged' if w_hash == ch_hash else 'changed'
             row = {
                 'id': cid,
                 'title': ch.get('title', f'第{idx + 1}章'),
@@ -3910,6 +3921,49 @@ class Handler(BaseHTTPRequestHandler):
                     'server_url': work.get('coo_server_url', ''),
                     'email': work.get('coo_email', ''),
                 }); return
+            if sub == 'sync-kb':
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置 API'}); return
+                work = get_work_meta(wid) or {}
+                bids = work.get('book_ids', [])
+                if not bids:
+                    self.json_resp(200, {'status': 'no_books', 'msg': '作品下没有书本'}); return
+                # Check for running readthrough on any book
+                for bid in bids:
+                    try:
+                        kb_storage.init_db(bid)
+                        st = kb_storage.get_rt_state(bid)
+                    except: st = None
+                    if st and st.get('status') == 'running':
+                        self.json_resp(409, {'error': f'书本 {bid} 正在通读中，请稍后再试'}); return
+                # Collect changed chapter IDs per book
+                book_changes = {}
+                total_changed = 0
+                for bid in bids:
+                    meta = get_book_meta(bid) or {}
+                    changed_ids = []
+                    for cid in (meta.get('chapter_order') or []):
+                        ch = _read_chapter_file(bid, cid) or {}
+                        ch_hash = hashlib.md5((ch.get('content', '') or '').encode()).hexdigest()
+                        try:
+                            kb_ch = kb_storage.get_chapter(bid, cid)
+                        except: kb_ch = None
+                        if not kb_ch or kb_ch.get('status') != 'done' or kb_ch.get('content_hash', '') != ch_hash:
+                            changed_ids.append(cid)
+                    if changed_ids:
+                        book_changes[bid] = changed_ids
+                        total_changed += len(changed_ids)
+                if not book_changes:
+                    self.json_resp(200, {'status': 'no_changes', 'msg': '所有书本已是最新'}); return
+                # Start background sync thread
+                tid = bg_task_start('work-sync-kb', wid, f'同步 {len(book_changes)} 本书')
+                threading.Thread(
+                    target=_do_work_sync_kb,
+                    args=(tid, wid, book_changes, settings),
+                    daemon=True,
+                ).start()
+                self.json_resp(200, {'status': 'started', 'books': len(book_changes), 'chapters': total_changed}); return
             if sub == 'readthrough':
                 action = parts[5] if len(parts) > 5 else 'status'
                 if action == 'status':
@@ -4398,7 +4452,8 @@ class Handler(BaseHTTPRequestHandler):
             if st and st.get('status') == 'running':
                 self.json_resp(409, {'error': '通读正在进行中'}); return
             meta = get_book_meta(bid) or {}
-            changed_ids = []
+            # Count changed chapters for the response
+            changed_count = 0
             for cid in (meta.get('chapter_order') or []):
                 ch = _read_chapter_file(bid, cid) or {}
                 ch_hash = hashlib.md5((ch.get('content', '') or '').encode()).hexdigest()
@@ -4406,16 +4461,19 @@ class Handler(BaseHTTPRequestHandler):
                     kb_ch = kb_storage.get_chapter(bid, cid)
                 except: kb_ch = None
                 if not kb_ch or kb_ch.get('status') != 'done' or kb_ch.get('content_hash', '') != ch_hash:
-                    changed_ids.append(cid)
-            if not changed_ids:
+                    changed_count += 1
+            if changed_count == 0:
                 self.json_resp(200, {'status': 'no_changes', 'msg': '所有章节已通读且无更改'}); return
+            # Use do_readthrough which handles incremental re-read with prior records
+            cfg = get_readthrough_config(bid)
+            if cfg.get('model'): settings['model'] = cfg['model']
             tid = bg_task_start('reread-incremental', bid, '更新')
             threading.Thread(
-                target=_do_kb_reread_task,
-                args=(tid, bid, changed_ids, True, {}, settings),
+                target=_do_readthrough_wrapper,
+                args=(bid, settings, cfg, True),
                 daemon=True,
             ).start()
-            self.json_resp(200, {'status': 'started', 'chapters': len(changed_ids)}); return
+            self.json_resp(200, {'status': 'started', 'chapters': changed_count}); return
 
         # 通用后台任务状态查询
         if path.startswith('/api/book/') and '/task/' in path:
@@ -10702,6 +10760,33 @@ def _run_timeline_arrange_task(task_id, book_id, cfg_settings):
         bg_task_update(task_id, progress=10)
         result = kb_pipeline.arrange_timeline_ai(book_id, cfg_settings)
         bg_task_update(task_id, progress=100, result=json.dumps(result, ensure_ascii=False))
+        bg_task_done(task_id)
+    except Exception as e:
+        bg_task_done(task_id, str(e))
+
+
+def _do_work_sync_kb(task_id, work_id, book_changes, cfg_settings):
+    """增量同步：构建章节列表，调用 kb_pipeline.sync_work_chapters 逐章重读纠错。"""
+    try:
+        # Build flat chapter list from book_changes {bid: [cid, ...]}
+        chapter_list = []
+        idx = 0
+        for bid, cids in book_changes.items():
+            book_title = (get_book_meta(bid) or {}).get('title', bid)
+            for cid in cids:
+                ch = _read_chapter_file(bid, cid) or {}
+                chapter_list.append({
+                    'book_id': bid,
+                    'chapter_id': cid,
+                    'title': f'[{book_title}] {ch.get("title", cid)}',
+                    'content': ch.get('content', ''),
+                    'idx': idx,
+                })
+                idx += 1
+        bg_task_update(task_id, progress=5, phase=f'准备同步 {len(chapter_list)} 章')
+        result = kb_pipeline.sync_work_chapters(work_id, chapter_list, cfg_settings)
+        bg_task_update(task_id, progress=100, phase='同步完成',
+                       result=json.dumps(result, ensure_ascii=False))
         bg_task_done(task_id)
     except Exception as e:
         bg_task_done(task_id, str(e))

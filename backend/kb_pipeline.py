@@ -1102,6 +1102,128 @@ def _resolve_reading_order(work_id, books_meta, reading_order=None):
     return result
 
 
+def sync_work_chapters(work_id, chapter_list, settings):
+    """增量同步：只重读有变更的章节，带数据库记忆纠错。
+
+    work_id: 世界观 ID（共享知识库）
+    chapter_list: [{book_id, chapter_id, title, content, idx}, ...]
+    """
+    m = _main()
+    set_conn_meta = m['set_conn_meta']
+    _get_effective_context_length = m['_get_effective_context_length']
+    render_markdown_views_fn = render_markdown_views
+
+    set_conn_meta('sync-kb', '增量同步', work_id)
+    init_db(work_id)
+
+    if not chapter_list:
+        set_rt_state(work_id, status='done', phase='无需同步')
+        return {'synced': 0, 'skipped': 0, 'failed': 0}
+
+    total = len(chapter_list)
+    set_rt_state(work_id, status='running', phase='准备中', total=total,
+                 current_idx=-1, active_start_idx=-1, active_end_idx=-1,
+                 pause_requested=0, stream_buffer='', error='')
+    rt_log(work_id, f'增量同步: {total} 章有变更')
+
+    def stop_check():
+        st = get_rt_state(work_id)
+        return bool(st and st['pause_requested'])
+
+    synced = 0
+    skipped = 0
+    failed = 0
+
+    for pos, ch_info in enumerate(chapter_list):
+        if stop_check():
+            set_rt_state(work_id, status='paused', phase='已暂停',
+                         current_idx=pos, active_start_idx=-1, active_end_idx=-1,
+                         stream_buffer='增量同步已暂停。')
+            rt_log(work_id, '用户暂停')
+            break
+
+        bid = ch_info['book_id']
+        cid = ch_info['chapter_id']
+        title = ch_info.get('title', '')
+        content = ch_info.get('content', '')
+        ch_idx = ch_info.get('idx', pos)
+        storage_id = f'{bid}::{cid}'
+
+        # Check if already up-to-date
+        existing = get_chapter(work_id, storage_id)
+        content_hash_val = hash_content(content)
+        if existing and existing['status'] == 'done' and existing.get('content_hash') == content_hash_val:
+            rt_log(work_id, f'跳过未变更: {title}')
+            skipped += 1
+            continue
+
+        # Load prior records for re-read with DB context
+        reread_prior = _chapter_kb_records_for_reread(work_id, storage_id) if (existing and existing['status'] == 'done') else None
+        set_rt_state(work_id, current_idx=pos,
+                     phase=(f'重读纠错: {title}' if reread_prior else f'读: {title}'),
+                     active_start_idx=pos, active_end_idx=pos,
+                     stream_buffer=(f'{title} 有改动，带着旧笔记重读纠错…' if reread_prior else f'正在思考: {title}'))
+        upsert_chapter(work_id, storage_id, idx=ch_idx, title=title,
+                      content_hash=content_hash_val, status='processing', error='')
+
+        try:
+            prev_ctx = _build_prev_context(work_id, max_chars=6000)
+            structured = ai_read_chapter_structured(
+                settings,
+                {'idx': ch_idx, 'id': cid, 'title': title, 'content': content},
+                prev_context=prev_ctx, prior_records=reread_prior,
+                on_token=lambda _tk: set_rt_state(work_id, stream_buffer='模型已返回，正在写入知识库...'),
+                should_stop_fn=stop_check,
+            )
+        except StoppedException:
+            upsert_chapter(work_id, storage_id, status='pending')
+            set_rt_state(work_id, status='paused', phase='已暂停',
+                         current_idx=pos, active_start_idx=-1, active_end_idx=-1,
+                         stream_buffer='增量同步已暂停。')
+            break
+        except Exception as e:
+            if stop_check():
+                upsert_chapter(work_id, storage_id, status='pending')
+                set_rt_state(work_id, status='paused', phase='已暂停')
+                break
+            upsert_chapter(work_id, storage_id, status='failed', error=str(e)[:500])
+            rt_log(work_id, f'失败: {title} ({str(e)[:100]})')
+            failed += 1
+            continue
+
+        apply_structured_result(work_id, storage_id, structured, chapter_idx=ch_idx)
+        upsert_chapter(work_id, storage_id, idx=ch_idx, title=title,
+                      status='done',
+                      summary=structured['summary'],
+                      content_hash=content_hash_val,
+                      error='')
+        synced += 1
+        rt_log(work_id, f'完成 ({pos + 1}/{total}) {title}')
+
+    # Rebuild indices
+    if synced > 0:
+        set_rt_state(work_id, phase='建立索引', active_start_idx=-1, active_end_idx=-1,
+                     stream_buffer='正在重建检索索引...')
+        rt_log(work_id, '重建检索索引')
+        try:
+            incremental_embed(work_id, settings)
+        except Exception:
+            pass
+        try:
+            render_markdown_views_fn(work_id)
+        except Exception:
+            pass
+
+    if failed:
+        set_rt_state(work_id, status='error', phase=f'{failed} 章失败',
+                     error=f'{failed} 章失败')
+    else:
+        set_rt_state(work_id, status='done', phase='同步完成',
+                     stream_buffer=f'增量同步完成: {synced} 章已更新')
+
+    return {'synced': synced, 'skipped': skipped, 'failed': failed}
+
+
 def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_title='', config=None, resume=False):
     """COO v2 世界观级通读：按 reading_order 遍历所有子书章节 + lore + 卷次边界。
 
