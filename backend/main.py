@@ -3976,6 +3976,51 @@ class Handler(BaseHTTPRequestHandler):
                         'status': 'idle', 'phase': '', 'current_idx': -1,
                         'total': 0, 'stream_buffer': '', 'error': '',
                     }
+                    # Always check books to detect stale work-level state
+                    work = get_work_meta(wid) or {}
+                    any_book_running = False
+                    for bid in (work.get('book_ids') or []):
+                        try:
+                            kb_storage.init_db(bid)
+                            bst = kb_storage.get_rt_state(bid)
+                        except Exception:
+                            bst = None
+                        if bst and bst.get('status') == 'running':
+                            # Check if the readthrough thread is actually alive
+                            t = threading.enumerate()
+                            alive = any(t_.name == f'kb_readthrough_{bid}' for t_ in t if t_.is_alive())
+                            updated = bst.get('updated_at', 0)
+                            just_started = updated and (time.time() - updated) < 8
+                            if not alive and not just_started:
+                                kb_storage.set_rt_state(bid, status='paused', phase='进程已退出，可继续')
+                                continue
+                            any_book_running = True
+                            resp['status'] = 'running'
+                            resp['phase'] = bst.get('phase', '通读中')
+                            resp['stream_buffer'] = bst.get('stream_buffer', '')
+                            resp['total'] = bst.get('total', 0)
+                            resp['current_idx'] = bst.get('current_idx', -1)
+                    if not any_book_running and resp.get('status') == 'running':
+                        # No child books running — check if work-level thread is alive
+                        t = threading.enumerate()
+                        work_alive = any(t_.name == f'kb_readthrough_{wid}' for t_ in t if t_.is_alive())
+                        updated = resp.get('updated_at', 0)
+                        just_started = updated and (time.time() - updated) < 8
+                        if not work_alive and not just_started:
+                            # Work-level state is stale — neither books nor work thread running
+                            kb_storage.set_rt_state(wid, status='idle',
+                                error='通读进程已退出，已自动恢复。')
+                            resp['status'] = 'idle'
+                            resp['error'] = '通读进程已退出，已自动恢复。'
+                            resp['phase'] = ''
+                    # Auto-recover stuck readthrough: if running but not updated in 5 min, mark as timed out
+                    if resp.get('status') == 'running':
+                        updated = resp.get('updated_at', 0)
+                        if updated and (time.time() - updated) > 300:
+                            kb_storage.set_rt_state(wid, status='idle',
+                                error='通读超时（超过5分钟未更新），已自动恢复。请重新开始。')
+                            resp['status'] = 'idle'
+                            resp['error'] = '通读超时（超过5分钟未更新），已自动恢复。请重新开始。'
                     resp['recent_logs'] = kb_storage.get_rt_logs(wid, 30)
                     resp['done_count'] = kb_storage.get_done_chapter_count(wid)
                     resp['has_source'] = bool(get_source(wid))
@@ -3993,6 +4038,65 @@ class Handler(BaseHTTPRequestHandler):
                         self.json_resp(400, {'error': '未知文件类型'}); return
                     text = getter(wid)
                     self.json_resp(200, {'text': text, 'exists': bool(text), 'type': ft}); return
+                if action == 'start':
+                    settings = get_settings()
+                    prov = get_ai_providers()
+                    if not settings.get('base_url'):
+                        p = (prov.get('providers', [{}])[0] if prov.get('providers') else {})
+                        if p: settings.update({'base_url': p.get('base_url',''), 'api_key': p.get('api_key',''), 'model': p.get('model',''), 'mode': p.get('mode','basic'), 'template_id': p.get('template_id','openai')})
+                    if not settings.get('base_url') or not settings.get('model'):
+                        self.json_resp(400, {'error': '请先配置API'}); return
+                    work = get_work_meta(wid) or {}
+                    bids = work.get('book_ids', [])
+                    if not bids:
+                        self.json_resp(200, {'status': 'no_books'}); return
+                    started = 0
+                    for bid in bids:
+                        try:
+                            kb_storage.init_db(bid)
+                            st = kb_storage.get_rt_state(bid)
+                        except: st = None
+                        if st and st.get('status') == 'running':
+                            continue
+                        cfg = get_readthrough_config(bid)
+                        if cfg.get('model'): settings['model'] = cfg['model']
+                        total = len((get_book_meta(bid) or {}).get('chapter_order', []) or [])
+                        kb_storage.set_rt_state(bid, status='running', phase='启动中', total=total,
+                                                current_idx=-1, active_start_idx=-1, active_end_idx=-1,
+                                                pause_requested=0, stream_buffer='', error='')
+                        threading.Thread(target=_do_readthrough_wrapper, args=(bid, settings, cfg, False),
+                                         name=f'kb_readthrough_{bid}', daemon=True).start()
+                        started += 1
+                    if started > 0:
+                        kb_storage.init_db(wid)
+                        kb_storage.set_rt_state(wid, status='running', phase=f'已启动 {started} 本书', total=sum(
+                            len((get_book_meta(bid) or {}).get('chapter_order', []) or []) for bid in bids),
+                            current_idx=-1, stream_buffer='', error='')
+                    self.json_resp(200, {'status': 'started', 'books': started}); return
+                if action == 'pause':
+                    work = get_work_meta(wid) or {}
+                    bids = work.get('book_ids', [])
+                    paused = 0
+                    for bid in bids:
+                        try:
+                            kb_storage.init_db(bid)
+                            st = kb_storage.get_rt_state(bid)
+                        except: st = None
+                        if st and st.get('status') == 'running':
+                            kb_storage.set_rt_state(bid, phase='暂停中')
+                            kb_storage.set_pause_requested(bid, True)
+                            close_connections_by_book(bid)
+                            paused += 1
+                    if paused > 0:
+                        kb_storage.init_db(wid)
+                        kb_storage.set_rt_state(wid, status='idle', phase='已暂停',
+                                                stream_buffer='', error='')
+                    else:
+                        # No books running — ensure work state is clean
+                        kb_storage.init_db(wid)
+                        kb_storage.set_rt_state(wid, status='idle', phase='',
+                                                stream_buffer='', error='')
+                    self.json_resp(200, {'status': 'paused', 'books': paused}); return
             if sub == 'edit-log':
                 try:
                     work = get_work_meta(wid) or {}
@@ -4011,6 +4115,18 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(200, {'logs': logs[:30]}); return
                 except Exception as e:
                     self.json_resp(500, {'error': str(e)}); return
+            if sub == 'lore-trash-list':
+                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                items = []
+                if os.path.isdir(trash_dir):
+                    for fn in sorted(os.listdir(trash_dir), reverse=True):
+                        if fn.endswith('.json') and not fn.endswith('.meta.json'):
+                            item = load_json(os.path.join(trash_dir, fn), dict)
+                            if item and item.get('id'):
+                                meta = load_json(os.path.join(trash_dir, f"{item['id']}.meta.json"), dict)
+                                item['_trash_meta'] = meta
+                                items.append(item)
+                self.json_resp(200, {'trash': items}); return
 
         if path == '/api/books':
             books = []
@@ -5000,6 +5116,99 @@ class Handler(BaseHTTPRequestHandler):
                 save_work_meta(wid, work)
                 self.json_resp(200, {'ok': True}); return
 
+            if action == 'lore-trash':
+                # Move lore to .trash folder instead of deleting
+                lid = str(data.get('lore_id') or '')
+                if not is_valid_id(lid):
+                    self.json_resp(400, {'error': '档案 ID 无效'}); return
+                lore_path = os.path.join(WORKS_DIR, wid, 'lore', f'{lid}.json')
+                if not os.path.isfile(lore_path):
+                    self.json_resp(404, {'error': '档案不存在'}); return
+                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                os.makedirs(trash_dir, exist_ok=True)
+                # Record original position in reading_order for restore
+                ro = work.get('reading_order', [])
+                orig_pos = None
+                for i, entry in enumerate(ro):
+                    if isinstance(entry, dict) and entry.get('type') == 'lore' and entry.get('ref') == lid:
+                        orig_pos = i
+                        break
+                meta = {'original_position': orig_pos, 'trashed_at': time.time()}
+                save_json(os.path.join(trash_dir, f'{lid}.meta.json'), meta)
+                shutil.move(lore_path, os.path.join(trash_dir, f'{lid}.json'))
+                work['reading_order'] = [
+                    x for x in ro
+                    if not (isinstance(x, dict) and x.get('type') == 'lore' and x.get('ref') == lid)
+                ]
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'lore-restore':
+                lid = str(data.get('lore_id') or '')
+                if not is_valid_id(lid):
+                    self.json_resp(400, {'error': '档案 ID 无效'}); return
+                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                trash_path = os.path.join(trash_dir, f'{lid}.json')
+                if not os.path.isfile(trash_path):
+                    self.json_resp(404, {'error': '回收站中未找到该档案'}); return
+                lore_dir = os.path.join(WORKS_DIR, wid, 'lore')
+                # Restore file
+                shutil.move(trash_path, os.path.join(lore_dir, f'{lid}.json'))
+                # Read meta for original position
+                meta_path = os.path.join(trash_dir, f'{lid}.meta.json')
+                meta = load_json(meta_path, dict)
+                try:
+                    os.remove(meta_path)
+                except OSError:
+                    pass
+                # Find position: try original, else find empty slot
+                ro = work.get('reading_order', [])
+                target_pos = meta.get('original_position')
+                if target_pos is not None and target_pos < len(ro):
+                    ro.insert(target_pos, {'type': 'lore', 'ref': lid})
+                else:
+                    ro.append({'type': 'lore', 'ref': lid})
+                work['reading_order'] = ro
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'lore-trash-list':
+                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                items = []
+                if os.path.isdir(trash_dir):
+                    for fn in sorted(os.listdir(trash_dir), reverse=True):
+                        if fn.endswith('.json') and not fn.endswith('.meta.json'):
+                            item = load_json(os.path.join(trash_dir, fn), dict)
+                            if item and item.get('id'):
+                                meta = load_json(os.path.join(trash_dir, f"{item['id']}.meta.json"), dict)
+                                item['_trash_meta'] = meta
+                                items.append(item)
+                self.json_resp(200, {'trash': items}); return
+
+            if action == 'lore-trash-clear':
+                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                if os.path.isdir(trash_dir):
+                    shutil.rmtree(trash_dir, ignore_errors=True)
+                self.json_resp(200, {'ok': True}); return
+
+            if action == 'lore-reorder':
+                # Accept a list of lore IDs in desired order
+                order = data.get('order')
+                if not isinstance(order, list):
+                    self.json_resp(400, {'error': 'order 必须是数组'}); return
+                valid_ids = {x['id'] for x in _work_lore_items(wid)}
+                new_ro = []
+                for lid in order:
+                    if lid in valid_ids:
+                        new_ro.append({'type': 'lore', 'ref': lid})
+                # Append any lore not in the order list
+                for lid in valid_ids:
+                    if lid not in order:
+                        new_ro.append({'type': 'lore', 'ref': lid})
+                work['reading_order'] = new_ro
+                save_work_meta(wid, work)
+                self.json_resp(200, {'ok': True}); return
+
             if action == 'delete':
                 for bid in work.get('book_ids') or []:
                     shutil.rmtree(os.path.join(BOOKS_DIR, bid), ignore_errors=True)
@@ -5138,6 +5347,50 @@ class Handler(BaseHTTPRequestHandler):
                     'needs_readthrough': True,
                 }); return
 
+            if action == 'sync-kb':
+                settings = get_settings()
+                if not settings.get('base_url') or not settings.get('model'):
+                    self.json_resp(400, {'error': '请先配置 API'}); return
+                work = get_work_meta(wid) or {}
+                bids = work.get('book_ids', [])
+                if not bids:
+                    self.json_resp(200, {'status': 'no_books', 'msg': '作品下没有书本'}); return
+                # Check for running readthrough on any book
+                for bid in bids:
+                    try:
+                        kb_storage.init_db(bid)
+                        st = kb_storage.get_rt_state(bid)
+                    except: st = None
+                    if st and st.get('status') == 'running':
+                        self.json_resp(409, {'error': f'书本 {bid} 正在通读中，请稍后再试'}); return
+                # Collect changed chapter IDs per book
+                book_changes = {}
+                total_changed = 0
+                for bid in bids:
+                    meta = get_book_meta(bid) or {}
+                    changed_ids = []
+                    for cid in (meta.get('chapter_order') or []):
+                        ch = _read_chapter_file(bid, cid) or {}
+                        ch_hash = hashlib.md5((ch.get('content', '') or '').encode()).hexdigest()
+                        try:
+                            kb_ch = kb_storage.get_chapter(bid, cid)
+                        except: kb_ch = None
+                        if not kb_ch or kb_ch.get('status') != 'done' or kb_ch.get('content_hash', '') != ch_hash:
+                            changed_ids.append(cid)
+                    if changed_ids:
+                        book_changes[bid] = changed_ids
+                        total_changed += len(changed_ids)
+                if not book_changes:
+                    self.json_resp(200, {'status': 'no_changes', 'msg': '所有书本已是最新'}); return
+                # Start background sync thread
+                tid = bg_task_start('work-sync-kb', wid, f'同步 {len(book_changes)} 本书')
+                threading.Thread(
+                    target=_do_work_sync_kb,
+                    args=(tid, wid, book_changes, settings),
+                    daemon=True,
+                ).start()
+                self.json_resp(200, {'status': 'started', 'books': len(book_changes), 'chapters': total_changed}); return
+
             if action == 'readthrough':
                 sub = parts[5] if len(parts) > 5 else 'start'
                 if sub == 'start':
@@ -5150,7 +5403,14 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         st = None
                     if st and st.get('status') == 'running':
-                        self.json_resp(409, {'error': '作品通读正在进行中'}); return
+                        # Auto-recover: if stuck for >5 min, allow restart
+                        updated = st.get('updated_at', 0)
+                        if updated and (time.time() - updated) > 300:
+                            kb_storage.set_rt_state(wid, status='idle',
+                                error='通读超时，已自动恢复')
+                            st = None  # allow restart
+                        else:
+                            self.json_resp(409, {'error': '作品通读正在进行中'}); return
                     resume = bool(data.get('resume'))
                     threading.Thread(
                         target=_do_work_readthrough_wrapper,
@@ -10777,6 +11037,7 @@ def _do_work_sync_kb(task_id, work_id, book_changes, cfg_settings):
                 ch = _read_chapter_file(bid, cid) or {}
                 chapter_list.append({
                     'book_id': bid,
+                    'book_title': book_title,
                     'chapter_id': cid,
                     'title': f'[{book_title}] {ch.get("title", cid)}',
                     'content': ch.get('content', ''),

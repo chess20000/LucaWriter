@@ -304,7 +304,8 @@ def upsert_chapter(book_id, chapter_id, idx=None, title=None, content_hash=None,
 def get_chapter(book_id, chapter_id):
     conn = _get_conn(book_id)
     try:
-        return conn.execute('SELECT * FROM chapters WHERE id=? AND book_id=?', (chapter_id, book_id)).fetchone()
+        row = conn.execute('SELECT * FROM chapters WHERE id=? AND book_id=?', (chapter_id, book_id)).fetchone()
+        return dict(row) if row else None
     finally:
         conn.close()
 

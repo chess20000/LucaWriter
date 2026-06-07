@@ -1159,6 +1159,7 @@ def sync_work_chapters(work_id, chapter_list, settings):
 
         # Load prior records for re-read with DB context
         reread_prior = _chapter_kb_records_for_reread(work_id, storage_id) if (existing and existing['status'] == 'done') else None
+        # title from _do_work_sync_kb already includes [book_title] prefix; use as-is
         set_rt_state(work_id, current_idx=pos,
                      phase=(f'重读纠错: {title}' if reread_prior else f'读: {title}'),
                      active_start_idx=pos, active_end_idx=pos,
@@ -1371,25 +1372,26 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
 
                 ch_idx = item.get('chapter_idx', chapter_count)
                 ch_title = item.get('chapter_title', ch.get('title', f'第{chapter_count+1}章'))
+                book_title = item.get('book_title', book_id)
                 content = ch.get('content', '')
 
                 if _is_content_empty(content):
-                    rt_log(work_id, f'跳过空章节: {ch_title}')
+                    rt_log(work_id, f'跳过空章节: 《{book_title}》{ch_title}')
                     continue
 
                 # 检查是否已处理
                 storage_id = f'{book_id}::{chapter_id}'
                 existing = get_chapter(work_id, storage_id)
                 if existing and existing['status'] == 'done' and existing.get('content_hash') == hash_content(content):
-                    rt_log(work_id, f'跳过已完成: {ch_title}')
+                    rt_log(work_id, f'跳过已完成: 《{book_title}》{ch_title}')
                     chapter_count += 1
                     continue
 
                 reread_prior = _chapter_kb_records_for_reread(work_id, storage_id) if (existing and existing['status'] == 'done') else None
                 set_rt_state(work_id, current_idx=pos,
-                             phase=(f'重读纠错: {ch_title}' if reread_prior else f'读: {ch_title}'),
+                             phase=(f'重读纠错: 《{book_title}》{ch_title}' if reread_prior else f'读: 《{book_title}》{ch_title}'),
                              active_start_idx=pos, active_end_idx=pos,
-                             stream_buffer=(f'{ch_title} 有改动，带着旧笔记重读纠错…' if reread_prior else f'正在思考: {ch_title}（{book_id}）'))
+                             stream_buffer=(f'《{book_title}》{ch_title} 有改动，带着旧笔记重读纠错…' if reread_prior else f'正在思考: 《{book_title}》{ch_title}'))
                 upsert_chapter(work_id, storage_id, idx=ch_idx, title=ch_title,
                               content_hash=hash_content(content), status='processing', error='')
 
@@ -1414,7 +1416,7 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                         set_rt_state(work_id, status='paused', phase='已暂停')
                         return
                     upsert_chapter(work_id, storage_id, status='failed', error=str(e)[:500])
-                    rt_log(work_id, f'失败: {ch_title} ({str(e)[:100]})')
+                    rt_log(work_id, f'失败: 《{book_title}》{ch_title} ({str(e)[:100]})')
                     chapter_count += 1
                     continue
 
@@ -1425,7 +1427,7 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                               content_hash=hash_content(content),
                               error='')
                 chapter_count += 1
-                rt_log(work_id, f'完成 ({chapter_count}/{total}) {ch_title}')
+                rt_log(work_id, f'完成 ({chapter_count}/{total}) 《{book_title}》{ch_title}')
 
         # 通读完成，建立索引
         set_rt_state(work_id, phase='建立索引', active_start_idx=-1, active_end_idx=-1,

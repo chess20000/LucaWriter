@@ -721,8 +721,13 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .rt-turn-body{font-size:13px;line-height:1.65;color:var(--t1);word-break:break-word;white-space:pre-wrap}
 .rt-thinking{display:none;align-items:center;gap:5px;margin-top:8px;height:14px;color:var(--t3);overflow:visible}
 .rt-thinking.active{display:flex}
-.rt-thinking span{width:5px;height:5px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+.rt-thinking span{width:5px;height:5px;border-radius:50%;background:var(--accent);flex:0 0 auto;animation:rt-bounce 1.4s ease-in-out infinite}
+.rt-thinking span:nth-child(1){animation-delay:0s}
+.rt-thinking span:nth-child(2){animation-delay:.18s}
+.rt-thinking span:nth-child(3){animation-delay:.36s}
+@keyframes rt-bounce{0%,100%{opacity:.4;transform:translateY(0)}50%{opacity:1;transform:translateY(-5px)}}
 
+#rtSystemLine{display:none}
 .rt-action-line{font-size:12px;line-height:1.4;color:var(--t2);padding:8px 0;border-top:1px solid var(--border2);border-bottom:1px solid var(--border2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0}
 .rt-log-list{display:flex;flex-direction:column;gap:0;margin:0;padding:0}
 .rt-log-line{font-size:12px;line-height:1.45;color:var(--t2);padding:6px 0;border-bottom:1px solid var(--border2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -756,7 +761,11 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .rt-controls .ai-send:disabled{opacity:.55;cursor:wait}
 .rt-mode-btn{background:transparent;border:1px solid var(--border);color:var(--t2);font-size:11px;padding:3px 10px;border-radius:100px;cursor:pointer;transition:0s;font-weight:500}
 .rt-mode-btn.active{background:var(--accent-a12);border-color:var(--accent);color:var(--t1)}
-.rt-mode-btn:hover:not(.active){background:var(--surface2);border-color:var(--border2);color:var(--t1)}
+.rt-mode-btn:hover:not(.active):not(.spinning):not(.pausing){background:var(--surface2);border-color:var(--border2);color:var(--t1)}
+.rt-mode-btn svg{width:14px;height:14px;flex-shrink:0}
+.rt-mode-btn.spinning svg{animation:sync-spin 1s linear infinite}
+.rt-mode-btn.spinning{border-color:var(--accent);color:var(--accent)}
+.rt-mode-btn.pausing{border-color:var(--danger);color:var(--danger)}
 .rt-mode-hint{font-size:10px;color:var(--t3);margin-left:auto;white-space:nowrap}
 @media (max-width:760px){
  .summary-pane .panel-left{width:48%;min-width:220px}
@@ -779,9 +788,23 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .meta-head{display:flex;align-items:center;padding:12px 18px;border-bottom:1px solid var(--border);flex-shrink:0}
 .meta-head h2{flex:1;font-size:15px;font-weight:700}
 .meta-body{flex:1;display:flex;min-height:0;overflow:hidden}
-.meta-console{width:44%;min-width:260px;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);background:var(--bg)}
-.meta-db{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:10px;gap:6px;background:var(--bg)}
+.meta-info{width:42%;min-width:240px;display:flex;flex-direction:column;overflow-y:auto;padding:12px 14px;gap:2px;border-right:1px solid var(--border);background:var(--bg)}
+.meta-right{flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.meta-console{flex:1;display:flex;flex-direction:column;overflow:hidden;border-top:1px solid var(--border);background:var(--bg);min-height:0}
+.meta-db{flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;padding:10px;gap:6px;background:var(--bg);max-height:42%}
 .meta-section-title{font-size:10px;font-weight:700;color:var(--t3);letter-spacing:.5px;text-transform:uppercase;flex-shrink:0}
+.meta-info-grid{display:flex;flex-direction:column;gap:2px}
+.meta-info-row{display:flex;gap:8px;padding:3px 0;font-size:12px;line-height:1.5;border-bottom:1px solid var(--border2)}
+.meta-info-label{flex-shrink:0;color:var(--t3);min-width:52px;font-size:11px}
+.meta-info-value{color:var(--t1);overflow-wrap:anywhere;flex:1;min-width:0}
+.meta-edit-log{flex:1;overflow-y:auto;min-height:60px;margin-top:4px}
+.meta-edit-log-line{font-size:11px;padding:5px 0;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:baseline}
+.meta-edit-log-line .time{color:var(--t3);white-space:nowrap;flex-shrink:0;font-size:10px}
+.meta-edit-log-line .book{color:var(--accent);flex-shrink:0;font-size:10px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta-edit-log-line .reason{color:var(--t2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.meta-book-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r1);padding:8px 10px;margin-bottom:4px}
+.meta-book-card .meta-book-title{font-size:12px;font-weight:600;color:var(--t1);margin-bottom:3px}
+.meta-book-card .meta-book-detail{font-size:10px;color:var(--t3);line-height:1.5}
 .meta-ch-row{display:flex;align-items:center;gap:8px;padding:3px 0}
 .meta-ch-label{flex-shrink:0;width:90px;display:flex;align-items:baseline;gap:4px;overflow:hidden}
 .meta-ch-book-title{font-size:11px;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
@@ -790,6 +813,7 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .meta-ch-seg{flex:1;height:100%;border-radius:2px;background:var(--border);transition:background .2s;min-width:2px}
 .meta-ch-seg.done{background:var(--accent)}
 .meta-ch-seg:hover{opacity:.8}
+#metaChTooltip{position:fixed;pointer-events:none;z-index:99999;background:var(--surface2);color:var(--t1);font-size:18px;font-weight:700;padding:6px 12px;border-radius:var(--r2);border:1px solid var(--accent-a40);white-space:nowrap;opacity:0;transition:opacity .06s;box-shadow:0 4px 16px rgba(0,0,0,.5);line-height:1.3;max-width:90vw;overflow:hidden;text-overflow:ellipsis}
 
 
 /* 导入校验弹窗 */
@@ -997,7 +1021,7 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 
 /* === Work reading line === */
 .work-view{display:none;flex:1;min-height:0;padding:22px 28px;gap:20px;overflow:hidden}
-.work-view.active{display:grid;grid-template-columns:260px 1fr;gap:16px;overflow:hidden}
+.work-view.active{display:grid;grid-template-columns:1fr 1fr;gap:16px;overflow:hidden}
 .work-panel,.work-reread{min-height:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;display:flex;flex-direction:column}
 .work-hero{display:grid;grid-template-columns:84px 1fr;gap:14px;padding:16px;border-bottom:1px solid var(--border)}
 .work-cover-button{width:84px;aspect-ratio:3/4;border:0;padding:0;border-radius:var(--r2);overflow:hidden;background:var(--surface2);cursor:pointer}
@@ -1019,7 +1043,6 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .work-books{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
 .work-book{display:grid;grid-template-columns:20px 48px minmax(0,1fr) auto;gap:6px;align-items:center;padding:8px;border:1px solid var(--border);border-radius:var(--r2);cursor:pointer;background:var(--surface2)}
 .work-book:hover{border-color:var(--accent)}
-.work-book.active{border-color:var(--accent);background:var(--accent-a8)}
 .work-book.dragging{opacity:.35}
 .work-book.drag-over{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-a20)}
 .work-book-handle{cursor:grab;color:var(--t3);display:flex;align-items:center;justify-content:center;opacity:.35;font-size:14px;line-height:1;user-select:none}
@@ -1039,6 +1062,9 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .work-sync-btn{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;padding:5px;border:1px solid var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r1);cursor:pointer}
 .work-sync-btn svg{width:100%;height:100%}
 .work-sync-btn:hover{border-color:var(--accent);color:var(--accent)}
+.work-sync-btn.spinning svg{animation:sync-spin 1s linear infinite}
+.work-sync-btn.pausing{border-color:var(--danger);color:var(--danger)}
+@keyframes sync-spin{to{transform:rotate(360deg)}}
 .work-export-btn{width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;padding:5px;border:1px solid var(--border);background:var(--surface2);color:var(--t2);border-radius:var(--r1);cursor:pointer}
 .work-export-btn svg{width:100%;height:100%}
 .work-export-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -1051,8 +1077,8 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .work-chat-head{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;font-weight:650;color:var(--t1);display:flex;align-items:center;position:relative}
 .work-chat-msgs{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px}
 .work-chat-msgs .ai-msg{max-width:100%;padding:8px 10px;border-radius:var(--r2);font-size:12px;line-height:1.5}
-.work-chat-msgs .ai-msg.user{background:var(--accent-dim);color:var(--t1);margin-left:20px}
-.work-chat-msgs .ai-msg.ai{background:var(--surface2);color:var(--t2);margin-right:20px}
+.work-chat-msgs .ai-msg.user{background:var(--accent-dim);color:var(--t1);align-self:flex-end;text-align:right;max-width:80%;width:fit-content}
+.work-chat-msgs .ai-msg.ai{background:var(--surface2);color:var(--t2);align-self:flex-start;max-width:80%;width:fit-content}
 .work-chat-msgs .ai-msg .ai-msg-body{white-space:pre-wrap;word-break:break-word}
 .work-chat-msgs .ai-msg .ai-thinking{font-size:10px;color:var(--t3);margin-bottom:4px;font-style:italic}
 .work-chat-msgs .ai-msg .ai-thinking.live{max-height:3.6em;overflow-y:auto;scrollbar-width:thin}
@@ -1115,6 +1141,7 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .work-rt-status{font-size:11px;color:var(--t3);padding:0 16px 12px}
 @media(max-width:900px){.work-view.active{grid-template-columns:1fr;overflow-y:auto}}
 
+
 .lore-view{display:none;flex:1;min-height:0;padding:22px 28px;overflow:hidden;flex-direction:column}
 .lore-view.active{display:flex}
 .lore-head{display:flex;align-items:center;gap:12px;padding-bottom:16px;border-bottom:1px solid var(--border);margin-bottom:16px}
@@ -1125,12 +1152,36 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 
 /* locker grid - the cabinet itself */
 .lore-grid{padding:18px 22px;overflow-y:auto;flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:20px;align-content:start;position:relative}
-/* locker door – each cell is a cabinet door with 3D bevel */
-.lore-locker{border-radius:5px;position:relative;min-height:190px;display:flex;flex-direction:column;overflow:hidden;background:linear-gradient(160deg,var(--surface2),color-mix(in srgb,var(--surface2) 85%,var(--t1) 15%));border:1px solid var(--border);box-shadow:0 1px 0 rgba(255,255,255,.06)inset,0 -1px 0 rgba(0,0,0,.07)inset,1px 0 0 rgba(255,255,255,.04)inset,-1px 0 0 rgba(0,0,0,.04)inset,0 6px 14px rgba(0,0,0,.10),0 2px 4px rgba(0,0,0,.06)}
+/* skeuomorphic cabinet background */
+.lore-grid::before{content:'';position:absolute;left:8px;right:8px;top:8px;bottom:8px;background:linear-gradient(180deg,#2b2b28,#201c18);opacity:.06;border-radius:8px;pointer-events:none}
+.lore-locker{border-radius:8px;position:relative;min-height:200px;display:flex;flex-direction:column;overflow:visible;
+  /* wood grain base */
+  background: linear-gradient(180deg,#7a4a28,#5a3016);
+  background-image: repeating-linear-gradient(90deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 5px), linear-gradient(180deg,#7a4a28,#5a3016);
+  border:1px solid rgba(0,0,0,0.45);
+  box-shadow: 0 10px 30px rgba(0,0,0,.5), inset 0 2px 0 rgba(255,255,255,.03);
+  padding:8px;
+}
+/* door overlay (wooden face) */
+.lore-door{position:absolute;inset:0;border-radius:8px;background:linear-gradient(180deg,#6f4023,#4e2913);background-blend-mode:multiply;box-shadow:inset 0 2px 0 rgba(255,255,255,.03);pointer-events:none}
+.lore-door::before{content:'';position:absolute;left:6px;top:10px;bottom:10px;width:6px;border-radius:4px;background:linear-gradient(180deg,#2e1e14,#1a0e08);box-shadow:inset 0 1px 0 rgba(255,255,255,.04);opacity:.9}
+.lore-door::after{content:'';position:absolute;right:8px;top:12px;width:8px;height:8px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#fff3, #0000), linear-gradient(180deg,#bfbfbf,#8f8f8f);box-shadow:0 2px 4px rgba(0,0,0,.5)}
+/* handle */
+.lore-handle{position:absolute;left:50%;top:60%;transform:translateX(-50%);width:64px;height:18px;border-radius:10px;background:linear-gradient(180deg,#d8d6d1,#a9a7a3);box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 6px 12px rgba(0,0,0,.35);pointer-events:none}
+.lore-handle::before{content:'';position:absolute;left:6px;right:6px;top:4px;height:8px;border-radius:6px;background:linear-gradient(180deg,#fff,#d6d6d6);opacity:.9}
+.lore-handle::after{content:'';position:absolute;left:8px;top:2px;width:6px;height:6px;border-radius:50%;background:linear-gradient(180deg,#8f8c89,#5e5b59);box-shadow:inset 0 1px 0 rgba(255,255,255,.06)}
 /* recessed inner panel */
-.lore-locker-inner{position:absolute;inset:7px;border-radius:3px;background:var(--surface);border:1px solid var(--border);box-shadow:inset 0 2px 5px rgba(0,0,0,.05);display:flex;flex-direction:column;overflow:hidden}
+.lore-locker-inner{position:absolute;inset:12px;border-radius:6px;background:linear-gradient(180deg,var(--surface), color-mix(in srgb,var(--surface) 92%, #0a0a0a 8%));border:1px solid rgba(255,255,255,.03);box-shadow:inset 0 10px 24px rgba(0,0,0,.6);display:flex;flex-direction:column;overflow:hidden}
 .lore-locker-content{flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;position:relative;z-index:1}
-/* classification bar nested inside panel top */
+
+/* document (paper) inside the locker */
+.lore-doc{background:linear-gradient(180deg,#fff,#fbfbf9);border-radius:4px;padding:12px;margin:12px;box-shadow:0 6px 14px rgba(0,0,0,.12);border:1px solid rgba(0,0,0,.06);display:flex;flex-direction:column;min-height:140px}
+.lore-doc{background:linear-gradient(180deg,var(--surface), color-mix(in srgb,var(--surface) 92%, #0a0a0a 8%));border-radius:6px;padding:10px;margin:12px;box-shadow:0 10px 30px rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.02);display:flex;flex-direction:column;min-height:140px}
+.lore-doc-title{font-size:13px;font-weight:700;color:var(--t1);margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lore-doc-body{font-size:12px;color:var(--t2);line-height:1.45;flex:1;overflow:hidden;display:-webkit-box;-webkit-line-clamp:6;-webkit-box-orient:vertical}
+.lore-doc .lore-locker-kind{position:absolute;top:8px;right:8px}
+
+/* classification bar nested inside panel top (kept for compatibility) */
 .lore-locker-bar{height:3px;flex-shrink:0;border-radius:0}
 .lore-locker-bar.k-default{background:var(--accent)}
 .lore-locker-bar.k-char{background:#4bb8b6}
@@ -1139,8 +1190,8 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .lore-locker-bar.k-object{background:#e0853e}
 .lore-locker-bar.k-concept{background:#5db85c}
 .lore-locker-bar.k-event{background:#e05c5c}
-/* id + kind row */
-.lore-locker-meta{display:flex;align-items:center;justify-content:flex-end;padding:7px 10px 0;font-family:var(--font-mono);font-size:9px;color:var(--t3);letter-spacing:.2px}
+
+.lore-locker-meta{display:flex;align-items:center;justify-content:flex-end;padding:6px 10px 0;font-family:var(--font-mono);font-size:9px;color:var(--t3);letter-spacing:.2px}
 .lore-locker-kind{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:1px 6px;border-radius:2px}
 .lore-locker-kind.k-default{background:var(--accent-a12);color:var(--accent)}
 .lore-locker-kind.k-char{background:rgba(75,184,182,.15);color:#4bb8b6}
@@ -1149,15 +1200,62 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .lore-locker-kind.k-object{background:rgba(224,133,62,.15);color:#e0853e}
 .lore-locker-kind.k-concept{background:rgba(93,184,92,.15);color:#5db85c}
 .lore-locker-kind.k-event{background:rgba(224,92,92,.15);color:#e05c5c}
-/* title */
-.lore-locker-title{padding:3px 10px 1px;font-size:13px;font-weight:700;color:var(--t1);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* body */
-.lore-locker-body{padding:2px 10px 6px;font-size:11px;color:var(--t2);line-height:1.55;flex:1;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+
 /* empty locker – shows inner recess but no content */
 .lore-locker.empty .lore-locker-inner{display:flex;align-items:center;justify-content:center}
-.lore-locker.empty .lore-locker-inner::after{content:'+';font-size:20px;font-weight:200;color:var(--t3);opacity:.3}
+.lore-locker.empty .lore-locker-inner::after{content:'+';font-size:20px;font-weight:200;color:var(--t3);opacity:.28}
 .lore-locker.empty:hover .lore-locker-inner::after{opacity:.6;color:var(--accent)}
 .lore-locker.empty{cursor:pointer}
+.lore-locker-slot-num{position:absolute;top:6px;left:8px;font-size:10px;color:var(--t3);opacity:.35;font-family:var(--font-mono);pointer-events:none;z-index:1}
+
+/* lore head right-side actions */
+.lore-head-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.lore-head-btn{height:34px;padding:0 12px;border-radius:var(--r2);border:1px solid var(--border);background:var(--surface2);color:var(--t2);font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;transition:border-color .15s ease}
+.lore-head-btn:hover{border-color:var(--accent);color:var(--accent)}
+.lore-head-btn.active{background:var(--accent-a12);border-color:var(--accent);color:var(--accent)}
+
+/* jiggle animation – arrange mode */
+@keyframes loreJiggle{0%{transform:rotate(0deg) translateY(0)}25%{transform:rotate(-.6deg) translateY(-1px)}75%{transform:rotate(.6deg) translateY(-1px)}100%{transform:rotate(0deg) translateY(0)}}
+.lore-locker{transform-origin:center center}
+.lore-locker.jiggle{animation:loreJiggle .35s ease-in-out infinite}
+.lore-locker.jiggle .lore-locker-inner{cursor:grab}
+.lore-locker.jiggle:active .lore-locker-inner{cursor:grabbing}
+
+/* when dragging, fade the original locker so ghost is primary */
+.lore-locker.drag-source{opacity:.18}
+
+/* drag state – source fades, target highlights */
+.lore-locker.drag-source .lore-locker-inner{opacity:.25}
+.lore-locker.drag-source{pointer-events:none}
+.lore-locker.drag-over{border-color:var(--accent);background:linear-gradient(160deg,var(--accent-a8),var(--surface2));box-shadow:0 0 0 2px var(--accent-a15)}
+
+/* trash drop target (large) */
+.lore-trash-drop{position:absolute;right:22px;bottom:22px;width:82px;height:82px;border-radius:12px;background:linear-gradient(180deg,var(--surface2),color-mix(in srgb,var(--surface2) 85%,var(--t1) 15%));border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--t2);box-shadow:0 8px 20px rgba(0,0,0,.25);z-index:30;cursor:default}
+.lore-trash-drop .icon{width:40px;height:40px;opacity:.85}
+.lore-trash-drop.over{border-color:var(--accent);background:linear-gradient(180deg,var(--accent-a12),var(--surface2));color:var(--accent)}
+
+/* drag ghost follows pointer */
+.lore-drag-ghost{position:fixed;pointer-events:none;z-index:99999;transform:translate(-50%,-50%) scale(1);transition:transform .12s ease,opacity .12s ease;filter:drop-shadow(0 18px 30px rgba(0,0,0,.45));opacity:0.98;border-radius:6px}
+.lore-drag-ghost *{pointer-events:none}
+
+/* hide original doc when lifted */
+.lore-doc.drag-source{opacity:.12}
+
+/* trash panel */
+.lore-trash-panel{display:none;position:absolute;right:0;top:100%;width:320px;max-height:360px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);overflow-y:auto;z-index:20;margin-top:6px}
+.lore-trash-panel.open{display:flex;flex-direction:column}
+.lore-trash-head{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-shrink:0}
+.lore-trash-head span{font-size:13px;font-weight:700;color:var(--t1)}
+.lore-trash-head button{font-size:11px;color:var(--danger);background:none;border:none;cursor:pointer;padding:2px 6px}
+.lore-trash-head button:hover{opacity:.8}
+.lore-trash-list{flex:1;overflow-y:auto;padding:6px 0}
+.lore-trash-item{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px;transition:background .1s}
+.lore-trash-item:hover{background:var(--surface2)}
+.lore-trash-item .lore-trash-title{flex:1;color:var(--t1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lore-trash-item .lore-trash-kind{font-size:9px;color:var(--t3);flex-shrink:0}
+.lore-trash-item .lore-trash-restore{font-size:11px;color:var(--accent);cursor:pointer;background:none;border:none;padding:2px 6px;flex-shrink:0}
+.lore-trash-item .lore-trash-restore:hover{opacity:.8}
+.lore-trash-empty{padding:24px 14px;text-align:center;color:var(--t3);font-size:12px}
 
 /* cover upload modal */
 .cover-upload-area{width:100%;aspect-ratio:3/4;max-height:320px;border-radius:var(--r2);background:var(--surface2);display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;border:1px dashed var(--border2);transition:0s;position:relative;margin:0 auto}
@@ -1245,7 +1343,7 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
        </div>
        <div class="work-meta-line" id="workMetaLine"></div>
          <div class="work-actions">
-           <button class="work-sync-btn" onclick="syncWorkKB()" title="增量同步（仅更新有变更的章节）"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
+           <button class="work-sync-btn" onclick="syncWorkKB()" title="通读全书"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
            <button class="work-export-btn" onclick="openWorkExportModal()" title="导出/上传"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg></button>
            <button class="work-reread-btn" onclick="startWorkReread()">元数据</button>
           </div>
@@ -1274,8 +1372,19 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
   <div class="lore-head">
    <button class="lore-back-btn" onclick="closeWorkLore()" title="返回作品"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg></button>
     <span class="lore-title">档案馆</span>
+   <div class="lore-head-actions" style="position:relative">
+    <button class="lore-head-btn" id="loreArrangeBtn" onclick="toggleLoreArrange()">编排</button>
+    <button class="lore-head-btn" id="loreTrashBtn" onclick="toggleLoreTrash()">回收站</button>
+    <div class="lore-trash-panel" id="loreTrashPanel">
+     <div class="lore-trash-head"><span>回收站</span><button onclick="loreTrashClearAll()">清空</button></div>
+     <div class="lore-trash-list" id="loreTrashList"></div>
+    </div>
+   </div>
   </div>
   <div class="lore-grid" id="loreGrid"></div>
+  <div id="loreTrashDrop" class="lore-trash-drop" title="拖动到此处移至回收站">
+   <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+  </div>
  </div>
 
  <div class="sidebar-trigger" id="sidebarTrigger" title="展开章节栏">
@@ -1628,34 +1737,45 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 <div class="modal meta-modal">
  <div class="meta-head">
   <h2>元数据</h2>
-  <button class="prompt-cancel" onclick="closeModal('metaModal')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:16px;color:var(--t3)">✕</button>
+  <button class="rt-mode-btn" id="rtWorkUpdateBtn" onclick="startWorkRT()" style="display:inline-flex;align-items:center;gap:5px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span id="rtWorkUpdateLabel">更新</span></button>
+  <div style="flex:1;display:flex;justify-content:flex-end"><button class="prompt-cancel" onclick="closeModal('metaModal')" style="width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:16px;color:var(--t3)">✕</button></div>
  </div>
  <div class="meta-body">
-  <div class="meta-console">
-   <div class="meta-section-title">通读日志</div>
-   <div class="rt-console" id="rtConsole" style="flex:1;overflow-y:auto">
-    <div class="rt-dialogue">
-     <div class="rt-avatar">L</div>
-     <div class="rt-message">
-      <div class="rt-message-name">Luca</div>
-      <div class="rt-turn-body" id="rtStream">开始通读以处理全部书本</div>
-      <div id="rtSystemLine"></div>
-      <div class="rt-thinking" id="rtThinking"><span></span><span></span><span></span></div>
-     </div>
-    </div>
-    <div class="rt-log-list" id="rtLogs"></div>
-   </div>
-   <div class="rt-db-section notes" style="flex:1;min-height:80px">
-    <div class="rt-db-section-body" style="flex:1;padding:0"><textarea class="rt-source" id="rtSource" readonly placeholder="通读完成后此处显示全书笔记..." style="width:100%;height:100%;resize:none;border:none"></textarea></div>
-   </div>
+  <!-- LEFT: Book metadata -->
+  <div class="meta-info">
+   <div class="meta-section-title">作品信息</div>
+   <div class="meta-info-grid" id="metaInfoGrid"></div>
+   <div class="meta-section-title" style="margin-top:12px">各卷信息</div>
+   <div class="meta-info-grid" id="metaBooksGrid"></div>
+   <div class="meta-section-title" style="margin-top:12px">COO 编辑历史</div>
+   <div class="meta-edit-log" id="metaEditLog"></div>
   </div>
+  <!-- RIGHT: Readthrough panel -->
+  <div class="meta-right">
    <div class="meta-db">
     <div class="meta-section-title">章节通读进度</div>
     <div class="meta-chapter-grid" id="metaChapterGrid" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding:4px 0"></div>
-    <div style="display:flex;gap:6px;flex-shrink:0;padding:2px 0">
-     <button class="rt-mode-btn" id="rtWorkUpdateBtn" onclick="startWorkRT()" style="flex:1">更新</button>
+
+   </div>
+   <div class="meta-console">
+    <div class="meta-section-title" style="padding:0 14px">通读日志</div>
+    <div class="rt-console" id="rtConsole" style="flex:1;overflow-y:auto">
+     <div class="rt-dialogue">
+      <div class="rt-avatar">L</div>
+      <div class="rt-message">
+       <div class="rt-message-name">Luca</div>
+       <div class="rt-turn-body" id="rtStream">开始通读以处理全部书本</div>
+       <div id="rtSystemLine"></div>
+       <div class="rt-thinking" id="rtThinking"><span></span><span></span><span></span></div>
+      </div>
+     </div>
+     <div class="rt-log-list" id="rtLogs"></div>
+    </div>
+    <div class="rt-db-section notes" style="flex:1;min-height:80px">
+     <div class="rt-db-section-body" style="flex:1;padding:0"><textarea class="rt-source" id="rtSource" readonly placeholder="通读完成后此处显示全书笔记..." style="width:100%;height:100%;resize:none;border:none"></textarea></div>
     </div>
    </div>
+  </div>
  </div>
 </div></div>
 
@@ -1732,6 +1852,7 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 <div class="dl-fp-badge" id="downloadBadge" onclick="restoreDownloadPanel()">
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
 </div>
+<div id="metaChTooltip"></div>
 
 <script>
 // 动态加载主题图标
@@ -1790,6 +1911,10 @@ var cachedBooks=null;
 var cachedWorks=null;
 var currentWork=null;
 var currentWorkDetail=null;
+var _lorePendingSlot=-1;
+var _loreArrangeMode=false;
+var _loreTrash=[];
+var _loreDragDst=null;
 
 var _readingDragIndex=-1;
 var dragSrcIndex=null;
@@ -2200,6 +2325,7 @@ function openWork(id,cb){
    if(s!==200||!d.work){toast(d.error||'作品加载失败','error');clearAppState();showBookShelf();return}
   currentWork=d.work;currentWorkDetail=d;
    renderWorkView();
+   _syncRTStateFromBackend();
    saveAppState();
   if(cb)cb();
  });
@@ -2214,7 +2340,7 @@ function renderWorkView(){
   $('workCoverImg').src='/api/work/'+encodeURIComponent(workId)+'/cover?t='+Date.now();
   var box=$('workBooks');box.innerHTML='';
   (currentWorkDetail.books||[]).forEach(function(b){
-   var row=document.createElement('div');row.className='work-book'+(b.id===_selectedVolumeId?' active':'');
+   var row=document.createElement('div');row.className='work-book';
    row.draggable=true;
     row.innerHTML='<span class="work-book-handle">⠿</span><img src="/api/book/'+esc(b.id)+'/cover?t='+Date.now()+'" alt="">'+
      '<div><div class="work-book-title">'+esc(b.title||'未命名书本')+'</div><div class="work-book-meta">'+(b.chapter_count||0)+' 章 · '+_formatDate(b.updated)+'</div></div>'+
@@ -2250,12 +2376,14 @@ function renderWorkView(){
      selectWorkVolume(_selectedVolumeId,true);
     }
     updateWorkProgress();
+    // Load chat messages for work view
+    if(!aiMessages.length) loadAIMessages();
+    else renderAIMessages();
    }
  
 function selectWorkVolume(bookId){
  _selectedVolumeId=bookId;
  saveAppState();
- document.querySelectorAll('.work-book').forEach(function(r){r.classList.toggle('active',r.dataset.volId===bookId)});
 }
 
 function renderVolumeChapters(book){
@@ -2340,7 +2468,7 @@ var _workVolumeDragIndex=-1;
 var _workVolumeDragged=false;
 var _selectedVolumeId=null;
 var _workTrashOpen=false;
-function loadCurrentWork(){if(!workId)return;api('GET','/api/work/'+workId,undefined,function(d,s){if(s===200){currentWorkDetail=d;currentWork=d.work;renderWorkView()}})}
+function loadCurrentWork(){if(!workId)return;api('GET','/api/work/'+workId,undefined,function(d,s){if(s===200){currentWorkDetail=d;currentWork=d.work;renderWorkView();_syncRTStateFromBackend()}})}
 function addChapterToVolume(){
  if(!_selectedVolumeId){toast('请先在左侧选中一卷','info');return;}
  var book=currentWorkDetail.books.find(function(x){return x.id===_selectedVolumeId});
@@ -2383,26 +2511,38 @@ function deleteWorkBook(id){showConfirm('删除卷','确定删除这卷和其中
 function addLoreToWork(){showPrompt('新档案','档案标题','新档案',function(t){if(!t)return;api('POST','/api/work/'+workId+'/lore-create',{title:t},function(d,s){if(s===200){if($('loreView').classList.contains('active'))openWorkLore();else loadCurrentWork()}else toast(d.error||'创建失败','error')})})}
 function editLore(id){var l=(currentWorkDetail.lore||[]).find(function(x){return x.id===id});if(!l)return;$('loreEditId').value=id;$('loreEditTitle').value=l.title||'';$('loreEditKind').value=l.kind||'';$('loreEditContent').value=l.content||'';openModal('loreEditModal')}
 function saveLoreEdit(){var id=$('loreEditId').value;api('POST','/api/work/'+workId+'/lore-update',{lore_id:id,title:$('loreEditTitle').value,kind:$('loreEditKind').value,content:$('loreEditContent').value},function(d,s){if(s===200){closeModal('loreEditModal');if($('loreView').classList.contains('active'))openWorkLore();else loadCurrentWork()}else toast(d.error||'保存失败','error')})}
-function deleteLoreEdit(){var id=$('loreEditId').value;showConfirm('删除档案','确定删除这份档案？',function(){api('POST','/api/work/'+workId+'/lore-delete',{lore_id:id},function(d,s){if(s===200){closeModal('loreEditModal');if($('loreView').classList.contains('active'))openWorkLore();else loadCurrentWork()}else toast(d.error||'删除失败','error')})},true)}
+function deleteLoreEdit(){var id=$('loreEditId').value;showConfirm('删除档案','确定删除这份档案？',function(){api('POST','/api/work/'+workId+'/lore-trash',{lore_id:id},function(d,s){if(s===200){closeModal('loreEditModal');if($('loreView').classList.contains('active'))openWorkLore();else loadCurrentWork()}else toast(d.error||'删除失败','error')})},true)}
 function openWorkLore(){
  if(!workId)return;
  $('workView').classList.remove('active');
  $('editorView').style.display='none';
  $('bottomPanel').style.display='none';
  $('loreView').classList.add('active');
+ $('topbarBackBtn').style.display='none';
+ // Reset arrange mode when opening
+ _loreArrangeMode=false;
+ var btn=$('loreArrangeBtn');
+ if(btn){btn.classList.remove('active');btn.innerHTML=btn.innerHTML.replace('完成','编排');}
  api('GET','/api/work/'+workId,undefined,function(d,s){
   if(s!==200||!d.work){toast('加载档案失败','error');return}
   currentWorkDetail=d;
   currentWork=d.work;
   renderLoreCards(d.lore||[]);
+  loadLoreTrash();
  });
 }
 function closeWorkLore(){
+ // Reset arrange mode
+ _loreArrangeMode=false;
+ var btn=$('loreArrangeBtn');
+ if(btn){btn.classList.remove('active');btn.innerHTML=btn.innerHTML.replace('完成','编排');}
+ // Close trash panel
+ var tp=$('loreTrashPanel');if(tp)tp.classList.remove('open');
  $('loreView').classList.remove('active');
  openWork(workId);
 }
 function renderMetaEditLog(){
- var el=$('rtEditLog');
+ var el=$('metaEditLog');
  if(!el)return;
  el.innerHTML='<span style="color:var(--t3);font-size:11px">加载中...</span>';
  api('GET','/api/work/'+workId+'/edit-log',undefined,function(d,s){
@@ -2413,46 +2553,250 @@ function renderMetaEditLog(){
    var time=(l.created_at||'').replace('T',' ').slice(0,16);
    var bookTitle=l.book_title||'';
    var reason=l.reason||l.field||'';
-   html+='<div style="font-size:11px;padding:5px 0;border-bottom:1px solid var(--border);display:flex;gap:6px">'
-    +'<span style="color:var(--t3);white-space:nowrap">'+esc(time)+'</span>'
-    +'<span style="color:var(--accent);flex-shrink:0">'+esc(bookTitle)+'</span>'
-    +'<span style="color:var(--t2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(reason)+'</span>'
+   html+='<div class="meta-edit-log-line">'
+    +'<span class="time">'+esc(time)+'</span>'
+    +'<span class="book">'+esc(bookTitle)+'</span>'
+    +'<span class="reason">'+esc(reason)+'</span>'
     +'</div>';
   });
   el.innerHTML=html;
  });
 }
+function renderMetaInfo(){
+ var grid=$('metaInfoGrid');
+ var booksGrid=$('metaBooksGrid');
+ if(!grid||!booksGrid)return;
+ var w=currentWork||{};
+ var detail=currentWorkDetail||{};
+ var books=detail.books||[];
+
+ // Format timestamp
+ function fmt(ts){
+  if(!ts)return '—';
+  var d=new Date(ts*1000);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+ }
+
+ // Work info rows
+ var infoRows=[
+  {label:'作品名',value:w.title||'—'},
+  {label:'作者',value:w.author||'—'},
+  {label:'简介',value:w.description||'—'},
+  {label:'作品UID',value:esc((w.work_uid||'').length>40?(w.work_uid||'').slice(0,20)+'…'+(w.work_uid||'').slice(-8):(w.work_uid||'—'))},
+  {label:'语言',value:w.language||'—'},
+  {label:'卷数',value:String(w.book_count||books.length||'—')},
+  {label:'章节数',value:String(w.chapter_count||'—')},
+  {label:'创建',value:fmt(w.created)},
+  {label:'更新',value:fmt(w.updated)},
+  {label:'封面',value:w.has_cover?'有':'无'},
+ ];
+ var html='';
+ infoRows.forEach(function(r){
+  html+='<div class="meta-info-row"><span class="meta-info-label">'+esc(r.label)+'</span><span class="meta-info-value">'+esc(r.value)+'</span></div>';
+ });
+ grid.innerHTML=html;
+
+ // Book cards
+ var booksHtml='';
+ if(books.length===0){
+  booksHtml='<div style="font-size:11px;color:var(--t3);padding:6px 0">无卷数据</div>';
+ }else{
+  books.forEach(function(b){
+   booksHtml+='<div class="meta-book-card">'
+    +'<div class="meta-book-title">'+esc(b.title||'')+'</div>'
+    +'<div class="meta-book-detail">'
+    +'UID: '+esc((b.book_uid||'').length>40?(b.book_uid||'').slice(0,20)+'…'+(b.book_uid||'').slice(-8):(b.book_uid||'—'))+' · '
+    +'作者: '+esc(b.author||'—')+' · '
+    +'章节: '+(b.chapter_count||0)+' · '
+    +'创建: '+fmt(b.created)+' · '
+    +'更新: '+fmt(b.updated)
+    +'</div>'
+    +(b.description?'<div class="meta-book-detail" style="margin-top:2px;color:var(--t2)">'+esc(b.description.slice(0,200))+'</div>':'')
+    +'</div>';
+  });
+ }
+ booksGrid.innerHTML=booksHtml;
+}
 function renderLoreCards(lore){
  var grid=$('loreGrid');grid.innerHTML='';
  var total=lore.length;
- if(total===0){
-  for(var i=0;i<6;i++){
-   var box=document.createElement('div');box.className='lore-locker empty';
-   box.onclick=function(){addLoreToWork()};
-   box.innerHTML='<div class="lore-locker-inner"></div>';
-   grid.appendChild(box);
+ var gridWidth=grid.clientWidth||800;
+ var colWidth=210;var gap=20;
+ var colsPerRow=Math.max(1,Math.floor((gridWidth+gap)/(colWidth+gap)));
+ var filledRows=Math.ceil(Math.max(total,1)/colsPerRow);
+ var totalSlots=Math.max((filledRows+1)*colsPerRow,colsPerRow);
+
+ // If a new entry was just created, place it at the clicked slot
+ var pendingSlot=_lorePendingSlot;
+ _lorePendingSlot=-1;
+ var orderedLore=lore.slice();
+ if(pendingSlot>=0&&total>0){
+  // Move the last item (just created) to the clicked position
+  var last=orderedLore.pop();
+  var insertAt=Math.min(pendingSlot,orderedLore.length);
+  orderedLore.splice(insertAt,0,last);
+ }
+
+ // Render filled lockers in order (no shuffling)
+ for(var i=0;i<orderedLore.length;i++){
+  var l=orderedLore[i];
+  var isJiggle=_loreArrangeMode;
+  var box=document.createElement('div');
+  box.className='lore-locker';
+  box.setAttribute('data-lore-id',l.id);
+  var kind=esc(l.kind||'设定');
+  var title=esc(l.title||'未命名');
+  var body=esc((l.content||'').slice(0,500));
+  var kc=_loreKindClass(l.kind);
+  if(!isJiggle){
+   box.onclick=function(lid){return function(){editLore(lid)};}(l.id);
   }
+  if(isJiggle){
+   box.style.touchAction='none';
+   box.onmousedown=function(e){_loreDragStart(this,e);};
+  }
+  box.innerHTML=
+   '<div class="lore-door" aria-hidden="true"><div class="lore-handle"></div></div>'+
+   '<div class="lore-locker-inner">'+
+    '<div class="lore-locker-content">'+
+     '<div class="lore-locker-bar '+kc+'"></div>'+
+     '<div class="lore-doc">'+
+       '<div class="lore-doc-title">'+title+'</div>'+
+       '<div class="lore-doc-body">'+body+'</div>'+
+     '</div>'+
+    '</div>'+
+   '</div>';
+  grid.appendChild(box);
+  // attach events to the inner document, not the outer locker
+  (function(box,lid,isJiggle){
+    var docEl = box.querySelector('.lore-doc');
+    if(!docEl) return;
+    // apply jiggle to document only (cabinet stays fixed)
+    if(isJiggle){
+      docEl.classList.add('jiggle');
+      docEl.style.touchAction='none';
+      docEl.onmousedown = function(e){ _loreDragStart(this,e); };
+    } else {
+      docEl.classList.remove('jiggle');
+      docEl.onclick = function(){ editLore(lid); };
+    }
+  })(box,l.id,isJiggle);
+ }
+ // Fill remaining slots with empty lockers
+ for(var i=orderedLore.length;i<totalSlots;i++){
+  var box=document.createElement('div');box.className='lore-locker empty';
+  // expose slot index so we can drop into a specific empty slot
+  box.setAttribute('data-slot-index', i);
+  if(!_loreArrangeMode){
+   box.onclick=(function(slotIdx){return function(){_lorePendingSlot=slotIdx;addLoreToWork()};})(i);
+  }
+  box.innerHTML=' <div class="lore-door" aria-hidden="true"><div class="lore-handle"></div></div>'+
+                  '<div class="lore-locker-inner"><span class="lore-locker-slot-num">'+(i+1)+'</span></div>';
+  grid.appendChild(box);
+ }
+}
+// --- Drag reorder (hold, move to target, release) ---
+var _loreDragSrc=null;
+var _loreDragOverTrash=false;
+var _loreTrashDropEl=null;
+var _loreDragGhost=null;
+var _loreDragOffsetX=0;
+var _loreDragOffsetY=0;
+function _loreDragStart(el,e){
+ if(!_loreArrangeMode)return;
+ e.preventDefault();
+ // el is the .lore-doc element; find its parent locker id
+ var locker = el.closest('.lore-locker');
+ if(!locker) return;
+ _loreDragSrc = locker.getAttribute('data-lore-id');
+ if(!_loreDragSrc) return;
+ // mark the document as dragging (not the locker)
+ el.classList.add('drag-source');
+ document.body.style.cursor='grabbing';
+ // cache trash drop element for quick detection
+ _loreTrashDropEl=document.getElementById('loreTrashDrop');
+
+ // create drag ghost (visual) so the whole locker moves with cursor
+  try{
+   var rect = el.getBoundingClientRect();
+   _loreDragOffsetX = e.clientX - rect.left;
+   _loreDragOffsetY = e.clientY - rect.top;
+   // clone only the document (not the whole locker)
+   _loreDragGhost = el.cloneNode(true);
+   _loreDragGhost.classList.add('lore-drag-ghost');
+   _loreDragGhost.style.width = rect.width + 'px';
+   _loreDragGhost.style.height = rect.height + 'px';
+   _loreDragGhost.style.left = (e.clientX - _loreDragOffsetX + rect.width/2) + 'px';
+   _loreDragGhost.style.top = (e.clientY - _loreDragOffsetY + rect.height/2) + 'px';
+   document.body.appendChild(_loreDragGhost);
+   // hide the original doc to create the feeling it was lifted out
+   el.style.opacity = '0.12';
+ }catch(err){_loreDragGhost=null}
+
+ document.addEventListener('mousemove',_loreDragOver);
+ document.addEventListener('mouseup',_loreDragEnd);
+}
+function _loreDragOver(e){
+ document.querySelectorAll('.lore-locker.drag-over').forEach(function(el){el.classList.remove('drag-over')});
+ var below=document.elementFromPoint(e.clientX,e.clientY);
+ // highlight any locker under pointer
+ if(below){var l=below.closest('.lore-locker');if(l)l.classList.add('drag-over');}
+ // detect if pointer is over trash drop target
+ if(_loreTrashDropEl){
+   var isOverTrash = below && !!below.closest('.lore-trash-drop');
+   if(isOverTrash){
+    _loreDragOverTrash=true;_loreTrashDropEl.classList.add('over');
+   } else if(_loreDragOverTrash){
+    _loreDragOverTrash=false;_loreTrashDropEl.classList.remove('over');
+   }
+ }
+ // move ghost if exists
+ if(_loreDragGhost){
+   var gx = e.clientX - _loreDragOffsetX + (_loreDragGhost.offsetWidth/2 || 0);
+   var gy = e.clientY - _loreDragOffsetY + (_loreDragGhost.offsetHeight/2 || 0);
+   _loreDragGhost.style.left = gx + 'px';
+   _loreDragGhost.style.top = gy + 'px';
+ }
+}
+function _loreDragEnd(e){
+ document.removeEventListener('mousemove',_loreDragOver);
+ document.removeEventListener('mouseup',_loreDragEnd);
+ document.body.style.cursor='';
+ var src=_loreDragSrc;
+ _loreDragSrc=null;
+ // remove any lingering drag-over highlights
+ document.querySelectorAll('.lore-locker.drag-over').forEach(function(el){el.classList.remove('drag-over')});
+ // if dropped onto trash drop target => move to trash
+ if(_loreDragOverTrash && src){
+  // cleanup visual
+  if(_loreTrashDropEl)_loreTrashDropEl.classList.remove('over');
+  _loreDragOverTrash=false;
+  // remove ghost
+  if(_loreDragGhost){try{_loreDragGhost.remove();}catch(e){}finally{_loreDragGhost=null}}
+  // restore original doc opacity
+  try{ document.querySelectorAll('.lore-doc.drag-source').forEach(function(d){ d.style.opacity=''; d.classList.remove('drag-source'); }); }catch(e){}
+  loreTrashViaX(src);
   return;
  }
- lore.forEach(function(l,i){
-   var box=document.createElement('div');box.className='lore-locker';
-   var kind=esc(l.kind||'设定');
-   var title=esc(l.title||'未命名');
-   var body=esc((l.content||'').slice(0,500));
-   var lid=esc(l.id);
-   var kc=_loreKindClass(l.kind);
-   box.onclick=function(){editLore(l.id)};
-   box.innerHTML=
-    '<div class="lore-locker-inner">'+
-     '<div class="lore-locker-content">'+
-      '<div class="lore-locker-bar '+kc+'"></div>'+
-      '<div class="lore-locker-meta"><span class="lore-locker-kind '+kc+'">'+kind+'</span></div>'+
-      '<div class="lore-locker-title">'+title+'</div>'+
-      '<div class="lore-locker-body">'+body+'</div>'+
-     '</div>'+
-    '</div>';
-   grid.appendChild(box);
- });
+ // remove ghost
+ if(_loreDragGhost){try{_loreDragGhost.remove();}catch(e){}finally{_loreDragGhost=null}}
+ // restore original doc visibility
+ try{ document.querySelectorAll('.lore-doc.drag-source').forEach(function(d){ d.style.opacity=''; d.classList.remove('drag-source'); }); }catch(e){}
+ if(!src) return;
+ var below=document.elementFromPoint(e.clientX,e.clientY);
+ if(!below) return;
+ var target=below.closest('.lore-locker');
+ if(!target) return;
+ var dstId=target.getAttribute('data-lore-id');
+ if(dstId&&dstId!==src){ swapLoreOrder(src,dstId); }
+ else if(target.classList.contains('empty')){
+   var slotIndex = target.getAttribute('data-slot-index');
+   if(slotIndex!==null && slotIndex!==undefined){
+    swapLoreToIndex(src, parseInt(slotIndex,10));
+   } else {
+    swapLoreToEmpty(src);
+   }
+ }
 }
 function _loreKindClass(k){
  var kk=(k||'').toLowerCase();
@@ -2467,11 +2811,175 @@ function _loreKindClass(k){
 function deleteLoreDirect(id){
  var l=(currentWorkDetail.lore||[]).find(function(x){return x.id===id});
  showConfirm('删除档案','确定删除「'+(l?esc(l.title):'')+'」？',function(){
-  api('POST','/api/work/'+workId+'/lore-delete',{lore_id:id},function(d,s){
+  api('POST','/api/work/'+workId+'/lore-trash',{lore_id:id},function(d,s){
    if(s===200)openWorkLore();
    else toast(d.error||'删除失败','error');
   });
  },true);
+}
+// --- Arrange (jiggle) mode ---
+function toggleLoreArrange(){
+ _loreArrangeMode=!_loreArrangeMode;
+ var btn=$('loreArrangeBtn');
+ if(_loreArrangeMode){
+  btn.classList.add('active');
+  btn.innerHTML=btn.innerHTML.replace('编排','完成');
+ } else {
+  btn.classList.remove('active');
+  btn.innerHTML=btn.innerHTML.replace('完成','编排');
+ }
+ // Re-render cards in new mode
+ renderLoreCards(currentWorkDetail?currentWorkDetail.lore||[]:[]);
+}
+function loreTrashViaX(id){
+ if(!workId)return;
+ api('POST','/api/work/'+workId+'/lore-trash',{lore_id:id},function(d,s){
+  if(s===200){
+   // Remove from local list and re-render
+   if(currentWorkDetail&&currentWorkDetail.lore){
+    currentWorkDetail.lore=currentWorkDetail.lore.filter(function(x){return x.id!==id});
+   }
+   loadLoreTrash();
+   renderLoreCards(currentWorkDetail?currentWorkDetail.lore||[]:[]);
+   toast('已移至回收站','');
+  } else {
+   toast(d.error||'操作失败','error');
+  }
+ });
+}
+function loadLoreTrash(){
+ if(!workId)return;
+ api('GET','/api/work/'+workId+'/lore-trash-list',undefined,function(d,s){
+  if(s===200){
+   _loreTrash=d.trash||[];
+   renderLoreTrashPanel();
+  }
+ });
+}
+function renderLoreTrashPanel(){
+ var list=$('loreTrashList');
+ var count=_loreTrash.length;
+ if(!list)return;
+ if(count===0){
+  list.innerHTML='<div class="lore-trash-empty">回收站为空</div>';
+  return;
+ }
+ var html='';
+ _loreTrash.forEach(function(item){
+  var title=esc(item.title||'未命名');
+  var kind=esc(item.kind||'');
+  html+='<div class="lore-trash-item">'
+   +'<span class="lore-trash-title">'+title+'</span>'
+   +(kind?'<span class="lore-trash-kind">'+kind+'</span>':'')
+   +'<button class="lore-trash-restore" onclick="event.stopPropagation();loreRestore(\''+item.id+'\')">恢复</button>'
+   +'</div>';
+ });
+ list.innerHTML=html;
+}
+function loreRestore(id){
+ if(!workId)return;
+ api('POST','/api/work/'+workId+'/lore-restore',{lore_id:id},function(d,s){
+  if(s===200){
+   _loreTrash=_loreTrash.filter(function(x){return x.id!==id});
+   renderLoreTrashPanel();
+   // Re-fetch lore list
+   api('GET','/api/work/'+workId,undefined,function(d2,s2){
+    if(s2===200&&d2.work){
+     currentWorkDetail=d2;
+     currentWork=d2.work;
+     renderLoreCards(d2.lore||[]);
+    }
+   });
+   toast('已恢复','');
+  } else {
+   toast(d.error||'恢复失败','error');
+  }
+ });
+}
+function loreTrashClearAll(){
+ if(!workId)return;
+ showConfirm('清空回收站','确定永久删除回收站中所有档案？此操作不可撤销。',function(){
+  api('POST','/api/work/'+workId+'/lore-trash-clear',{},function(d,s){
+   if(s===200){
+    _loreTrash=[];
+    renderLoreTrashPanel();
+    toast('回收站已清空','');
+   } else {
+    toast(d.error||'操作失败','error');
+   }
+  });
+ },true);
+}
+function toggleLoreTrash(){
+ var panel=$('loreTrashPanel');
+ var isOpen=panel.classList.contains('open');
+ if(isOpen){
+  panel.classList.remove('open');
+ } else {
+  loadLoreTrash();
+  panel.classList.add('open');
+ }
+}
+// Close trash panel when clicking outside
+document.addEventListener('click',function(e){
+ var panel=$('loreTrashPanel');
+ var btn=$('loreTrashBtn');
+ if(panel&&btn&&panel.classList.contains('open')){
+  if(!panel.contains(e.target)&&!btn.contains(e.target)){
+   panel.classList.remove('open');
+  }
+ }
+});
+// --- Drag reorder ---
+function swapLoreOrder(idA,idB){
+ if(!workId||!currentWorkDetail||!currentWorkDetail.lore)return;
+ var lore=currentWorkDetail.lore;
+ var idxA=-1,idxB=-1;
+ for(var i=0;i<lore.length;i++){
+  if(lore[i].id===idA)idxA=i;
+  if(lore[i].id===idB)idxB=i;
+ }
+ if(idxA<0||idxB<0)return;
+ // Swap in array
+ var tmp=lore[idxA];
+ lore[idxA]=lore[idxB];
+ lore[idxB]=tmp;
+ // Persist order
+ var order=lore.map(function(x){return x.id});
+ api('POST','/api/work/'+workId+'/lore-reorder',{order:order},function(){
+  // Re-render
+  renderLoreCards(lore);
+ });
+}
+// Move a lore item to the end (drop onto empty slot)
+function swapLoreToEmpty(id){
+ if(!workId||!currentWorkDetail||!currentWorkDetail.lore)return;
+ var lore=currentWorkDetail.lore;
+ var idx=-1;
+ for(var i=0;i<lore.length;i++){if(lore[i].id===id){idx=i;break;}}
+ if(idx<0)return;
+ // Move to end
+ var item=lore.splice(idx,1)[0];
+ lore.push(item);
+ var order=lore.map(function(x){return x.id});
+ api('POST','/api/work/'+workId+'/lore-reorder',{order:order},function(){
+  renderLoreCards(lore);
+ });
+}
+// Move a lore item to a specific slot index (0-based). If index > length, append.
+function swapLoreToIndex(id,index){
+ if(!workId||!currentWorkDetail||!currentWorkDetail.lore)return;
+ var lore=currentWorkDetail.lore;
+ var idx=-1;
+ for(var i=0;i<lore.length;i++){if(lore[i].id===id){idx=i;break;}}
+ if(idx<0) return;
+ var item=lore.splice(idx,1)[0];
+ var insertAt = Math.max(0, Math.min(index, lore.length));
+ lore.splice(insertAt,0,item);
+ var order=lore.map(function(x){return x.id});
+ api('POST','/api/work/'+workId+'/lore-reorder',{order:order},function(){
+  renderLoreCards(lore);
+ });
 }
 function placeLore(id){api('POST','/api/work/'+workId+'/lore-place',{lore_id:id},function(){loadCurrentWork()})}
 function unplaceLore(id){api('POST','/api/work/'+workId+'/lore-unplace',{lore_id:id},function(){loadCurrentWork()})}
@@ -2508,29 +3016,107 @@ function startWorkReread(){
  if(!workId)return;
  openModal('metaModal');
  renderMetaChapterGrid();
+ renderMetaInfo();
+ renderMetaEditLog();
+ _syncRTStateFromBackend();
+}
+var _workRTSyncing=false;
+// Sync button states with backend readthrough status (called on page load / modal open)
+function _syncRTStateFromBackend(){
+ if(!workId)return;
+ api('GET','/api/work/'+workId+'/readthrough',undefined,function(d,s){
+  if(s!==200)return;
+  var isRunning=d.status==='running';
+  if(isRunning){
+   _workRTSyncing=true;
+   _setRTButtonsSpinning(true);
+   if($('rtThinking'))$('rtThinking').classList.add('active');
+   if(!_workRTPollTimer)_startWorkRTPoll();
+  }else{
+   _workRTSyncing=false;
+   _setRTButtonsSpinning(false);
+   if($('rtThinking'))$('rtThinking').classList.remove('active');
+  }
+  // Update stream text based on current state
+  var stream=$('rtStream');
+  if(stream){
+   if(d.stream_buffer)stream.textContent=d.stream_buffer;
+   else if(d.status==='done')stream.textContent='全书通读完成';
+   else if(d.status==='paused')stream.textContent='通读已暂停';
+   else if(d.status==='error')stream.textContent='通读出错了，可继续重试';
+   else stream.textContent='开始通读以处理全部书本';
+  }
+  // Update system line
+  var sys=$('rtSystemLine');
+  if(sys){
+   var done=d.done_count||0,total=d.total||0;
+   var phase=d.phase||'';
+   if(d.status==='running')sys.textContent='已读 '+done+'/'+total+' 章 · '+phase;
+   else if(d.status==='done')sys.textContent='全书通读完成 · '+done+'/'+total;
+   else if(d.status==='paused')sys.textContent='已暂停 · 已读 '+done+'/'+total+' 章';
+   else if(d.status==='error')sys.textContent='通读出错了，可继续重试';
+   else sys.textContent='等待通读任务';
+  }
+  // Load source notes if available
+  if(d.has_source||d.status==='done'){
+   api('GET','/api/work/'+workId+'/readthrough/file?type=source',function(fd,fs){
+    if(fs===200&&fd.text){
+     var src=$('rtSource');
+     if(src)src.value=fd.text;
+    }
+   });
+  }
+ });
+}
+function _setRTButtonsSpinning(spin){
+ var btn=$('rtWorkUpdateBtn');var lbl=$('rtWorkUpdateLabel');
+ if(btn){if(spin)btn.classList.add('spinning');else btn.classList.remove('spinning','pausing')}
+ if(lbl)lbl.textContent=spin?'暂停':'更新';
+ var syncBtn=document.querySelector('.work-sync-btn');
+ if(syncBtn){if(spin)syncBtn.classList.add('spinning');else{syncBtn.disabled=false;syncBtn.classList.remove('spinning','pausing')}}
 }
 function syncWorkKB(){
  if(!workId)return;
- var books=currentWorkDetail&&currentWorkDetail.books||[];
- if(!books.length){toast('没有书本可同步','warn');return}
  var syncBtn=document.querySelector('.work-sync-btn');
- if(syncBtn)syncBtn.disabled=true;
- toast('正在检查变更...','info');
- api('POST','/api/work/'+workId+'/sync-kb',{},function(d,s){
-  if(syncBtn)syncBtn.disabled=false;
-  if(s===200){
-   if(d.status==='no_changes'){
-    toast('所有书本已是最新','info');
-   }else if(d.status==='started'){
-    toast('开始增量同步 '+d.chapters+' 章（'+d.books+' 本书）','success');
-    loadCurrentWork();
-   }else if(d.status==='no_books'){
-    toast('作品下没有书本','warn');
+ // If already syncing, pause instead
+ if(_workRTSyncing){
+  if(syncBtn){syncBtn.disabled=true;syncBtn.classList.add('pausing')}
+  var rb=$('rtWorkUpdateBtn');if(rb){rb.classList.add('pausing');rb.classList.remove('spinning')}
+  toast('正在暂停通读...','info');
+  api('POST','/api/work/'+workId+'/readthrough/pause',{},function(d,s){
+   if(syncBtn){syncBtn.disabled=false;syncBtn.classList.remove('pausing')}
+   if(rb)rb.classList.remove('pausing');
+   if(s===200){
+    _workRTSyncing=false;
+    _setRTButtonsSpinning(false);
+    if($('rtThinking'))$('rtThinking').classList.remove('active');
+    toast('通读已暂停','info');
+    clearInterval(_workRTPollTimer);
+    _workRTPollTimer=null;
+    // Refresh work data without triggering _syncRTStateFromBackend (which may re-add spinning)
+    api('GET','/api/work/'+workId,undefined,function(d2,s2){
+     if(s2===200){currentWorkDetail=d2;currentWork=d2.work;renderWorkView();updateWorkProgress()}
+    });
+    renderMetaChapterGrid();
+   }else{
+    _setRTButtonsSpinning(true);
+    toast(d&&d.error||'暂停失败','error');
    }
-  }else if(s===409){
-   toast(d.error||'有书本正在通读中，请稍后再试','warn');
+  });
+  return;
+ }
+ _setRTButtonsSpinning(true);
+ _workRTSyncing=true;
+ api('POST','/api/work/'+workId+'/readthrough/start',{},function(d,s){
+  if(s===200){
+   toast('通读已启动','success');
+   var stream=$('rtStream');if(stream)stream.textContent='通读已启动，请稍候...';
+   if($('rtThinking'))$('rtThinking').classList.add('active');
+   _startWorkRTPoll();
   }else{
-   toast(d.error||'同步失败','error');
+   _workRTSyncing=false;
+   _setRTButtonsSpinning(false);
+   toast(d&&d.error||'启动失败','error');
   }
  });
 }
@@ -2559,7 +3145,12 @@ function renderMetaChapterGrid(){
   b.chapters.forEach(function(ch){
    var seg=document.createElement('div');
    seg.className='meta-ch-seg'+(ch.reread_status&&ch.reread_status!=='unread'?' done':'');
-   seg.title=esc(ch.title||'');
+   var chTitle=ch.title||'';
+   var bkTitle=b.title||'';
+   seg.setAttribute('data-ch-title',chTitle);
+   seg.addEventListener('mouseenter',function(e){var t=$('metaChTooltip');t.textContent=bkTitle+' · '+chTitle;t.style.opacity='1';t.style.left=e.clientX+16+'px';t.style.top=e.clientY-12+'px'});
+   seg.addEventListener('mousemove',function(e){var t=$('metaChTooltip');t.style.left=e.clientX+16+'px';t.style.top=e.clientY-12+'px'});
+   seg.addEventListener('mouseleave',function(){$('metaChTooltip').style.opacity='0'});
    bar.appendChild(seg);
   });
   row.appendChild(label);
@@ -2567,22 +3158,56 @@ function renderMetaChapterGrid(){
   grid.appendChild(row);
  });
  // update button text
- var btn=$('rtWorkUpdateBtn');
- if(btn)btn.textContent=allUnread?'开始通读':'更新';
+ if(_workRTSyncing){
+  _setRTButtonsSpinning(true);
+ }else{
+  _setRTButtonsSpinning(false);
+  var label=$('rtWorkUpdateLabel');
+  if(label)label.textContent=allUnread?'开始通读':'更新';
+ }
 }
 function startWorkRT(){
  if(!workId)return;
  var btn=$('rtWorkUpdateBtn');
- if(btn)btn.disabled=true;
+ // If already syncing, pause instead
+ if(_workRTSyncing){
+  if(btn){btn.disabled=true;btn.classList.add('pausing');btn.classList.remove('spinning')}
+  var sb=document.querySelector('.work-sync-btn');
+  if(sb){sb.classList.add('pausing');sb.classList.remove('spinning')}
+  toast('正在暂停通读...','info');
+  api('POST','/api/work/'+workId+'/readthrough/pause',{},function(d,s){
+   if(btn){btn.disabled=false;btn.classList.remove('pausing')}
+   if(sb)sb.classList.remove('pausing');
+   if(s===200){
+    _workRTSyncing=false;
+    _setRTButtonsSpinning(false);
+    if($('rtThinking'))$('rtThinking').classList.remove('active');
+    clearInterval(_workRTPollTimer);
+    _workRTPollTimer=null;
+    // Refresh work data without re-triggering _syncRTStateFromBackend
+    api('GET','/api/work/'+workId,undefined,function(d2,s2){
+     if(s2===200){currentWorkDetail=d2;currentWork=d2.work;renderWorkView();updateWorkProgress()}
+    });
+    renderMetaChapterGrid();
+    toast('通读已暂停','info');
+   }else{
+    _setRTButtonsSpinning(true);
+    toast(d&&d.error||'暂停失败','error');
+   }
+  });
+  return;
+ }
+ _setRTButtonsSpinning(true);
+ _workRTSyncing=true;
  api('POST','/api/work/'+workId+'/readthrough/start',{},function(d,s){
-  if(btn)btn.disabled=false;
   if(s===200){
    toast('通读已启动','success');
    $('rtStream').textContent='通读已启动，请稍候...';
    if($('rtThinking'))$('rtThinking').classList.add('active');
-   // start polling
    _startWorkRTPoll();
   }else{
+   _workRTSyncing=false;
+   _setRTButtonsSpinning(false);
    toast(d&&d.error||'启动失败','error');
   }
  });
@@ -2594,20 +3219,50 @@ function _startWorkRTPoll(){
    if(s!==200)return;
    var stream=$('rtStream');
    if(stream)stream.textContent=d.stream_buffer||'处理中...';
+   // Update system line with progress
+   var sys=$('rtSystemLine');
+   if(sys){
+    var done=d.done_count||0,total=d.total||0;
+    var phase=d.phase||'';
+    if(d.status==='running')sys.textContent='已读 '+done+'/'+total+' 章 · '+phase;
+    else if(d.status==='done')sys.textContent='全书通读完成 · '+done+'/'+total;
+    else if(d.status==='paused')sys.textContent='已暂停 · 已读 '+done+'/'+total+' 章';
+    else if(d.status==='error')sys.textContent='通读出错了，可继续重试';
+    else sys.textContent='等待通读任务';
+   }
+   // Update recent logs
+   var logList=$('rtLogs');
+   if(logList&&d.recent_logs&&d.recent_logs.length){
+    logList.innerHTML=d.recent_logs.slice(-20).map(function(l){
+     return '<div class="rt-log-line"><span class="time">'+esc(l.time||'')+'</span>'+esc(l.msg||l.message||'')+'</div>';
+    }).join('');
+    var con=$('rtConsole');if(con)con.scrollTop=con.scrollHeight;
+   }
+   // Update source notes
+   if(d.has_source){
+    api('GET','/api/work/'+workId+'/readthrough/file?type=source',function(fd,fs){
+     if(fs===200&&fd.text){
+      var src=$('rtSource');
+      if(src)src.value=fd.text;
+     }
+    });
+   }
    if(d.status==='done'){
     clearInterval(_workRTPollTimer);
     _workRTPollTimer=null;
+    _workRTSyncing=false;
+    _setRTButtonsSpinning(false);
     if($('rtThinking'))$('rtThinking').classList.remove('active');
-    // reload chapter data
-    loadCurrentWork();
-    // toggle back to show grid instead of wait
     renderMetaChapterGrid();
+    renderMetaInfo();
+    renderMetaEditLog();
     toast('通读完成','success');
-   }else if(d.status==='error'){
+   }else if(d.status==='error'||d.status==='paused'||d.status==='idle'){
     clearInterval(_workRTPollTimer);
     _workRTPollTimer=null;
+    _workRTSyncing=false;
+    _setRTButtonsSpinning(false);
     if($('rtThinking'))$('rtThinking').classList.remove('active');
-    toast('通读出错','error');
    }
   });
  },2000);
@@ -3221,6 +3876,7 @@ function loadAIMessages(){
  })}
 
 function _checkPendingChat(){
+ if(!bookId)return;
  var last=aiMessages[aiMessages.length-1];
  if(last&&last.type==='ai'&&last._pending&&(last.task_id||last._pollTid)){
  _startChatPoll(last.task_id||last._pollTid);
@@ -3238,7 +3894,7 @@ function _checkPendingChat(){
 }
 
 function _startChatPoll(taskId){
- if(_chatPollTimer)return;
+ if(_chatPollTimer||!bookId)return;
  _chatPollTimer=setInterval(function(){
  api('GET','/api/book/'+bookId+'/task/status?task_id='+taskId,undefined,function(st){
  if(!st||!st.status){_stopChatPoll();return;}
