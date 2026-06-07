@@ -54,6 +54,17 @@ def _get_conn(book_id):
     conn.execute('PRAGMA busy_timeout=5000')
     return conn
 
+def wal_checkpoint(book_id, mode='passive'):
+    """截断 WAL 文件，防止长时间通读导致 WAL 无限增长。mode: passive|full|truncate"""
+    try:
+        conn = _get_conn(book_id)
+        try:
+            conn.execute(f'PRAGMA wal_checkpoint({mode})')
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
 def init_db(book_id):
     with db_transaction(book_id) as conn:
         conn.execute('PRAGMA foreign_keys=ON')

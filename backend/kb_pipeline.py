@@ -1290,6 +1290,13 @@ def do_readthrough(book_id, settings, config=None, resume=False):
                 embed_chunks_for_chapter(book_id, ch['id'], settings)
             except Exception:
                 pass
+            # 每 5 章截断一次 WAL，防止通读长书时 WAL 文件无限增长
+            if (ch['idx'] + 1) % 5 == 0:
+                try:
+                    from kb_storage import wal_checkpoint
+                    wal_checkpoint(book_id, 'passive')
+                except Exception:
+                    pass
 
         def _process_single(ch):
             if stop_check():
@@ -1307,6 +1314,7 @@ def do_readthrough(book_id, settings, config=None, resume=False):
             upsert_chapter(book_id, ch['id'], idx=ch['idx'], title=ch['title'],
                           content_hash=hash_content(ch['content']), status='processing', error='')
 
+            structured = None
             try:
                 prev_ctx = build_reading_context(book_id, ch['content'], settings, token_budget=_prev_context_limit(read_context_window))
                 structured = ai_read_chapter_structured(
@@ -1314,12 +1322,21 @@ def do_readthrough(book_id, settings, config=None, resume=False):
                     on_token=lambda _tk: set_rt_state(book_id, stream_buffer='模型已返回，正在写入知识库...'),
                     should_stop_fn=stop_check, book_id=book_id,
                 )
+                set_rt_state(book_id, current_idx=ch['idx'], phase=f'入库: {ch["title"]}',
+                             active_start_idx=ch['idx'], active_end_idx=ch['idx'],
+                             stream_buffer='正在整理人物、事件、伏笔和规则...')
+                _finish_structured(ch, structured)
             except StoppedException:
                 upsert_chapter(book_id, ch['id'], status='pending')
                 set_rt_state(book_id, status='paused', phase='已暂停',
                              current_idx=ch['idx'], active_start_idx=-1, active_end_idx=-1,
                              stream_buffer='通读已暂停，继续后会重读当前章。')
                 rt_log(book_id, '用户暂停（章节中），下次重做此章')
+                return False
+            except MemoryError:
+                rt_log(book_id, f'内存不足: {ch["title"]}，已保存已处理章节')
+                set_rt_state(book_id, status='error', phase='内存不足',
+                             error=f'处理 {ch["title"]} 时内存不足，已保存已完成的章节。请重启服务器后继续通读。')
                 return False
             except Exception as e:
                 if stop_check():
@@ -1333,10 +1350,6 @@ def do_readthrough(book_id, settings, config=None, resume=False):
                 rt_log(book_id, f'失败: {ch["title"]} ({str(e)[:100]})')
                 return True
 
-            set_rt_state(book_id, current_idx=ch['idx'], phase=f'入库: {ch["title"]}',
-                         active_start_idx=ch['idx'], active_end_idx=ch['idx'],
-                         stream_buffer='正在整理人物、事件、伏笔和规则...')
-            _finish_structured(ch, structured)
             done_count = len([c for c in list_chapters_db(book_id) if c['status'] == 'done'])
             rt_log(book_id, f'完成 ({done_count}/{total}) {ch["title"]}')
             return True
@@ -1795,6 +1808,7 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                 )
                 try:
                     prev_ctx = build_reading_context(work_id, content, settings, token_budget=1500)
+                    lore_reread_prior = _chapter_kb_records_for_reread(work_id, storage_id) if (existing and existing['status'] == 'done') else None
                     structured = ai_read_chapter_structured(
                         settings,
                         {
@@ -1803,8 +1817,14 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                             'title': f'[设定] {lore_title}',
                             'content': content,
                         },
-                        prev_context=prev_ctx, prior_records=reread_prior,
+                        prev_context=prev_ctx, prior_records=lore_reread_prior,
                         should_stop_fn=stop_check, book_id=work_id,
+                    )
+                    apply_structured_result(work_id, storage_id, structured, chapter_idx=chapter_count)
+                    upsert_chapter(
+                        work_id, storage_id, idx=chapter_count, title=f'[设定] {lore_title}',
+                        status='done', summary=structured['summary'],
+                        content_hash=hash_content(content), error='',
                     )
                 except StoppedException:
                     upsert_chapter(work_id, storage_id, status='pending')
@@ -1815,12 +1835,6 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                     rt_log(work_id, f'失败: {lore_title} ({str(e)[:100]})')
                     chapter_count += 1
                     continue
-                apply_structured_result(work_id, storage_id, structured, chapter_idx=chapter_count)
-                upsert_chapter(
-                    work_id, storage_id, idx=chapter_count, title=f'[设定] {lore_title}',
-                    status='done', summary=structured['summary'],
-                    content_hash=hash_content(content), error='',
-                )
                 chapter_count += 1
                 rt_log(work_id, f'完成 ({chapter_count}/{total}) 设定: {lore_title}')
                 try:
@@ -1875,11 +1889,22 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                         on_token=lambda _tk: set_rt_state(work_id, stream_buffer='模型已返回，正在写入知识库...'),
                         should_stop_fn=stop_check, book_id=work_id,
                     )
+                    apply_structured_result(work_id, storage_id, structured, chapter_idx=ch_idx)
+                    upsert_chapter(work_id, storage_id, idx=ch_idx, title=ch_title,
+                                  status='done',
+                                  summary=structured['summary'],
+                                  content_hash=hash_content(content),
+                                  error='')
                 except StoppedException:
                     upsert_chapter(work_id, storage_id, status='pending')
                     set_rt_state(work_id, status='paused', phase='已暂停',
                                  current_idx=pos, active_start_idx=-1, active_end_idx=-1,
                                  stream_buffer='通读已暂停。')
+                    return
+                except MemoryError:
+                    rt_log(work_id, f'内存不足: 《{book_title}》{ch_title}，已保存已处理章节')
+                    set_rt_state(work_id, status='error', phase='内存不足',
+                                 error=f'处理 《{book_title}》{ch_title} 时内存不足，已保存已完成的章节。请重启服务器后继续通读。')
                     return
                 except Exception as e:
                     if stop_check():
@@ -1891,18 +1916,19 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                     chapter_count += 1
                     continue
 
-                apply_structured_result(work_id, storage_id, structured, chapter_idx=ch_idx)
-                upsert_chapter(work_id, storage_id, idx=ch_idx, title=ch_title,
-                              status='done',
-                              summary=structured['summary'],
-                              content_hash=hash_content(content),
-                              error='')
                 chapter_count += 1
                 rt_log(work_id, f'完成 ({chapter_count}/{total}) 《{book_title}》{ch_title}')
                 try:
                     embed_chunks_for_chapter(work_id, storage_id, settings)
                 except Exception:
                     pass
+                # 每 5 章截断一次 WAL，防止通读长书时 WAL 文件无限增长
+                if chapter_count % 5 == 0:
+                    try:
+                        from kb_storage import wal_checkpoint
+                        wal_checkpoint(work_id, 'passive')
+                    except Exception:
+                        pass
 
         # 通读完成，建立索引
         set_rt_state(work_id, phase='建立索引', active_start_idx=-1, active_end_idx=-1,

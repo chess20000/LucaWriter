@@ -118,16 +118,37 @@ def build_history_event(identity, changed_files, previous_event_hash, event_type
     return event, event_hash
 
 
+def _changed_files_equal(a, b):
+    """比较两份 changed_files 列表是否完全一致（path/sha256/size 逐项相等）。"""
+    if len(a) != len(b):
+        return False
+    for x, y in zip(a, b):
+        if x.get("path") != y.get("path") or x.get("sha256") != y.get("sha256") or x.get("size") != y.get("size"):
+            return False
+    return True
+
+
 def write_coo_with_history(raw_zip_bytes, identity, event_type="export"):
     """给一个已打包好的 .coo ZIP 追加历史链并返回新 ZIP 字节。
 
     raw_zip_bytes: 不含 META-INF/ 的干净 ZIP 内容。
     identity: load_or_create_identity 返回的身份。
     event_type: "export" / "edit" 等。
+
+    如果当前载荷与上一条事件的 changed_files 完全一致，则不追加新事件，
+    直接返回原 ZIP 字节（避免无修改的重复导出产生冗余历史记录）。
     """
     src = zipfile.ZipFile(BytesIO(raw_zip_bytes), "r")
     history = _read_history(src)
     changed_files = _payload_file_hashes(src)
+
+    # 如果文件没有任何变化，不追加重复事件
+    if history:
+        last_changed = history[-1].get("changed_files", [])
+        if _changed_files_equal(last_changed, changed_files):
+            src.close()
+            return raw_zip_bytes
+
     previous_event_hash = history[-1].get("event_hash", "") if history else ""
 
     event, _ = build_history_event(identity, changed_files, previous_event_hash, event_type)

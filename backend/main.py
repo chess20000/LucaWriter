@@ -729,36 +729,33 @@ def _build_coo_zip(work_id, pen_name=''):
                     child_cover = _coo_cover_arcname(cover_raw)
                     zf.writestr(book_dir + child_cover, cover_raw)
 
-            outline_rel = 'ai/outline.md' if _coo_add_file(
-                zf, os.path.join(BOOKS_DIR, local_bid, 'outline.md'), book_dir + 'ai/outline.md'
-            ) else ''
-            volume_rel = 'ai/volume_summary.md' if _coo_add_file(
-                zf, os.path.join(BOOKS_DIR, local_bid, 'volume_summary.md'),
-                book_dir + 'ai/volume_summary.md'
-            ) else ''
-            sub_manifest = {
-                'book_uid': meta.get('book_uid') or _new_stable_uid(),
-                'title': book.get('title', '未命名书本'),
-                'author': meta.get('author') or pen_name,
-                'description': meta.get('description', ''),
-                'cover_file': child_cover,
-                'order': book_index,
-                'language': meta.get('language', work.get('language', 'zh-CN')),
-                'created': meta.get('created', 0),
-                'updated': meta.get('updated', 0),
-                'chapters': chapters_manifest,
-                'ai': {'outline_path': outline_rel, 'volume_summary_path': volume_rel},
-            }
-            zf.writestr(
-                book_dir + 'manifest.json',
-                json.dumps(sub_manifest, ensure_ascii=False, indent=2),
-            )
+            outline_rel = ''
+            if _coo_add_file(zf, os.path.join(BOOKS_DIR, local_bid, 'outline.md'), book_dir + 'ai/outline.md'):
+                outline_rel = book_dir + 'ai/outline.md'
+            volume_rel = ''
+            if _coo_add_file(zf, os.path.join(BOOKS_DIR, local_bid, 'volume_summary.md'), book_dir + 'ai/volume_summary.md'):
+                volume_rel = book_dir + 'ai/volume_summary.md'
+
+            # 章节路径改为根相对（包根），不再写子书 manifest
+            root_chapters = []
+            for ch in chapters_manifest:
+                root_ch = dict(ch)
+                root_ch['path'] = book_dir + ch['path']
+                if ch.get('summary_path'):
+                    root_ch['summary_path'] = book_dir + ch['summary_path']
+                root_chapters.append(root_ch)
+
             package_books.append({
                 'id': package_bid,
                 'title': book.get('title', '未命名书本'),
                 'order': book_index,
                 'path': book_dir,
-                'manifest_path': book_dir + 'manifest.json',
+                'cover_file': child_cover,
+                'chapters': root_chapters,
+                'ai': {
+                    'outline_path': outline_rel,
+                    'volume_summary_path': volume_rel,
+                },
             })
 
         lore_manifest = []
@@ -964,10 +961,85 @@ def _import_coo_zip(raw):
 
     for book_index, book_ref in enumerate(books_info, start=1):
         package_bid = str(book_ref.get('id') or f'book_{book_index}')
+        book_dir = _safe_coo_path(book_ref.get('path')).rstrip('/') + '/'
+
+        # v2: chapters are inline in the top-level manifest (root-relative paths)
+        chapters_ref = book_ref.get('chapters')
+        if chapters_ref:
+            bid = _new_local_id('book')
+            package_book_map[package_bid] = bid
+            bd = os.path.join(BOOKS_DIR, bid)
+            ch_dir = os.path.join(bd, 'chapters')
+            os.makedirs(ch_dir, exist_ok=True)
+            os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
+            chapter_order = []
+            chapter_ids = set()
+            for chapter_index, ch_ref in enumerate(
+                sorted(chapters_ref, key=lambda x: x.get('order', 0)), start=1
+            ):
+                path = _safe_coo_path(ch_ref.get('path'))
+                if not path:
+                    continue
+                try:
+                    ch = json.loads(_zip_read_limited(zf, path, 80 * _MB).decode('utf-8'))
+                except Exception:
+                    continue
+                cid = str(ch.get('id') or ch_ref.get('id') or _new_local_id('ch'))
+                if not is_valid_id(cid) or cid in chapter_ids:
+                    cid = _new_local_id('ch')
+                chapter_ids.add(cid)
+                chapter_order.append(cid)
+                save_json(os.path.join(ch_dir, f'{cid}.json'), {
+                    'id': cid,
+                    'title': str(ch.get('title') or ch_ref.get('title') or f'第 {chapter_index} 章')[:200],
+                    'content': str(ch.get('content') or ''),
+                    'updated': ch.get('updated') or ch_ref.get('updated') or now,
+                })
+                summary_path = _safe_coo_path(ch_ref.get('summary_path'))
+                if summary_path:
+                    try:
+                        summary = _zip_read_limited(zf, summary_path, 10 * _MB)
+                        summary_dir = os.path.join(bd, 'chapter_summaries')
+                        os.makedirs(summary_dir, exist_ok=True)
+                        with open(os.path.join(summary_dir, f'{cid}.md'), 'wb') as f:
+                            f.write(summary)
+                    except Exception:
+                        pass
+            meta = {
+                'id': bid,
+                'work_id': wid,
+                'title': str(book_ref.get('title') or '未命名书本')[:200],
+                'chapter_order': chapter_order,
+                'current_chapter_id': chapter_order[0] if chapter_order else '',
+            }
+            save_json(os.path.join(bd, 'meta.json'), meta)
+            save_json(os.path.join(bd, 'outline.json'), dict(DEFAULT_OUTLINE))
+            package_chapters[package_bid] = set(chapter_order)
+            work['book_ids'].append(bid)
+            # book cover (relative to book dir)
+            cover_rel = _safe_coo_path(book_ref.get('cover_file'))
+            if cover_rel:
+                try:
+                    with open(os.path.join(bd, 'cover'), 'wb') as f:
+                        f.write(_zip_read_limited(zf, book_dir + cover_rel, EPUB_MAX_COVER_BYTES))
+                except Exception:
+                    pass
+            # book-level AI assets (root-relative paths)
+            book_ai = book_ref.get('ai') or {}
+            for ai_field, dest_name in [('outline_path', 'outline.md'), ('volume_summary_path', 'volume_summary.md')]:
+                ai_path = _safe_coo_path(book_ai.get(ai_field))
+                if ai_path:
+                    try:
+                        with open(os.path.join(bd, dest_name), 'wb') as f:
+                            f.write(_zip_read_limited(zf, ai_path, 200 * _MB))
+                    except Exception:
+                        pass
+            continue
+
+        # ── 兼容旧格式：子书 manifest.json（v2 早期版本）──
         manifest_path = _safe_coo_path(book_ref.get('manifest_path'))
         if not manifest_path:
-            base = _safe_coo_path(book_ref.get('path')).rstrip('/')
-            manifest_path = f'{base}/manifest.json' if base else ''
+            manifest_path = f'{book_dir}manifest.json' if book_dir else ''
         if not manifest_path:
             continue
         try:
@@ -1018,13 +1090,7 @@ def _import_coo_zip(raw):
         meta = {
             'id': bid,
             'work_id': wid,
-            'book_uid': sub.get('book_uid') or _new_stable_uid(),
             'title': str(sub.get('title') or book_ref.get('title') or '未命名书本')[:200],
-            'author': str(sub.get('author') or work['author'])[:200],
-            'description': str(sub.get('description') or ''),
-            'language': str(sub.get('language') or work['language'])[:30],
-            'created': sub.get('created') or now,
-            'updated': sub.get('updated') or now,
             'chapter_order': chapter_order,
             'current_chapter_id': chapter_order[0] if chapter_order else '',
         }
@@ -2718,7 +2784,14 @@ def _session_remember(token):
             created = s.get('created', 0)
             if created > 0:
                 lifetime = s['expires'] - created
-                return lifetime > 86400 * 2  # >2 days = remember session
+                # original remember-me sessions have 90-day lifetime
+                if lifetime > 86400 * 2:
+                    return True
+                # non-remember sessions (1-day) stay as such
+                return False
+            # fallback: no created field → use remaining time as heuristic
+            remaining = s['expires'] - now
+            return remaining > 86400 * 2  # >2 days remaining = likely remember
     return False
 
 
@@ -3646,7 +3719,7 @@ class Handler(BaseHTTPRequestHandler):
         if not token: return
         remember = _session_remember(token)
         max_age = 7776000 if remember else 86400
-        cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'
+        cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
         if self.headers.get('X-Forwarded-Proto') == 'https':
             cookie += '; Secure'
         self.send_header('Set-Cookie', cookie)
@@ -4779,7 +4852,7 @@ class Handler(BaseHTTPRequestHandler):
             token = make_session(u, remember=remember, device_name=device_name)
             log_action('SETUP', u)
             max_age = 7776000 if remember else 86400
-            cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'
+            cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
             if self.headers.get('X-Forwarded-Proto') == 'https':
                 cookie += '; Secure'
             self.json_resp(200, {'ok': True, 'username': u, 'has_password': bool(p)}, {'Set-Cookie': cookie}); return
@@ -4804,7 +4877,7 @@ class Handler(BaseHTTPRequestHandler):
                 token = make_session(u, remember=remember, device_name=device_name)
                 log_action('LOGIN', u)
                 max_age = 7776000 if remember else 86400
-                cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'
+                cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
                 if self.headers.get('X-Forwarded-Proto') == 'https':
                     cookie += '; Secure'
                 self.json_resp(200, {'ok': True, 'username': u, 'has_password': False}, {'Set-Cookie': cookie}); return
@@ -4826,7 +4899,7 @@ class Handler(BaseHTTPRequestHandler):
             token = make_session(u, remember=remember, device_name=device_name)
             log_action('LOGIN', u)
             max_age = 7776000 if remember else 86400
-            cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'
+            cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Lax'
             if self.headers.get('X-Forwarded-Proto') == 'https':
                 cookie += '; Secure'
             self.json_resp(200, {'ok': True, 'username': u, 'has_password': True}, {'Set-Cookie': cookie}); return
@@ -4836,6 +4909,8 @@ class Handler(BaseHTTPRequestHandler):
             if t:
                 sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') != t]
                 save_json(SESSIONS_FILE, sessions)
+            # prevent _refresh_session_cookie from re-setting the session cookie
+            self._authed_token = None
             self.json_resp(200, {'ok': True}, {'Set-Cookie': 'session=; Path=/; Max-Age=0; SameSite=Lax'}); return
 
         if path == '/api/auth/reset-password':
@@ -6387,6 +6462,11 @@ class Handler(BaseHTTPRequestHandler):
                             log_action('AUTO_COMPRESS', f'before={_estimate_messages_tokens(msgs)} limit={ctx_limit}')
                             msgs = _compress_messages_for_context(msgs, ctx_limit, cfg_settings)
                             log_action('AUTO_COMPRESS', f'after={_estimate_messages_tokens(msgs)}')
+
+                        # 安全兜底：确保消息列表始终包含至少一条 user 消息
+                        _has_user = any(m.get('role') == 'user' for m in msgs)
+                        if not _has_user:
+                            msgs.append({'role': 'user', 'content': user_text or '继续'})
 
                         # 如果网络搜索功能未关闭，注入浏览器工具提示
                         _network_search_mode = cfg_settings.get('network_search', 'on')
@@ -8493,17 +8573,33 @@ def _saved_chat_to_ai_history(entity_id, pending_task_id=''):
             if m.get('type') == 'ai' and m.get('_pending') and m.get('task_id') == pending_task_id:
                 skip_user_idx = i - 1
                 break
-    history = []
+    raw = []
     for i, m in enumerate(messages):
         if i == skip_user_idx:
             continue
         mtype = m.get('type')
         if mtype == 'system' and m.get('subtype') == 'compressed_summary' and m.get('text'):
-            history.append({'role': 'system', 'content': m.get('text', '')})
+            raw.append({'role': 'system', 'content': m.get('text', '')})
         elif mtype == 'user' and m.get('text'):
-            history.append({'role': 'user', 'content': m.get('text', '')})
+            raw.append({'role': 'user', 'content': m.get('text', '')})
         elif mtype == 'ai' and not m.get('_pending') and not m.get('_streaming') and m.get('text'):
-            history.append({'role': 'assistant', 'content': m.get('text', '')})
+            raw.append({'role': 'assistant', 'content': m.get('text', '')})
+    # 修剪开头孤立的 assistant 消息（没有前置 user 消息的 assistant）
+    first_user_idx = None
+    for i, m in enumerate(raw):
+        if m.get('role') == 'user':
+            first_user_idx = i
+            break
+    if first_user_idx is not None and first_user_idx > 0:
+        # 删除第一个 user 之前的所有消息（孤立的 assistant / system）
+        raw = raw[first_user_idx:]
+    # 合并连续的同 role 消息（相邻 user-user 或 assistant-assistant）
+    history = []
+    for m in raw:
+        if history and history[-1].get('role') == m.get('role'):
+            history[-1]['content'] = history[-1]['content'] + '\n\n' + m['content']
+        else:
+            history.append(dict(m))
     return history
 
 def _replace_pending_chat_msg(book_id, task_id, text, reasoning='', meta=None):
@@ -9775,6 +9871,8 @@ def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=Fals
         body['max_tokens'] = min(int(max_tokens), 131072)
     else:
         body['max_tokens'] = 4096
+    if temperature is not None:
+        body['temperature'] = float(temperature)
     if stream:
         body['stream'] = True
     # 添加 tools 支持
@@ -10358,6 +10456,8 @@ def _compress_messages_for_context(messages, max_ctx_tokens, settings=None):
     if sys_msg:
         result.append(sys_msg)
     if not hist:
+        # 安全兜底：压缩后至少保留一个占位 user 消息
+        result.append({'role': 'user', 'content': '继续'})
         return result
     keep_recent = 6
     if len(hist) <= keep_recent + 2:
@@ -11320,7 +11420,20 @@ def _schedule_kb_after_write_jobs(book_id, cfg_settings, include_prediction=True
 
 def _do_readthrough_wrapper(book_id, cfg_settings, config=None, resume=False):
     threading.current_thread().name = f'kb_readthrough_{book_id}'
-    kb_pipeline.do_readthrough(book_id, cfg_settings, config=config, resume=resume)
+    try:
+        kb_pipeline.do_readthrough(book_id, cfg_settings, config=config, resume=resume)
+    except BaseException as e:
+        import traceback
+        log_action('RT_WRAPPER_CRASH', f'book={book_id} err={str(e)[:200]}')
+        try:
+            kb_storage.set_rt_state(book_id, status='error', phase='崩溃',
+                                    error=f'通读线程崩溃: {str(e)[:200]}\n{traceback.format_exc()[-500:]}')
+            kb_pipeline.rt_log(book_id, f'通读线程崩溃: {str(e)[:200]}')
+        except Exception:
+            pass
+        if not isinstance(e, Exception):
+            raise
+        return
     try:
         st = kb_storage.get_rt_state(book_id)
         if st and st.get('status') == 'done':
@@ -11331,18 +11444,31 @@ def _do_readthrough_wrapper(book_id, cfg_settings, config=None, resume=False):
 
 def _do_work_readthrough_wrapper(work_id, cfg_settings, config=None, resume=False):
     threading.current_thread().name = f'kb_readthrough_{work_id}'
-    detail = _work_detail(work_id)
-    if not detail:
+    try:
+        detail = _work_detail(work_id)
+        if not detail:
+            return
+        kb_pipeline.do_readthrough_work(
+            work_id,
+            detail['books'],
+            cfg_settings,
+            reading_order=_normalize_work_reading_order(work_id, append_missing=True),
+            work_title=detail['work'].get('title', ''),
+            config=config,
+            resume=resume,
+        )
+    except BaseException as e:
+        import traceback
+        log_action('RT_WORK_WRAPPER_CRASH', f'work={work_id} err={str(e)[:200]}')
+        try:
+            kb_storage.set_rt_state(work_id, status='error', phase='崩溃',
+                                    error=f'通读线程崩溃: {str(e)[:200]}\n{traceback.format_exc()[-500:]}')
+            kb_pipeline.rt_log(work_id, f'通读线程崩溃: {str(e)[:200]}')
+        except Exception:
+            pass
+        if not isinstance(e, Exception):
+            raise
         return
-    kb_pipeline.do_readthrough_work(
-        work_id,
-        detail['books'],
-        cfg_settings,
-        reading_order=_normalize_work_reading_order(work_id, append_missing=True),
-        work_title=detail['work'].get('title', ''),
-        config=config,
-        resume=resume,
-    )
     try:
         st = kb_storage.get_rt_state(work_id)
         if st and st.get('status') == 'done':

@@ -37,21 +37,22 @@
 
 ```
 三体.coo                          (= 一个 IP = 一个世界观)
-├── manifest.json                # IP 信息 + 书目 + lore 注册表 + 阅读线 reading_order
+├── manifest.json                # IP 信息 + 书目(含章节清单) + lore 注册表 + 阅读线
 ├── META-INF/
 │   └── coo-history.jsonl        # 记账本：author(留名) + 哈希链(防偷改)，无签名
 ├── books/                       # 【正文 · 有序】
 │   ├── 01_三体/
-│   │   ├── manifest.json        # 子书元数据 + 章节清单
-│   │   └── chapters/
-│   │       ├── ch_001.json
-│   │       └── ch_002.json
+│   │   ├── chapters/
+│   │   │   ├── ch_001.json
+│   │   │   └── ch_002.json
+│   │   ├── ai/                  #   可选：该书的大纲、卷摘要、章节摘要
+│   │   └── cover.webp           #   可选：该书封面
 │   ├── 02_黑暗森林/
-│   │   ├── manifest.json
-│   │   └── chapters/
+│   │   ├── chapters/
+│   │   └── ai/
 │   └── 03_死神永生/
-│       ├── manifest.json
-│       └── chapters/
+│       ├── chapters/
+│       └── ai/
 ├── lore/                        # 【设定 · 无序 · 便签】
 │   ├── 三体人.md
 │   ├── 水滴.md
@@ -73,14 +74,16 @@
 - 所有 ZIP 内路径用正斜杠 `/`，相对包根。导入方按 `/` 归一化反斜杠。
 - 忽略 `__MACOSX/` 及任何目录项。
 - 子书目录名格式 `NN_标题`（`NN` 为两位序号，仅为人类可读；真正的顺序以 manifest 里的 `order` 为准）。
-- 子书 manifest 内的 `path` 相对**该子书目录**（如 `chapters/ch_001.json`）。
-- 顶层 manifest 内的 `path` 相对**包根**（如 `books/01_三体/`、`lore/水滴.md`）。
+- 顶层 manifest 内的所有 `path` 均相对**包根**（如 `books/01_三体/chapters/ch_001.json`、`lore/水滴.md`）。
 
 ### 必需 / 推荐文件
 
-**必需**：`manifest.json`、至少一个 `books/NN_*/manifest.json` 且其至少含一章、`META-INF/coo-history.jsonl`。
+**必需**：`manifest.json`（其 `books[]` 至少含一个条目且该条目至少含一章）、`META-INF/coo-history.jsonl`。
 
 **推荐**：`assets/cover.*`、`lore/*.md`、`shared/ai/*`、`shared/vector_db/**`、各子书 `ai/chapter_summaries/*.md`。
+
+> **书不是独立实体**：书只是比「章」高一级的目录容器。书不持有自己的 manifest、UID、作者、简介、语言等元数据——
+> 一切管理在顶层 `manifest.json` 的 `books[]` 和 `work` 里。书的目录下只有 `chapters/`（必需）、`ai/`（可选）、封面文件（可选）。
 
 ---
 
@@ -113,14 +116,41 @@
       "title": "三体",
       "order": 1,
       "path": "books/01_三体/",
-      "manifest_path": "books/01_三体/manifest.json"
+      "cover_file": "cover.webp",
+      "chapters": [
+        {
+          "id": "ch_001",
+          "title": "科学边界",
+          "order": 1,
+          "path": "books/01_三体/chapters/ch_001.json",
+          "summary_path": "books/01_三体/ai/chapter_summaries/ch_001.md",
+          "word_count": 3500,
+          "updated": 1780459638.0
+        }
+      ],
+      "ai": {
+        "outline_path": "books/01_三体/ai/outline.md",
+        "volume_summary_path": "books/01_三体/ai/volume_summary.md"
+      }
     },
     {
       "id": "02_黑暗森林",
       "title": "黑暗森林",
       "order": 2,
       "path": "books/02_黑暗森林/",
-      "manifest_path": "books/02_黑暗森林/manifest.json"
+      "cover_file": "",
+      "chapters": [
+        {
+          "id": "ch_001",
+          "title": "上部 面壁者",
+          "order": 1,
+          "path": "books/02_黑暗森林/chapters/ch_001.json",
+          "summary_path": "",
+          "word_count": 4200,
+          "updated": 1780459638.0
+        }
+      ],
+      "ai": {}
     }
   ],
 
@@ -172,8 +202,10 @@
 - `format_version`：整数 `2`。导入方必须拒绝其他版本（v1 不再受支持，见 §9）。
 - `work_uid`：IP 的全局稳定标识，`coo_` 前缀 + ≥64 位随机十六进制。重新导出同一 IP 应保持不变。
 - `work`：IP（= 作品 = 世界观）的元数据。`title` 必填非空。Coobox 用户主页的「x 个作品」数的就是它。
-  `cover_file` 可为空；为空时展示方必须回退到 `books[]` 按 `order` 排序后的第一本子书封面。
-- `books[]`：**有序**书目。`id` = 子书目录基名，全包内唯一；`order` 为真正排序依据；详细章节在子书自身 manifest。
+  `author` 是**整个 IP 的唯一规范作者**。书不持有独立作者。`cover_file` 可为空；为空时展示方必须回退到 `books[]` 按 `order` 排序后的第一本书的封面。
+- `books[]`：**有序**书目。书不是独立实体——它只是比章高一级的目录容器，不持有自己的 manifest 或 UID。
+  `id` = 子书目录基名，全包内唯一；`order` 为真正排序依据；`chapters[]` 直接内联在此（所有 path 相对包根）。
+  `cover_file` 可选（相对该书目录）；`ai` 可选，记录该书的大纲/卷摘要/章节摘要路径（均相对包根）。
 - `lore[]`：lore **注册表**（无序集合，仅登记，不排序）。`id` 供 `reading_order` 引用，全包内唯一。
   `kind` 可选，建议取值：`entity`(实体) / `location`(地点) / `concept`(概念) / `item`(物件) / `archive`(收容档案) / `event`(事件)。
 - `reading_order`：阅读线，见 §5。可省略/为空（见缺省推导规则）。
@@ -186,45 +218,21 @@
 
 ---
 
-## 3. 子书 manifest 与章节文件
+## 3. 书目录与章节文件
 
-### books/NN_xxx/manifest.json
+### books/NN_xxx/ —— 书的目录
 
-```json
-{
-  "book_uid": "coo_64_or_more_random_hex_chars",
-  "title": "三体",
-  "author": "",
-  "description": "",
-  "cover_file": "cover.webp",
-  "order": 1,
-  "language": "zh-CN",
-  "created": 1780141269.0,
-  "updated": 1780459638.0,
-  "chapters": [
-    {
-      "id": "ch_001",
-      "title": "科学边界",
-      "order": 1,
-      "path": "chapters/ch_001.json",
-      "summary_path": "ai/chapter_summaries/ch_001.md",
-      "word_count": 3500,
-      "updated": 1780459638.0
-    }
-  ],
-  "ai": {
-    "outline_path": "ai/outline.md",
-    "volume_summary_path": "ai/volume_summary.md"
-  }
-}
-```
+书**不持有自己的 manifest**。它只是一个目录容器，里面放：
 
-- `cover_file` 可选，相对**该子书目录**。作品与每本子书可以有各自独立的标题和封面。
-- `chapters[]` 的 `path` / `summary_path` 相对**该子书目录**。
-- `order` 决定该书内章节顺序（缺省阅读线时即按此序通读）。
-- 子书可有自己的 `ai/`（章节摘要、卷摘要、大纲）；世界观级共享资产放 `shared/`，二者并存。
+- `chapters/`：章节 JSON 文件（必需）
+- `ai/`：该书专属的 AI 资产——大纲（`outline.md`）、卷摘要（`volume_summary.md`）、章节摘要（`chapter_summaries/*.md`）——全部可选
+- 封面文件：可选，文件名任意，扩展名决定 MIME
 
-### 章节文件 chapters/ch_xxx.json
+书的全部元数据（标题、章节清单、AI 资产路径等）都在顶层 `manifest.json` 的 `books[]` 里，
+见 §2。书没有 `book_uid`、没有独立作者、没有简介/语言/时间戳——这些要么不存在（书不是独立实体），
+要么在 `work` 里（作者、简介、语言）。
+
+### 章节文件 books/NN_xxx/chapters/NNNNN_xxx.json
 
 沿用纯文本章节形状（与 v1 一致，未变）：
 
@@ -371,9 +379,11 @@ Coobox 阅读时只渲染一个极小的 Markdown 子集：
 字段：
 
 - `author`：**必填**，自由填写的留名字符串，不校验、可重名。
+  此字段记录的是「谁执行了这次导出/编辑」（类似 git 的 committer），不是作品内容的作者（内容作者见 `work.author`）。
 - `event_type`：`export` / `edit` / `merge` 等，描述这次事件。
 - `changed_files[]`：本次事件覆盖的「当前完整载荷」清单——即除控制文件外、包内每个文件的
   `{path, sha256, size}`，按 `path` 升序。（与 v1 一致：记录的是改动后包的全量快照，便于「最后一条 = 当前文件」核对。）
+  **如果本次导出时载荷与上一条事件完全一致，不得追加新事件**（避免无修改的重复导出产生冗余记录）。
 - `previous_event_hash`：上一条事件的 `event_hash`；第一条为 `""`。
 - `event_hash`：本事件的哈希，算法见 §8。
 - **已移除字段**（相对 v1）：`signature_alg`、`public_key_id`、`signature`。

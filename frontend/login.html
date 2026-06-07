@@ -229,7 +229,7 @@ if(window.electronAPI&&window.electronAPI.onMaximizeChange){
 loadThemedIcon();
 loadTheme();
 var isSetup=false;
-var rememberActive=(function(){try{return localStorage.getItem('lw_remember_login')==='true'}catch(e){return false}})();
+var rememberActive=(function(){try{var v=localStorage.getItem('lw_remember_login');if(v===null)return true;return v==='true'}catch(e){return true}})();
 function toggleRemember(){rememberActive=!rememberActive;var el=$('rememberToggle');el.classList.toggle('active',rememberActive);el.setAttribute('aria-checked',rememberActive);try{localStorage.setItem('lw_remember_login',rememberActive)}catch(e){}}
 (function(){if(rememberActive){var el=document.getElementById('rememberToggle');if(el){el.classList.add('active');el.setAttribute('aria-checked','true')}}})();
 function api(m,p,d,cb){var x=new XMLHttpRequest();x.onload=function(){try{cb(JSON.parse(this.responseText),this.status)}catch(e){cb({error:'err'},this.status)}};x.onerror=function(){cb({error:'err'},0)};x.open(m,p);x.setRequestHeader('Cache-Control','no-cache');x.setRequestHeader('Pragma','no-cache');if(d!==undefined){x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(d))}else x.send()}

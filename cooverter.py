@@ -71,13 +71,12 @@ def _build_coo_from_source(path):
     raw = path.read_bytes()
     chapters, book_title, cover_data = _normalize_parse_result(main.IMPORT_PARSERS[ext](raw, path.name), path.name)
     work_uid = "coo_" + os.urandom(48).hex()
-    book_uid = "coo_" + os.urandom(48).hex()
     book_id = "01_" + _safe_name(book_title, "book")
     exported_at = time.time()
 
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # ── 子书目录: books/01_Title/chapters/ ──
+        # ── 书目录: books/01_Title/chapters/ ──
         book_dir = f"books/{book_id}/"
         chapter_items = []
         for idx, chapter in enumerate(chapters, start=1):
@@ -97,29 +96,11 @@ def _build_coo_from_source(path):
                 "id": cid,
                 "title": title,
                 "order": idx,
-                "path": f"chapters/{idx:05d}_{safe}.json",
+                "path": arc,
                 "summary_path": "",
                 "word_count": len(content),
                 "updated": exported_at,
             })
-
-        # ── 子书 manifest: books/01_Title/manifest.json ──
-        sub_manifest = {
-            "book_uid": book_uid,
-            "title": book_title,
-            "author": PEN_NAME,
-            "description": "",
-            "order": 1,
-            "language": "zh-CN",
-            "created": exported_at,
-            "updated": exported_at,
-            "chapters": chapter_items,
-            "ai": {
-                "outline_path": "",
-                "volume_summary_path": "",
-            },
-        }
-        zf.writestr(f"{book_dir}manifest.json", json.dumps(sub_manifest, ensure_ascii=False, indent=2))
 
         # ── 封面 ──
         cover_arc = ""
@@ -152,8 +133,10 @@ def _build_coo_from_source(path):
                     "id": book_id,
                     "title": book_title,
                     "order": 1,
-                    "path": f"books/{book_id}/",
-                    "manifest_path": f"books/{book_id}/manifest.json",
+                    "path": book_dir,
+                    "cover_file": "",
+                    "chapters": chapter_items,
+                    "ai": {},
                 }
             ],
             "lore": [],

@@ -1684,6 +1684,10 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 <div class="modal" style="max-width:400px">
 <h2>导出 / 上传作品</h2>
 <p style="font-size:12px;color:var(--t2);margin-bottom:12px">带有完整章节、封面、摘要、知识库和向量数据。</p>
+<div class="mg">
+<label>笔名</label>
+  <input id="cooPenName" type="text" placeholder="写入 COO 文件的作者笔名">
+</div>
 <div style="margin-bottom:16px">
   <button class="prompt-ok" style="width:100%;padding:14px 10px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px" onclick="doExportCoo()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>保存到本地</button>
 </div>
@@ -1700,10 +1704,6 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 <div class="mg">
 <label>密码</label>
   <input id="cooPassword" type="password" placeholder="你的 Coobox 账号密码">
-</div>
-<div class="mg">
-<label>笔名</label>
-  <input id="cooPenName" type="text" placeholder="写入 COO 文件的作者笔名">
 </div>
 <div class="ma" style="margin-top:6px">
   <button class="prompt-ok" onclick="doPushCoo()" style="background:var(--accent-a15);color:var(--accent);width:100%">推送到 Coobox</button>
@@ -3181,6 +3181,7 @@ function switchWorkChatSession(sid){
  if(sid===currentChatSessionId)return;
  currentChatSessionId=sid;_saveChatSessionId();
  var hp=$('workChatHistory');if(hp)hp.style.display='none';
+ var wb=$('workChatHistBtn');if(wb){wb.innerHTML='<svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 4h10M3 8h10M3 12h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';wb.title='历史对话';}
  api('GET','/api/chat-session/'+sid+'/messages',undefined,function(d,s){
   if(s===200&&d.messages){aiMessages=d.messages}else{aiMessages=[]}
   renderAIMessages();
@@ -4031,6 +4032,9 @@ function renderAIMessages(){
   var nearBottom=c.scrollHeight-c.scrollTop-c.clientHeight<60;
   var savedScrollTop=c.scrollTop;
   c.innerHTML='';
+  // Always clear work chat messages too (before early return)
+  var wc=$('workChatMessages');
+  if(wc){wc.innerHTML='';}
   if(!aiMessages.length){_syncThinkingRotation();return}
   aiMessages.forEach(function(m,idx){
  if(m.type==='system'&&m.subtype==='compressed_summary') return;
@@ -4048,9 +4052,7 @@ function renderAIMessages(){
   if(nearBottom)c.scrollTop=c.scrollHeight;
   else c.scrollTop=savedScrollTop;
    _syncThinkingRotation();
-  var wc=$('workChatMessages');
   if(wc){
-   wc.innerHTML='';
    if(aiMessages.length){
     aiMessages.forEach(function(m,idx){
      if(m.type==='system')return;
@@ -4067,8 +4069,8 @@ function renderAIMessages(){
       if(isLive&&!m.text&&!m.reasoning){el.innerHTML='<div class="ai-msg-body"><span class="thinking-word"></span></div>'}
      wc.appendChild(el);
     });
-    var first=wc.firstElementChild;
-    if(first)first.style.marginTop='auto';
+    var first2=wc.firstElementChild;
+    if(first2)first2.style.marginTop='auto';
     wc.scrollTop=wc.scrollHeight;
    }
   }
@@ -6460,7 +6462,14 @@ function newChatSession(){
    aiMessages=[];
    renderAIMessages();
    var hp=$('chatHistoryPanel');if(hp)hp.style.display='none';
-   loadChatSessions(function(){renderChatHistory();_updateSessionTitleDisplay()});
+   // Also close work chat history if open
+   var wh=$('workChatHistory');if(wh){wh.style.display='none';}
+   var wb=$('workChatHistBtn');if(wb){wb.innerHTML='<svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 4h10M3 8h10M3 12h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';wb.title='历史对话';}
+   loadChatSessions(function(){
+    renderChatHistory();
+    renderWorkChatHistory();
+    _updateSessionTitleDisplay();
+   });
   }
  });
 }
