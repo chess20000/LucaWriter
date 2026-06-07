@@ -229,8 +229,9 @@ if(window.electronAPI&&window.electronAPI.onMaximizeChange){
 loadThemedIcon();
 loadTheme();
 var isSetup=false;
-var rememberActive=false;
-function toggleRemember(){rememberActive=!rememberActive;var el=$('rememberToggle');el.classList.toggle('active',rememberActive);el.setAttribute('aria-checked',rememberActive)}
+var rememberActive=(function(){try{return localStorage.getItem('lw_remember_login')==='true'}catch(e){return false}})();
+function toggleRemember(){rememberActive=!rememberActive;var el=$('rememberToggle');el.classList.toggle('active',rememberActive);el.setAttribute('aria-checked',rememberActive);try{localStorage.setItem('lw_remember_login',rememberActive)}catch(e){}}
+(function(){if(rememberActive){var el=document.getElementById('rememberToggle');if(el){el.classList.add('active');el.setAttribute('aria-checked','true')}}})();
 function api(m,p,d,cb){var x=new XMLHttpRequest();x.onload=function(){try{cb(JSON.parse(this.responseText),this.status)}catch(e){cb({error:'err'},this.status)}};x.onerror=function(){cb({error:'err'},0)};x.open(m,p);x.setRequestHeader('Cache-Control','no-cache');x.setRequestHeader('Pragma','no-cache');if(d!==undefined){x.setRequestHeader('Content-Type','application/json');x.send(JSON.stringify(d))}else x.send()}
 
 api('GET','/api/auth/status',undefined,function(d){if(!d.has_users){isSetup=true;$('mainCard').classList.add('setup-mode');$('submitBtn').textContent='创建账户';$('username').placeholder='用户名';$('pwHint').textContent='创建你的账户';return}if(d.logged_in){try{localStorage.removeItem('lucawriter_state')}catch(e){}location.href='/';return}$('forgotPwd').style.display='block'});

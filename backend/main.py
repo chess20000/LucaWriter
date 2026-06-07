@@ -2708,6 +2708,20 @@ def validate_session(token):
     return False
 
 
+def _session_remember(token):
+    """Check if a session was created with 'remember' (90-day expiry)."""
+    if not token: return False
+    sessions = load_json(SESSIONS_FILE, list)
+    now = time.time()
+    for s in sessions:
+        if hmac.compare_digest(s.get('token', ''), token) and s.get('expires', 0) > now:
+            created = s.get('created', 0)
+            if created > 0:
+                lifetime = s['expires'] - created
+                return lifetime > 86400 * 2  # >2 days = remember session
+    return False
+
+
 def get_cookie_token(headers):
     c = headers.get('Cookie', '')
     if not c: return None
@@ -3592,6 +3606,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Connection', 'close')
             self.send_cors()
+            self._refresh_session_cookie()
             if extra_headers:
                 for k, v in extra_headers.items(): self.send_header(k, v)
             self.end_headers()
@@ -3604,6 +3619,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.send_header('Cache-Control', 'no-store')
             self.send_header('Connection', 'close')
+            self._refresh_session_cookie()
             self.end_headers()
             self.wfile.write(content.encode('utf-8'))
         except: pass
@@ -3617,7 +3633,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def is_authed(self):
         if not has_users(): return False
-        return validate_session(get_cookie_token(self.headers))
+        token = get_cookie_token(self.headers)
+        if not token: return False
+        if validate_session(token):
+            self._authed_token = token
+            return True
+        return False
+
+    def _refresh_session_cookie(self):
+        """Refresh session cookie on every authenticated response to prevent expiry."""
+        token = getattr(self, '_authed_token', None)
+        if not token: return
+        remember = _session_remember(token)
+        max_age = 7776000 if remember else 86400
+        cookie = f'session={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict'
+        if self.headers.get('X-Forwarded-Proto') == 'https':
+            cookie += '; Secure'
+        self.send_header('Set-Cookie', cookie)
 
     def _check_access(self):
         scope = '127.0.0.1'
@@ -3685,6 +3717,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self._track_me()
         if not self._check_access(): return
+        # Refresh session cookie on every authenticated request to prevent expiry
+        self.is_authed()
         path = urlparse(self.path).path
 
         # 兼容：支持 /summary 作为 /readthrough 的别名（前端/外部可能使用 summary 命名）
@@ -4713,6 +4747,8 @@ class Handler(BaseHTTPRequestHandler):
         self._track_me()
         if not self._check_access(): return
         if not self._check_csrf(): return
+        # Refresh session cookie on every authenticated request to prevent expiry
+        self.is_authed()
         path = urlparse(self.path).path
         qs = parse_qs(urlparse(self.path).query)
 

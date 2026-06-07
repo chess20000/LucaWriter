@@ -606,9 +606,8 @@ def resolve_entity(book_id, canonical_name, type_, aliases=None, first_chapter_i
                         merged.append(a)
                 conn.execute('UPDATE entities SET aliases=?, updated_at=? WHERE id=?',
                     (json.dumps(merged, ensure_ascii=False), now, eid))
-            if first_chapter_id and not existing.get('first_chapter_id'):
-                conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?',
-                    (first_chapter_id, now, eid))
+            if first_chapter_id and not existing['first_chapter_id']:
+                conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?', (first_chapter_id, now, eid))
             # 更新 name_norm
             conn.execute('UPDATE entities SET name_norm=COALESCE(name_norm,?), updated_at=? WHERE id=?',
                 (name_norm, now, eid))
@@ -673,7 +672,7 @@ def resolve_entity_with_embedding(book_id, canonical_name, type_, aliases=None, 
                         merged.append(a)
                 conn.execute('UPDATE entities SET aliases=?, updated_at=? WHERE id=?',
                     (json.dumps(merged, ensure_ascii=False), now, eid))
-            if first_chapter_id and not existing.get('first_chapter_id'):
+            if first_chapter_id and not existing['first_chapter_id']:
                 conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?',
                     (first_chapter_id, now, eid))
             conn.execute('UPDATE entities SET name_norm=COALESCE(name_norm,?), updated_at=? WHERE id=?',
@@ -753,7 +752,7 @@ def _merge_entities_internal(conn, book_id, into_id, canonical_name, type_, alia
             merged.append(a)
     conn.execute('UPDATE entities SET aliases=?, updated_at=? WHERE id=?',
         (json.dumps(merged, ensure_ascii=False), now, into_id))
-    if first_chapter_id and not existing.get('first_chapter_id'):
+    if first_chapter_id and not existing['first_chapter_id']:
         conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?',
             (first_chapter_id, now, into_id))
     conn.execute('UPDATE entities SET name_norm=COALESCE(name_norm,?), updated_at=? WHERE id=?',
@@ -785,7 +784,7 @@ def merge_entities(book_id, into_id, from_id):
         conn.execute('UPDATE entities SET aliases=?, mention_cnt=COALESCE(mention_cnt,0)+(SELECT COUNT(*) FROM mentions WHERE entity_id=?), updated_at=? WHERE id=?',
             (json.dumps(merged, ensure_ascii=False), from_id, now, into_id))
         # first_chapter_id 取更早
-        if from_entity.get('first_chapter_id') and not into_entity.get('first_chapter_id'):
+        if from_entity['first_chapter_id'] and not into_entity['first_chapter_id']:
             conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?',
                 (from_entity['first_chapter_id'], now, into_id))
         # 写入 entity_merges
@@ -806,7 +805,7 @@ def backfill_entity_mentions(book_id):
         for r in rows:
             eid = r['id']
             # name_norm
-            if not r.get('name_norm'):
+            if not r['name_norm']:
                 nn = normalize_name(r['canonical_name'])
                 conn.execute('UPDATE entities SET name_norm=? WHERE id=?', (nn, eid))
             # 拆别名到 entity_aliases
@@ -820,11 +819,23 @@ def backfill_entity_mentions(book_id):
             cnt = conn.execute('SELECT COUNT(*) as c FROM mentions WHERE entity_id=?', (eid,)).fetchone()['c']
             conn.execute('UPDATE entities SET mention_cnt=? WHERE id=?', (cnt, eid))
 
+def _ensure_str(val):
+    """Sanitize AI output: convert list→comma-joined string, None→'', else str()."""
+    if val is None:
+        return ''
+    if isinstance(val, list):
+        return ', '.join(str(v) for v in val if v)
+    if isinstance(val, dict):
+        return str(val)
+    return str(val)
+
 # ─── Mention DAO ───
 
 def add_mention(book_id, entity_id, chapter_id, fact, snippet=None, confidence=0.6, pass_no=1):
     mid = str(uuid.uuid4())
     now = int(time.time())
+    fact = _ensure_str(fact) if fact else ''
+    snippet = _ensure_str(snippet) if snippet else None
     with db_transaction(book_id) as conn:
         conn.execute('INSERT INTO mentions (id, entity_id, chapter_id, fact, snippet, confidence, pass_no, created_at) VALUES (?,?,?,?,?,?,?,?)',
             (mid, entity_id, chapter_id, fact, snippet, confidence, pass_no, now))
@@ -861,6 +872,9 @@ def add_fact_revision(book_id, entity_id, chapter_id, fact, snippet=None,
     """写入 fact_revisions 表。"""
     now = int(time.time())
     rev_id = str(uuid.uuid4())
+    fact = _ensure_str(fact) if fact else ''
+    snippet = _ensure_str(snippet) if snippet else None
+    reason = _ensure_str(reason) if reason else None
     with db_transaction(book_id) as conn:
         conn.execute('''INSERT INTO fact_revisions
             (id, book_id, entity_id, chapter_id, fact, snippet, confidence, pass_no, status, supersedes, reason, created_at)
@@ -891,6 +905,11 @@ def get_entity_recent_mentions_before(book_id, entity_id, before_idx=None, limit
 def add_event(book_id, chapter_id, story_time, who, what, where_loc, why, consequence):
     eid = str(uuid.uuid4())
     now = int(time.time())
+    who = _ensure_str(who) if who else ''
+    what = _ensure_str(what) if what else ''
+    where_loc = _ensure_str(where_loc) if where_loc else ''
+    why = _ensure_str(why) if why else ''
+    consequence = _ensure_str(consequence) if consequence else ''
     with db_transaction(book_id) as conn:
         conn.execute('''INSERT INTO events (id, book_id, chapter_id, story_time, who, what, where_loc, why, consequence, created_at)
             VALUES (?,?,?,?,?,?,?,?,?,?)''', (eid, book_id, chapter_id, story_time, who, what, where_loc, why, consequence, now))
@@ -936,6 +955,8 @@ def get_events_by_chapter(book_id, chapter_id):
 def add_foreshadowing(book_id, hint_chapter_id, hint, status='open', resolved_chapter_id=None, resolution=None):
     fid = str(uuid.uuid4())
     now = int(time.time())
+    hint = _ensure_str(hint) if hint else ''
+    resolution = _ensure_str(resolution) if resolution else None
     with db_transaction(book_id) as conn:
         conn.execute('''INSERT INTO foreshadowing (id, book_id, hint_chapter_id, hint, status, resolved_chapter_id, resolution, updated_at)
             VALUES (?,?,?,?,?,?,?,?)''', (fid, book_id, hint_chapter_id, hint, status, resolved_chapter_id, resolution, now))
@@ -943,6 +964,8 @@ def add_foreshadowing(book_id, hint_chapter_id, hint, status='open', resolved_ch
 
 def resolve_foreshadowing(book_id, hint, resolved_chapter_id, resolution):
     now = int(time.time())
+    hint = _ensure_str(hint) if hint else ''
+    resolution = _ensure_str(resolution) if resolution else ''
     with db_transaction(book_id) as conn:
         conn.execute('''UPDATE foreshadowing SET status='resolved', resolved_chapter_id=?, resolution=?, updated_at=?
             WHERE book_id=? AND hint=? AND status='open' ''', (resolved_chapter_id, resolution, now, book_id, hint))
@@ -965,6 +988,8 @@ def list_foreshadowing(book_id, status=None):
 
 def upsert_rule(book_id, name, body, first_chapter_id=None):
     now = int(time.time())
+    name = _ensure_str(name) if name else ''
+    body = _ensure_str(body) if body else ''
     with db_transaction(book_id) as conn:
         existing = conn.execute('SELECT * FROM rules WHERE book_id=? AND name=?', (book_id, name)).fetchone()
         if existing:
@@ -978,6 +1003,7 @@ def upsert_rule(book_id, name, body, first_chapter_id=None):
 def add_rule_mention(book_id, rule_id, chapter_id, evidence=None):
     mid = str(uuid.uuid4())
     now = int(time.time())
+    evidence = _ensure_str(evidence) if evidence else None
     with db_transaction(book_id) as conn:
         if not conn.execute('SELECT 1 FROM rules WHERE id=? AND book_id=?', (rule_id, book_id)).fetchone():
             return None
@@ -1114,11 +1140,13 @@ def save_consistency_alerts(book_id, chapter_id, alerts, source_hash=None):
             if not msg:
                 continue
             aid = str(uuid.uuid4())
+            evidence = _ensure_str(a.get('evidence')) if a.get('evidence') else None
+            suggestion = _ensure_str(a.get('suggestion')) if a.get('suggestion') else None
             conn.execute('''INSERT INTO consistency_alerts
                 (id, book_id, chapter_id, kind, severity, message, evidence, suggestion, status, source_hash, created_at, updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (aid, book_id, chapter_id, str(a.get('kind') or 'possible_conflict')[:50],
-                 str(a.get('severity') or 'medium')[:20], msg, a.get('evidence'), a.get('suggestion'),
+                 str(a.get('severity') or 'medium')[:20], msg, evidence, suggestion,
                  'open', source_hash, now, now))
             item = dict(a)
             item['id'] = aid

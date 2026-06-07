@@ -346,6 +346,9 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 #appLoading span{font-family:var(--font-serif);font-size:clamp(48px,8vw,120px);font-weight:200;color:var(--t3);opacity:.12;letter-spacing:.04em}
 body.loading .app{opacity:0;pointer-events:none}
 body:not(.loading) #appLoading{opacity:0;pointer-events:none}
+#editorLoadingOverlay{position:absolute;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;visibility:hidden;opacity:0;transition:opacity .2s;pointer-events:none}
+#editorLoadingOverlay.show{visibility:visible;opacity:1;pointer-events:auto}
+#editorLoadingOverlay span{font-size:13px;color:var(--t3);letter-spacing:.3px}
 .book-list-panel{padding:6px}
 .book-list-item{padding:10px 12px;border-radius:var(--r2);font-size:13px;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:8px;margin:2px 0;transition:0s;border:1px solid transparent}
 .book-list-item:hover{color:var(--t1);background:var(--surface2)}
@@ -1390,26 +1393,27 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 
  <div class="resize-handle" id="resizeHandleR" title="拖拽调整左侧栏宽度"></div>
 
- <div class="editor-area">
- <div class="editor-body">
- <div class="editor-highlight-layer" id="highlightLayer"><div class="editor-highlight-content" id="highlightContent"></div></div>
- <div class="search-bar" id="searchBar">
-  <div class="search-row">
-   <button class="search-close" onclick="closeSearch()" title="关闭">&#215;</button>
-   <input class="search-input" id="searchInput" placeholder="搜索..." autocomplete="off" data-form-type="other">
-   <span class="search-count" id="searchCount"></span>
-   <button class="search-btn" id="searchPrev" onclick="searchNav(-1)" title="上一个 (↑)">&#8593;</button>
-   <button class="search-btn" id="searchNext" onclick="searchNav(1)" title="下一个 (↓)">&#8595;</button>
-   <button class="search-btn" id="searchToggleReplace" onclick="toggleSearchReplace()" title="替换">&#8693;</button>
+  <div class="editor-area">
+  <div class="editor-body">
+  <div class="editor-highlight-layer" id="highlightLayer"><div class="editor-highlight-content" id="highlightContent"></div></div>
+  <div class="search-bar" id="searchBar">
+   <div class="search-row">
+    <button class="search-close" onclick="closeSearch()" title="关闭">&#215;</button>
+    <input class="search-input" id="searchInput" placeholder="搜索..." autocomplete="off" data-form-type="other">
+    <span class="search-count" id="searchCount"></span>
+    <button class="search-btn" id="searchPrev" onclick="searchNav(-1)" title="上一个 (↑)">&#8593;</button>
+    <button class="search-btn" id="searchNext" onclick="searchNav(1)" title="下一个 (↓)">&#8595;</button>
+    <button class="search-btn" id="searchToggleReplace" onclick="toggleSearchReplace()" title="替换">&#8693;</button>
+   </div>
+   <div class="search-replace-row">
+    <input class="search-input" id="searchReplaceInput" placeholder="替换为..." autocomplete="off" data-form-type="other">
+    <button class="search-btn" onclick="searchReplaceOne()" title="替换当前" style="font-size:10px;letter-spacing:.3px">替换</button>
+    <button class="search-btn" onclick="searchReplaceAll()" title="替换全部" style="font-size:10px;letter-spacing:.3px">全部</button>
+   </div>
   </div>
-  <div class="search-replace-row">
-   <input class="search-input" id="searchReplaceInput" placeholder="替换为..." autocomplete="off" data-form-type="other">
-   <button class="search-btn" onclick="searchReplaceOne()" title="替换当前" style="font-size:10px;letter-spacing:.3px">替换</button>
-   <button class="search-btn" onclick="searchReplaceAll()" title="替换全部" style="font-size:10px;letter-spacing:.3px">全部</button>
+  <div id="editorLoadingOverlay"><div class="sp" style="width:24px;height:24px;border-width:2.5px"></div><span>加载中...</span></div>
+  <textarea id="editorArea" placeholder="开始写作..." oninput="onContentChange()"></textarea>
   </div>
- </div>
- <textarea id="editorArea" placeholder="开始写作..." oninput="onContentChange()"></textarea>
- </div>
  </div>
  </div>
 
@@ -3247,19 +3251,42 @@ function openBook(id){
 	 bookAnnotations={};
  var tsb=$('topbarSummaryBtn');if(tsb)tsb.style.display='';
   $('bookshelfView').classList.remove('active');$('workView').classList.remove('active');
+   // Show loading overlay before making editor visible
+   var l=$('editorLoadingOverlay');if(l)l.classList.add('show');
   $('editorView').classList.add('active');$('editorView').style.display='flex';$('bottomPanel').style.display='flex';
   closeBottomPanel();setTimeout(syncInputWidth,50);
  $('trashList').classList.remove('open');$('trashToggleBtn').textContent='回收站';$('trashToggleBtn').classList.remove('open');
  $('chTitleInput').value='';$('editorArea').value='';$('wordCount').textContent='0';
  $('saveIndicator').className='save-indicator';
  charCount=0;
- // Reset summary panel for new book
-  $('rtStream').textContent='等待开始...';
- $('rtSource').value='';
+ // Stop all stale polling for previous work/book
+ clearInterval(_workRTPollTimer);_workRTPollTimer=null;
+ clearInterval(rtPollTimer);rtPollTimer=null;
+ _workRTSyncing=false;_setRTButtonsSpinning(false);
+ rtLastChapterIdx=-1;rtLastNotifiedStatus='';rtLastStatus='';rtLastDoneChapters=0;
+ // Reset all reading panel UI
+ $('rtLogs').textContent='';
+ var ccb=$('rtCloudBody');if(ccb)ccb.innerHTML='通读开始后，这里会浮现作品的知识图谱…';
+ var cc=$('rtCloudCounts');if(cc)cc.textContent='';
+ var rsp=$('rtStatusPhase');if(rsp)rsp.textContent='等待通读任务';
+ var rspr=$('rtStatusProgress');if(rspr)rspr.textContent='';
+ var rsd=$('rtStatusDots');if(rsd)rsd.className='rt-status-dots';
+  // Reset summary panel for new book
+ var rts=$('rtStream');if(rts)rts.textContent='等待开始...';
+ var rsrc=$('rtSource');if(rsrc)rsrc.value='';
+ var rtp=$('rtPhase');if(rtp)rtp.textContent='';
+ var rtc=$('rtChapters');if(rtc)rtc.textContent='';
+ var rtpr=$('rtProgress');if(rtpr)rtpr.style.width='0%';
+ var rtbu=$('rtBuffer');if(rtbu)rtbu.style.width='0%';
+ var rtt=$('rtThinking');if(rtt)rtt.classList.remove('active');
 	 $('outlineSource').innerHTML='打开章节后显示本章相关人物、设定、事件和伏笔。';
 	 $('outlineLog').textContent='当前没有提醒。';
-	 _radarDeepStates={};
- 	 _timelineData=null;
+ _radarDeepStates={};
+  	 _timelineData=null;
+   // Clear stale sidebar data immediately
+  $('chapterList').innerHTML='';
+  $('bookListPanel').innerHTML='';
+  $('chSearch').value='';
  updateBreadcrumb();
  saveAppState();
  setEditorLoading(true);
@@ -3278,6 +3305,7 @@ function openBook(id){
 function backToBooks(){
  if(bookId&&chapterId&&currentChapter){doSaveNow()}
  setEditorLoading(false);
+ var l=$('editorLoadingOverlay');if(l)l.classList.remove('show');
  if(workId){bookId=null;chapterId=null;currentChapter=null;openWork(workId);saveAppState()}
  else{clearAppState();showBookShelf()}
 }
@@ -3315,7 +3343,11 @@ function loadChapters(){
  if(savedBackend&&allChapters.some(function(c){return c.id===savedBackend}))targetCh=savedBackend;
  }
  if(!targetCh&&allChapters.length)targetCh=allChapters[0].id;
- if(targetCh&&targetCh!==chapterId)selectChapter(targetCh);
+ if(targetCh&&targetCh!==chapterId){selectChapter(targetCh)}else{
+  // No chapter to select - hide loading overlay
+  var l=$('editorLoadingOverlay');if(l)l.classList.remove('show');
+  setEditorLoading(false);
+ }
  updateBreadcrumb();
  });
 }
@@ -3425,11 +3457,12 @@ function selectChapter(id){
  api('POST','/api/book/'+bookId+'/set-current-chapter',{id:id},function(){});
  api('GET','/api/book/'+bookId+'/chapter/'+id,undefined,function(d,s){
  setEditorLoading(false);
-    if(s===200){currentChapter=d;loadChapterData(d)}else{chapterId=null;$('chTitleInput').value='';toast('加载章节失败','error')}
+    if(s===200){currentChapter=d;loadChapterData(d)}else{chapterId=null;$('chTitleInput').value='';toast('加载章节失败','error');var l=$('editorLoadingOverlay');if(l)l.classList.remove('show')}
  });
 }
 
 function loadChapterData(ch){
+ var l=$('editorLoadingOverlay');if(l)l.classList.remove('show');
  currentChapter=ch;$('chTitleInput').value=ch.title||'';$('editorArea').value=ch.content||'';
  charCount=ch.content?ch.content.length:0;
  _autoCommentLastLen=charCount;

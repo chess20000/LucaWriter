@@ -1353,9 +1353,9 @@ def do_readthrough(book_id, settings, config=None, resume=False):
 
             if _unchanged_done(ch):
                 upsert_chapter(book_id, ch['id'], idx=ch['idx'], title=ch['title'])
-                set_rt_state(book_id, current_idx=ch['idx'], phase=f'跳过: {ch["title"]}',
+                set_rt_state(book_id, current_idx=ch['idx'], phase=f'{ch["title"]} 已同步，跳过',
                              active_start_idx=-1, active_end_idx=-1,
-                             stream_buffer=f'第 {ch["idx"] + 1} 章已有最新笔记，已跳过。')
+                             stream_buffer=f'{ch["title"]} 已同步，跳过。')
                 pos += 1
                 continue
 
