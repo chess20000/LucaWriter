@@ -8,7 +8,7 @@ import os
 from kb_storage import (
     init_db, db_transaction, upsert_chapter, get_chapter, list_chapters_db,
     delete_chapter_artifacts,
-    upsert_entity, add_mention, list_entities, match_entities_by_name, remaining_entities,
+    upsert_entity, resolve_entity, add_mention, list_entities, match_entities_by_name, remaining_entities,
     get_mentions_by_chapter, get_mentions_for_entity, get_entity_recent_mentions_before,
     add_event, list_events, get_events_by_chapter, list_timeline_events,
     add_foreshadowing, resolve_foreshadowing, list_foreshadowing,
@@ -61,7 +61,7 @@ STRUCTURED_USER_TEMPLATE = '''【章节】{title}
 
 【输出 JSON Schema】
 {{
-  "summary": "本章剧情摘要的自然段落（200-3000 字，连贯叙述，不要 bullet，不要复制原文）",
+  "summary": "用 1-3 句精炼概括本章核心剧情，交代出场人物、关键事件和结果。不要描写、不要原文复述，要像「安纳金被帕尔帕廷引诱，叛变为达斯·维达」这样一句话说清发生了什么",
   "entities": [
     {{
       "canonical_name": "李云",
@@ -154,7 +154,7 @@ def _extract_json_array_from_text(raw: str) -> str:
     return text
 
 
-def ai_read_chapter_structured(settings, ch, prev_context='', on_token=None, should_stop_fn=None, prior_records=None):
+def ai_read_chapter_structured(settings, ch, prev_context='', on_token=None, should_stop_fn=None, prior_records=None, book_id=None):
     m = _main()
     call_ai_stream = m['call_ai_stream']
 
@@ -180,6 +180,13 @@ def ai_read_chapter_structured(settings, ch, prev_context='', on_token=None, sho
             '- 当前正文仍成立的照常输出；与正文冲突、或已被改写/删除的旧内容不要再输出（即纠正/删除）；正文新增的正常补充。\n'
             '最终只输出与当前正文一致的、修正后的完整结构化笔记。\n'
             f'旧笔记：\n{json.dumps(prior_records, ensure_ascii=False)}\n\n'
+        )
+        ctx_str += (
+            '【查询数据库工具】\n'
+            '如果觉得数据库里关于某个人物的旧记录可能和本章正文矛盾，可以使用 [QUERY_KB] 工具主动查询该人物的全部记录。\n'
+            '用法：[QUERY_KB]{"entity":"人物名"}[/QUERY_KB]\n'
+            '返回该人物在所有章节中的事实记录，供你核对是否与当前正文一致。\n'
+            '发现矛盾时在最终输出的 corrections 中纠正。\n\n'
         )
     prompt = STRUCTURED_USER_TEMPLATE.format(
         title=title,
@@ -233,6 +240,62 @@ def ai_read_chapter_structured(settings, ch, prev_context='', on_token=None, sho
                 continue
             raise RuntimeError(f'AI 调用失败: {err}')
 
+        # — 处理 [QUERY_KB] 工具调用
+        _QUERY_KB_RE = re.compile(r'\[QUERY_KB\]\s*(\{.*?\})\s*(?:\[/QUERY_KB\]|(?=\n|$))', re.S)
+        _kb_queries = []
+        for _qm in _QUERY_KB_RE.finditer(raw):
+            try:
+                _qcmd = json.loads(_qm.group(1).strip())
+                _entity = _qcmd.get('entity', '')
+                if _entity:
+                    _kb_queries.append(_entity)
+            except Exception:
+                pass
+
+        if _kb_queries:
+            # 有工具调用 → 查询数据库并追加一轮对话
+            raw = _QUERY_KB_RE.sub('', raw).strip()
+            _kb_results = []
+            _bid = book_id
+            from kb_storage import list_entities, get_mentions_for_entity, list_chapters_db
+            _all_entities = list_entities(_bid)
+            _chapters_db = list_chapters_db(_bid)
+            _ch_map = {c['id']: c.get('idx', 0) for c in _chapters_db}
+            _ch_title_map = {c['id']: c.get('title', '') for c in _chapters_db}
+            for _eq in _kb_queries[:3]:  # 最多 3 个实体
+                _ent = None
+                for _e in _all_entities:
+                    if _e['canonical_name'] == _eq:
+                        _ent = _e
+                        break
+                if not _ent:
+                    continue
+                _mentions = get_mentions_for_entity(_bid, _ent['id'])
+                _lines = [f'【{_ent["canonical_name"]} ({_ent["type"]}）的数据库记录】']
+                for _m in _mentions[:10]:
+                    _ci = _ch_map.get(_m['chapter_id'], '?')
+                    _ct = _ch_title_map.get(_m['chapter_id'], '')
+                    _lines.append(f'- 第{_ci}章 {_ct}: {_m["fact"]}')
+                if _lines:
+                    _kb_results.append('\n'.join(_lines))
+            if _kb_results:
+                # 第二轮：把数据库结果喂给 AI，让它生成最终输出
+                _follow_up = (
+                    '【工具返回结果】\n'
+                    + '\n\n'.join(_kb_results) +
+                    '\n\n请仔细核对以上数据库记录与本章正文是否一致。如果发现矛盾，在最终 JSON 的 corrections 中纠正。'
+                    '如果没有矛盾则正常输出。'
+                )
+                raw2, err2 = call_ai_stream(settings, [
+                    {'role': 'system', 'content': STRUCTURED_SYSTEM_PROMPT},
+                    {'role': 'user', 'content': retry_prompt},
+                    {'role': 'assistant', 'content': raw},
+                    {'role': 'user', 'content': _follow_up},
+                ], max_tokens=output_tokens, temperature=0.3, timeout=300,
+                    should_stop_fn=should_stop_fn)
+                if not err2 and raw2:
+                    raw = raw2
+
         try:
             result = json.loads(raw)
         except json.JSONDecodeError:
@@ -254,6 +317,7 @@ def ai_read_chapter_structured(settings, ch, prev_context='', on_token=None, sho
         result.setdefault('foreshadowing_new', [])
         result.setdefault('foreshadowing_resolved', [])
         result.setdefault('rules', [])
+        result.setdefault('corrections', [])
         return result
 
     raise RuntimeError('所有重试均失败')
@@ -416,14 +480,25 @@ class StoppedException(Exception):
 # ─── Phase 3: Apply Structured Result ───
 
 def apply_structured_result(book_id, chapter_id, structured, chapter_idx=None):
-    delete_chapter_artifacts(book_id, chapter_id)
+    """落库结构化结果。自动检测是否为重读，重读时走 diff+版本化。"""
+    from kb_storage import get_chapter
+    ch = get_chapter(book_id, chapter_id)
+    is_reread = ch and ch.get('status') == 'done'
+    if is_reread:
+        _apply_structured_diff(book_id, chapter_id, structured, chapter_idx)
+    else:
+        delete_chapter_artifacts(book_id, chapter_id)
+        _apply_structured_insert(book_id, chapter_id, structured, chapter_idx)
 
+
+def _apply_structured_insert(book_id, chapter_id, structured, chapter_idx=None):
+    """首次读：全部插入。"""
     for ent_data in structured.get('entities', []) or []:
         canonical = str(ent_data.get('canonical_name', '')).strip()
         if not canonical:
             continue
         aliases = ent_data.get('aliases_in_chapter', []) or []
-        ent_id = upsert_entity(
+        ent_id = resolve_entity(
             book_id, canonical, ent_data.get('type', '未分类') or '未分类',
             aliases=aliases, first_chapter_id=chapter_id,
         )
@@ -462,6 +537,201 @@ def apply_structured_result(book_id, chapter_id, structured, chapter_idx=None):
                                   resolved_chapter_id=chapter_id,
                                   resolution=fs_res_data.get('resolution', ''))
 
+    for rule_data in structured.get('rules', []) or []:
+        name = str(rule_data.get('name', '')).strip()
+        body = str(rule_data.get('body', '')).strip()
+        if name and body:
+            rid = upsert_rule(book_id, name, body=body, first_chapter_id=chapter_id)
+            add_rule_mention(book_id, rid, chapter_id, evidence=rule_data.get('snippet') or body[:200])
+
+
+def _apply_structured_diff(book_id, chapter_id, structured, chapter_idx=None):
+    """重读纠错：diff + 版本化，不整章删除。"""
+    from kb_storage import get_mentions_for_chapter, add_fact_revision
+    now = int(time.time())
+
+    # 收集新实体/事实
+    new_entity_facts = {}  # canonical -> [(fact, snippet)]
+    new_entity_meta = {}   # canonical -> {type, aliases}
+    for ent_data in structured.get('entities', []) or []:
+        canonical = str(ent_data.get('canonical_name', '')).strip()
+        if not canonical:
+            continue
+        new_entity_meta[canonical] = {
+            'type': ent_data.get('type', '未分类') or '未分类',
+            'aliases': ent_data.get('aliases_in_chapter', []) or [],
+        }
+        facts = []
+        for fact_data in ent_data.get('facts', []) or []:
+            fact = str(fact_data.get('fact', '')).strip()
+            if fact:
+                facts.append((fact, fact_data.get('snippet')))
+        new_entity_facts[canonical] = facts
+
+    # 获取旧 mentions
+    old_mentions = get_mentions_for_chapter(book_id, chapter_id)
+
+    # 旧事实索引：归一化文本 -> mention row
+    from kb_storage import normalize_name
+    old_fact_map = {}
+    for m in old_mentions:
+        key = normalize_name(m['fact'])
+        if key not in old_fact_map:
+            old_fact_map[key] = m
+        elif m.get('id'):  # 保留最后一条
+            old_fact_map[key] = m
+
+    new_fact_keys = set()
+    for canonical, facts in new_entity_facts.items():
+        ent_id = resolve_entity(
+            book_id, canonical, new_entity_meta[canonical]['type'],
+            aliases=new_entity_meta[canonical]['aliases'],
+            first_chapter_id=chapter_id,
+        )
+        for fact, snippet in facts:
+            nk = normalize_name(fact)
+            new_fact_keys.add(nk)
+            old_match = old_fact_map.get(nk)
+
+            if old_match:
+                # 事实已有——提升置信度
+                pass_no = (old_match.get('pass_no') or 1) + 1
+                confidence = min(0.95, (old_match.get('confidence') or 0.6) + 0.1)
+                add_mention(book_id, ent_id, chapter_id,
+                            fact=fact, snippet=snippet,
+                            confidence=confidence, pass_no=pass_no)
+            else:
+                # 新事实
+                add_mention(book_id, ent_id, chapter_id,
+                            fact=fact, snippet=snippet,
+                            confidence=0.7, pass_no=2)
+
+    # 旧有但新无→superseded
+    for key, old_m in old_fact_map.items():
+        if key not in new_fact_keys:
+            add_fact_revision(book_id, old_m.get('entity_id'), chapter_id,
+                              fact=old_m['fact'], snippet=old_m.get('snippet'),
+                              confidence=old_m.get('confidence', 0.6),
+                              pass_no=old_m.get('pass_no', 1),
+                              status='superseded', reason='重读后不再出现')
+
+    # 事件：删旧插新（事件量少，直接替换）
+    from kb_storage import list_events
+    old_events = [e for e in list_events(book_id) if e['chapter_id'] == chapter_id]
+    for oe in old_events:
+        conn = None
+        try:
+            conn = _get_conn_for_book(book_id)
+            conn.execute('DELETE FROM events WHERE id=? AND book_id=?', (oe['id'], book_id))
+        except Exception:
+            pass
+        finally:
+            if conn: conn.close()
+    _insert_events(book_id, chapter_id, structured)
+
+    # 伏笔：删旧插新
+    from kb_storage import list_foreshadowing
+    old_fs = [f for f in list_foreshadowing(book_id) if f['hint_chapter_id'] == chapter_id]
+    conn = None
+    try:
+        conn = _get_conn_for_book(book_id)
+        for ofs in old_fs:
+            conn.execute('DELETE FROM foreshadowing WHERE id=? AND book_id=?', (ofs['id'], book_id))
+    except Exception:
+        pass
+    finally:
+        if conn: conn.close()
+    _insert_foreshadowing(book_id, chapter_id, structured)
+
+    # 规则：删旧插新
+    from kb_storage import list_rules, upsert_rule, add_rule_mention
+    old_rules = [r for r in list_rules(book_id) if r.get('first_chapter_id') == chapter_id]
+    for r in old_rules:
+        try:
+            conn2 = _get_conn_for_book(book_id)
+            conn2.execute('DELETE FROM rule_mentions WHERE rule_id=?', (r['id'],))
+            conn2.execute('DELETE FROM rules WHERE id=? AND book_id=?', (r['id'], book_id))
+            conn2.close()
+        except Exception:
+            pass
+    _insert_rules(book_id, chapter_id, structured)
+
+    # 顺手校对：应用 AI 返回的跨章 corrections
+    corrections = structured.get('corrections', []) or []
+    for corr in corrections:
+        try:
+            mention_id = corr.get('mention_id') or corr.get('id')
+            cid = corr.get('chapter_id')
+            correct_fact = corr.get('correct_fact', '')
+            correct_snippet = corr.get('correct_snippet', '')
+            reason = corr.get('reason', '')
+            if not mention_id or not cid:
+                continue
+            # 查找旧 mention 信息
+            conn3 = _get_conn_for_book(book_id)
+            try:
+                old_row = conn3.execute('''SELECT m.*, e.canonical_name, e.id as eid
+                    FROM mentions m JOIN entities e ON m.entity_id=e.id
+                    WHERE m.id=? AND e.book_id=?''', (mention_id, book_id)).fetchone()
+            except Exception:
+                old_row = None
+            finally:
+                conn3.close()
+            if not old_row:
+                continue
+            # 写 fact_revision 标记为 superseded
+            add_fact_revision(book_id, old_row['eid'], cid,
+                              fact=old_row['fact'], snippet=old_row.get('snippet'),
+                              confidence=old_row.get('confidence', 0.6),
+                              pass_no=old_row.get('pass_no', 1),
+                              status='superseded',
+                              reason=f'重读第{chapter_idx+1 if chapter_idx is not None else "?"}章时顺手校对: {reason or "与正文矛盾"}')
+            # 如果 AI 提供了正确值，新建一条 mention
+            if correct_fact:
+                new_ent_id = resolve_entity(book_id, old_row['canonical_name'],
+                                             old_row.get('type') or '未分类',
+                                             first_chapter_id=cid)
+                add_mention(book_id, new_ent_id, cid,
+                            fact=correct_fact, snippet=correct_snippet or '',
+                            confidence=0.7, pass_no=2)
+                rt_log(book_id, f'顺手校对: {old_row["canonical_name"]} "{old_row["fact"][:40]}" → "{correct_fact[:40]}" ({reason})')
+            else:
+                rt_log(book_id, f'顺手删除: {old_row["canonical_name"]} "{old_row["fact"][:40]}" ({reason})')
+        except Exception as e:
+            rt_log(book_id, f'顺手校对失败: {e}')
+
+
+def _insert_events(book_id, chapter_id, structured):
+    for ev_data in structured.get('events', []) or []:
+        what = str(ev_data.get('what', '')).strip()
+        if not what:
+            continue
+        add_event(
+            book_id, chapter_id,
+            story_time=ev_data.get('story_time', ''),
+            who=ev_data.get('who', ''),
+            what=what,
+            where_loc=ev_data.get('where', ev_data.get('where_loc', '')),
+            why=ev_data.get('why', ''),
+            consequence=ev_data.get('consequence', ''),
+        )
+
+
+def _insert_foreshadowing(book_id, chapter_id, structured):
+    for fs_data in structured.get('foreshadowing_new', []) or []:
+        hint = str(fs_data.get('hint', '')).strip()
+        if hint:
+            add_foreshadowing(book_id, chapter_id, hint=hint)
+    for fs_res_data in structured.get('foreshadowing_resolved', []) or []:
+        earlier = str(fs_res_data.get('earlier_hint', '')).strip()
+        if earlier:
+            resolve_foreshadowing(book_id, hint=earlier,
+                                  resolved_chapter_id=chapter_id,
+                                  resolution=fs_res_data.get('resolution', ''))
+
+
+def _insert_rules(book_id, chapter_id, structured):
+    from kb_storage import upsert_rule, add_rule_mention
     for rule_data in structured.get('rules', []) or []:
         name = str(rule_data.get('name', '')).strip()
         body = str(rule_data.get('body', '')).strip()
@@ -668,6 +938,13 @@ def incremental_embed(book_id, settings, sources=None):
             register_embedding_chunk(book_id, chunk_id, source_type, source_id,
                                      content_hash, backend.backend_id)
     prune_vector_entries(book_id, expected_ids)
+    # P5: 嵌入完成后重建 ANN 索引
+    try:
+        if settings.get('vector_index') == 'hnsw':
+            from kb_storage import rebuild_ann_index
+            rebuild_ann_index(book_id)
+    except Exception:
+        pass
 
 
 # ─── Phase 3: Readthrough Orchestrator ───
@@ -700,6 +977,185 @@ def _build_prev_context(book_id, max_chars=6000):
                 break
             lines.append(item)
     return '\n'.join(lines)[:max_chars]
+
+
+def embed_chunks_for_chapter(book_id, chapter_id, settings):
+    """对单章产物增量嵌入（实体/事件/伏笔→chunk）。"""
+    try:
+        backend = get_embedding_backend(settings)
+    except Exception:
+        return
+    chapters = [c for c in list_chapters_db(book_id) if c['id'] == chapter_id]
+    if not chapters:
+        return
+    ch = chapters[0]
+    texts_to_embed = []
+    ids_to_embed = []
+    metadatas_to_embed = []
+    hashes_to_register = []
+
+    def queue_chunk(chunk_id, text, source_type, source_id, extra_meta=None):
+        content_hash = hash_content(text)
+        old = get_embedding_chunk(book_id, chunk_id)
+        if old and old.get('content_hash') == content_hash and old.get('backend_id') == backend.backend_id:
+            return
+        texts_to_embed.append(text)
+        ids_to_embed.append(chunk_id)
+        meta = {'source_type': source_type, 'source_id': source_id}
+        if extra_meta:
+            meta.update(extra_meta)
+        metadatas_to_embed.append(meta)
+        hashes_to_register.append((chunk_id, source_type, source_id, content_hash))
+
+    if ch.get('status') == 'done' and ch.get('summary'):
+        cid = f'ch_summary_{ch["id"]}'
+        text = f'章节: {ch["title"]}\n{ch["summary"]}'
+        queue_chunk(cid, text, 'chapter_summary', ch['id'])
+
+    entities = list_entities(book_id)
+    for ent in entities:
+        if ent.get('first_chapter_id') != chapter_id:
+            continue
+        mentions = get_mentions_for_entity(book_id, ent['id'])
+        if not mentions:
+            continue
+        cid = f'ent_{ent["id"]}'
+        text = f'实体: {ent["canonical_name"]} ({ent["type"]})\n'
+        for m in mentions:
+            text += f'- [{m.get("chapter_title","?")}] {m["fact"]}\n'
+        queue_chunk(cid, text, 'entity', ent['id'], extra_meta={'kind': ent['type']})
+
+    from kb_storage import list_events
+    events = [ev for ev in list_events(book_id) if ev['chapter_id'] == chapter_id]
+    for ev in events:
+        ev_text = f'事件: 第{ev.get("chapter_idx","?")}章 {ev["who"]} {ev["what"]}'
+        if ev.get('where_loc'): ev_text += f' 地点: {ev["where_loc"]}'
+        if ev.get('why'): ev_text += f' 原因: {ev["why"]}'
+        queue_chunk(f'ev_{ev["id"]}', ev_text, 'event', ev['id'])
+
+    from kb_storage import list_foreshadowing
+    fss = [f for f in list_foreshadowing(book_id) if f['hint_chapter_id'] == chapter_id]
+    for f in fss:
+        status = '未解' if f['status'] == 'open' else '已解'
+        fs_text = f'伏笔 [{status}]: {f["hint"]}'
+        if f.get('resolution'): fs_text += f' → 回收: {f["resolution"]}'
+        queue_chunk(f'fs_{f["id"]}', fs_text, 'foreshadowing', f['id'])
+
+    from kb_storage import list_rules
+    rules = [r for r in list_rules(book_id) if r.get('first_chapter_id') == chapter_id]
+    for r in rules:
+        r_text = f'规则: {r["name"]}: {r["body"]}'
+        queue_chunk(f'rule_{r["id"]}', r_text, 'rule', r['id'])
+
+    if texts_to_embed:
+        vecs = backend.embed(texts_to_embed)
+        embed_upsert_many(book_id, ids_to_embed, texts_to_embed, vecs, metadatas_to_embed)
+        from kb_storage import register_embedding_chunk
+        for chunk_id, source_type, source_id, content_hash in hashes_to_register:
+            register_embedding_chunk(book_id, chunk_id, source_type, source_id,
+                                     content_hash, backend.backend_id)
+
+
+def build_reading_context(book_id, chapter_text, settings, token_budget=3500):
+    """检索式阅读上下文：固定锚 + 动态检索，回落旧窗口。"""
+    try:
+        backend = get_embedding_backend(settings)
+    except Exception:
+        return _build_prev_context(book_id, max_chars=token_budget)
+
+    lines = []
+    char_budget = token_budget * 4
+    used = 0
+
+    def add_block(header, body):
+        nonlocal used
+        block = f'## {header}\n{body}\n'
+        if used + len(block) > char_budget:
+            return False
+        lines.append(block)
+        used += len(block)
+        return True
+
+    # ---- 固定锚：系列全书摘要 ----
+    _source_text = ''
+    try:
+        m = _main()
+        _get_source = m.get('get_source')
+        if _get_source:
+            _source_text = _get_source(book_id) or ''
+    except Exception:
+        pass
+    if _source_text:
+        # 截取合理长度
+        if len(_source_text) > char_budget * 0.5:
+            _source_text = _source_text[:int(char_budget * 0.5)] + '\n\n…（后续章节摘要略）'
+        add_block('全书摘要', _source_text)
+    else:
+        # 无全书摘要时回落最近 3 章
+        chapters = [c for c in list_chapters_db(book_id)
+                    if c.get('status') == 'done' and c.get('summary')]
+        for ch in chapters[-3:]:
+            idx = ch.get('idx')
+            idx_text = f'第 {idx + 1} 章' if idx is not None else '章节'
+            body = f'{idx_text}: {ch["title"]}\n{ch["summary"]}'
+            if not add_block('前情回顾', body):
+                break
+
+    # ---- 动态检索 ----
+    if char_budget - used > 200:
+        try:
+            query_text = chapter_text[:1500] if chapter_text else ''
+            if query_text:
+                from kb_storage import embed_query_ann, embed_query as _embed_query_brute
+                use_ann = settings.get('vector_index') == 'hnsw'
+                if use_ann:
+                    hits = embed_query_ann(book_id, query_text, backend, top_k=24)
+                else:
+                    hits = _embed_query_brute(book_id, query_text, backend, top_k=24)
+                if hits:
+                    included_ids = set()
+                    dynamic_lines = []
+                    for h in hits:
+                        meta = h.get('metadata', {})
+                        src_type = meta.get('source_type', '')
+                        src_id = meta.get('source_id', '')
+                        key = f'{src_type}:{src_id}'
+                        if key in included_ids:
+                            continue
+                        included_ids.add(key)
+                        # 取原文
+                        chunk_row = conn2 = None
+                        try:
+                            conn2 = _get_conn_for_book(book_id)
+                            row = conn2.execute(
+                                'SELECT text FROM embedding_chunks WHERE book_id=? AND id=?',
+                                (book_id, h['id'])).fetchone()
+                            if row:
+                                text = row['text']
+                                if len(text) > 300:
+                                    text = text[:300] + '…'
+                                dynamic_lines.append(f'- [{src_type}] {text}')
+                        except Exception:
+                            pass
+                        finally:
+                            if conn2: conn2.close()
+                        if len(dynamic_lines) >= 12:
+                            break
+                    if dynamic_lines:
+                        add_block('检索相关', '\n'.join(dynamic_lines))
+        except Exception:
+            pass
+
+    result = '\n'.join(lines)
+    if not result:
+        return _build_prev_context(book_id, max_chars=char_budget)
+    return result[:char_budget]
+
+
+def _get_conn_for_book(book_id):
+    """Internal helper to get a read-only kb connection."""
+    from kb_storage import _get_conn
+    return _get_conn(book_id)
 
 
 def do_readthrough(book_id, settings, config=None, resume=False):
@@ -830,6 +1286,10 @@ def do_readthrough(book_id, settings, config=None, resume=False):
                           summary=structured['summary'],
                           content_hash=hash_content(ch['content']),
                           error='')
+            try:
+                embed_chunks_for_chapter(book_id, ch['id'], settings)
+            except Exception:
+                pass
 
         def _process_single(ch):
             if stop_check():
@@ -848,11 +1308,11 @@ def do_readthrough(book_id, settings, config=None, resume=False):
                           content_hash=hash_content(ch['content']), status='processing', error='')
 
             try:
-                prev_ctx = _build_prev_context(book_id, max_chars=_prev_context_limit(read_context_window))
+                prev_ctx = build_reading_context(book_id, ch['content'], settings, token_budget=_prev_context_limit(read_context_window))
                 structured = ai_read_chapter_structured(
                     settings, ch, prev_context=prev_ctx, prior_records=reread_prior,
                     on_token=lambda _tk: set_rt_state(book_id, stream_buffer='模型已返回，正在写入知识库...'),
-                    should_stop_fn=stop_check,
+                    should_stop_fn=stop_check, book_id=book_id,
                 )
             except StoppedException:
                 upsert_chapter(book_id, ch['id'], status='pending')
@@ -907,7 +1367,7 @@ def do_readthrough(book_id, settings, config=None, resume=False):
                 pos += 1
                 continue
 
-            prev_ctx = _build_prev_context(book_id, max_chars=_prev_context_limit(read_context_window))
+            prev_ctx = build_reading_context(book_id, ch['content'], settings, token_budget=_prev_context_limit(read_context_window))
             batch = [ch]
             if use_batch and current_max_batch > 1 and not _is_reread(ch):
                 used = _chapter_input_cost(ch)
@@ -990,18 +1450,24 @@ def do_readthrough(book_id, settings, config=None, resume=False):
         set_rt_state(book_id, phase='建立索引', active_start_idx=-1, active_end_idx=-1,
                      stream_buffer='正文已经通读完，正在统一建立检索索引。')
         rt_log(book_id, '统一建立检索索引')
-        incremental_embed(book_id, settings)
-        render_markdown_views_fn(book_id)
+        try:
+            incremental_embed(book_id, settings)
+        except Exception as e:
+            rt_log(book_id, f'建立索引失败（通读结果已保存）: {str(e)[:200]}')
+        try:
+            render_markdown_views_fn(book_id)
+        except Exception as e:
+            rt_log(book_id, f'生成摘要视图失败: {str(e)[:200]}')
         failed = [c for c in list_chapters_db(book_id) if c.get('status') == 'failed']
         if failed:
             msg = f'{len(failed)} 章失败，可点击继续重试'
             set_rt_state(book_id, status='error', phase=msg, current_idx=-1,
-                         active_start_idx=-1, active_end_idx=-1, error=msg)
+                         active_start_idx=-1, active_end_idx=-1, error=msg, stream_buffer='')
             rt_log(book_id, msg)
             return
 
         set_rt_state(book_id, status='done', phase='完成', current_idx=-1,
-                     active_start_idx=-1, active_end_idx=-1)
+                     active_start_idx=-1, active_end_idx=-1, stream_buffer='', error='')
         rt_log(book_id, '通读完成')
 
         meta = get_book_meta(book_id) or {}
@@ -1168,13 +1634,13 @@ def sync_work_chapters(work_id, chapter_list, settings):
                       content_hash=content_hash_val, status='processing', error='')
 
         try:
-            prev_ctx = _build_prev_context(work_id, max_chars=6000)
+            prev_ctx = build_reading_context(work_id, content, settings, token_budget=1500)
             structured = ai_read_chapter_structured(
                 settings,
                 {'idx': ch_idx, 'id': cid, 'title': title, 'content': content},
                 prev_context=prev_ctx, prior_records=reread_prior,
                 on_token=lambda _tk: set_rt_state(work_id, stream_buffer='模型已返回，正在写入知识库...'),
-                should_stop_fn=stop_check,
+                should_stop_fn=stop_check, book_id=work_id,
             )
         except StoppedException:
             upsert_chapter(work_id, storage_id, status='pending')
@@ -1320,7 +1786,7 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                 set_rt_state(
                     work_id, current_idx=pos, phase=f'读设定: {lore_title}',
                     active_start_idx=pos, active_end_idx=pos,
-                    stream_buffer=f'正在阅读设定: {lore_title}',
+                    stream_buffer=f'正在阅读档案: {lore_title}',
                 )
                 upsert_chapter(
                     work_id, storage_id, idx=chapter_count,
@@ -1328,7 +1794,7 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                     content_hash=hash_content(content), status='processing', error='',
                 )
                 try:
-                    prev_ctx = _build_prev_context(work_id, max_chars=6000)
+                    prev_ctx = build_reading_context(work_id, content, settings, token_budget=1500)
                     structured = ai_read_chapter_structured(
                         settings,
                         {
@@ -1337,11 +1803,8 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                             'title': f'[设定] {lore_title}',
                             'content': content,
                         },
-                        prev_context=prev_ctx,
-                        on_token=lambda _tk: set_rt_state(
-                            work_id, stream_buffer='模型已返回，正在写入知识库...'
-                        ),
-                        should_stop_fn=stop_check,
+                        prev_context=prev_ctx, prior_records=reread_prior,
+                        should_stop_fn=stop_check, book_id=work_id,
                     )
                 except StoppedException:
                     upsert_chapter(work_id, storage_id, status='pending')
@@ -1360,6 +1823,10 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                 )
                 chapter_count += 1
                 rt_log(work_id, f'完成 ({chapter_count}/{total}) 设定: {lore_title}')
+                try:
+                    embed_chunks_for_chapter(work_id, storage_id, settings)
+                except Exception:
+                    pass
                 continue
 
             elif item_type == 'chapter':
@@ -1375,12 +1842,16 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                 book_title = item.get('book_title', book_id)
                 content = ch.get('content', '')
 
+                storage_id = f'{book_id}::{chapter_id}'
+
                 if _is_content_empty(content):
                     rt_log(work_id, f'跳过空章节: 《{book_title}》{ch_title}')
+                    upsert_chapter(work_id, storage_id, idx=ch_idx, title=ch_title,
+                                   content_hash=hash_content(content), status='skipped')
+                    chapter_count += 1
                     continue
 
                 # 检查是否已处理
-                storage_id = f'{book_id}::{chapter_id}'
                 existing = get_chapter(work_id, storage_id)
                 if existing and existing['status'] == 'done' and existing.get('content_hash') == hash_content(content):
                     rt_log(work_id, f'跳过已完成: 《{book_title}》{ch_title}')
@@ -1396,13 +1867,13 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                               content_hash=hash_content(content), status='processing', error='')
 
                 try:
-                    prev_ctx = _build_prev_context(work_id, max_chars=6000)
+                    prev_ctx = build_reading_context(work_id, content, settings, token_budget=1500)
                     structured = ai_read_chapter_structured(
                         settings,
                         {'idx': ch_idx, 'id': chapter_id, 'title': ch_title, 'content': content},
                         prev_context=prev_ctx, prior_records=reread_prior,
                         on_token=lambda _tk: set_rt_state(work_id, stream_buffer='模型已返回，正在写入知识库...'),
-                        should_stop_fn=stop_check,
+                        should_stop_fn=stop_check, book_id=work_id,
                     )
                 except StoppedException:
                     upsert_chapter(work_id, storage_id, status='pending')
@@ -1428,22 +1899,32 @@ def do_readthrough_work(work_id, books_meta, settings, reading_order=None, work_
                               error='')
                 chapter_count += 1
                 rt_log(work_id, f'完成 ({chapter_count}/{total}) 《{book_title}》{ch_title}')
+                try:
+                    embed_chunks_for_chapter(work_id, storage_id, settings)
+                except Exception:
+                    pass
 
         # 通读完成，建立索引
         set_rt_state(work_id, phase='建立索引', active_start_idx=-1, active_end_idx=-1,
                      stream_buffer='正文已经通读完，正在统一建立检索索引。')
         rt_log(work_id, '统一建立检索索引')
-        incremental_embed(work_id, settings)
-        render_markdown_views_fn(work_id)
+        try:
+            incremental_embed(work_id, settings)
+        except Exception as e:
+            rt_log(work_id, f'建立索引失败（通读结果已保存）: {str(e)[:200]}')
+        try:
+            render_markdown_views_fn(work_id)
+        except Exception as e:
+            rt_log(work_id, f'生成摘要视图失败: {str(e)[:200]}')
 
         failed = [c for c in list_chapters_db(work_id) if c.get('status') == 'failed']
         if failed:
             msg = f'{len(failed)} 章失败，可点击继续重试'
-            set_rt_state(work_id, status='error', phase=msg, current_idx=-1, error=msg)
+            set_rt_state(work_id, status='error', phase=msg, current_idx=-1, error=msg, stream_buffer='')
             rt_log(work_id, msg)
             return
 
-        set_rt_state(work_id, status='done', phase='完成', current_idx=-1)
+        set_rt_state(work_id, status='done', phase='完成', current_idx=-1, stream_buffer='', error='')
         rt_log(work_id, '世界观通读完成')
 
     except Exception as e:
@@ -1482,7 +1963,7 @@ def do_chapter_complete(book_id, chapter_id, settings, text=None):
             'rules': [],
         }
     else:
-        prev_ctx = _build_prev_context(book_id)
+        prev_ctx = build_reading_context(book_id, ch['content'], settings, token_budget=1500)
 
         def stop_check():
             st = get_rt_state(book_id)
@@ -1490,7 +1971,7 @@ def do_chapter_complete(book_id, chapter_id, settings, text=None):
 
         structured = ai_read_chapter_structured(
             settings, ch, prev_context=prev_ctx,
-            should_stop_fn=stop_check,
+            should_stop_fn=stop_check, book_id=book_id,
         )
 
     apply_structured_result(book_id, chapter_id, structured)
@@ -2200,6 +2681,7 @@ def _chapter_kb_records_for_reread(book_id, chapter_id):
             'type': mref.get('type') or '',
             'fact': mref.get('fact') or '',
             'snippet': mref.get('snippet') or '',
+            'chapter_id': chapter_id,
         })
     for ev in get_events_by_chapter(book_id, chapter_id):
         records['events'].append({
@@ -2226,6 +2708,44 @@ def _chapter_kb_records_for_reread(book_id, chapter_id):
                 'hint': f.get('hint') or '',
                 'resolution': f.get('resolution') or '',
             })
+
+    # 顺手校对：加载其他章节中同实体的全部相关记录，让 AI 自己判断是否矛盾
+    entity_names = set()
+    for m in records['mentions']:
+        if m.get('entity'):
+            entity_names.add(m['entity'])
+    if entity_names:
+        cross = []
+        from kb_storage import list_entities, get_mentions_for_entity, normalize_name, list_chapters_db
+        chapters_db = list_chapters_db(book_id)
+        ch_map = {c['id']: c.get('idx', 0) for c in chapters_db}
+        ch_title_map = {c['id']: c.get('title', '') for c in chapters_db}
+        for ename in entity_names:
+            ent = None
+            for e in list_entities(book_id):
+                if e['canonical_name'] == ename or normalize_name(e['canonical_name']) == normalize_name(ename):
+                    ent = e
+                    break
+            if not ent:
+                continue
+            for cm in get_mentions_for_entity(book_id, ent['id']):
+                if cm['chapter_id'] == chapter_id:
+                    continue
+                ch_idx = ch_map.get(cm['chapter_id'], 0)
+                ch_title = ch_title_map.get(cm['chapter_id'], '')
+                cross.append({
+                    'id': cm.get('id'),
+                    'entity': ent['canonical_name'],
+                    'type': ent.get('type', ''),
+                    'fact': cm.get('fact', ''),
+                    'snippet': cm.get('snippet', ''),
+                    'chapter_id': cm['chapter_id'],
+                    'chapter_idx': ch_idx,
+                    'chapter_title': ch_title,
+                })
+        if cross:
+            records['cross_chapter_candidates'] = cross[:15]  # 封顶 15 条
+
     return records
 
 
@@ -2235,7 +2755,7 @@ def apply_partial_structured_result(book_id, chapter_id, structured):
         canonical = str(ent_data.get('canonical_name', '')).strip()
         if not canonical:
             continue
-        ent_id = upsert_entity(
+        ent_id = resolve_entity(
             book_id, canonical, ent_data.get('type', '人物') or '人物',
             aliases=ent_data.get('aliases_in_chapter', []) or [],
             first_chapter_id=chapter_id,

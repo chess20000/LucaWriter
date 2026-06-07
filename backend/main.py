@@ -258,6 +258,7 @@ DEFAULT_SETTINGS = {
     'local_embedding_model': 'BAAI/bge-small-zh-v1.5',
     'embedding_model': 'text-embedding-3-small',
     'custom_colors': {},
+    'vector_index': 'brute',  # brute|hnsw — ANN 近邻检索，缺库回落 brute
 }
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
@@ -2286,6 +2287,8 @@ def _work_detail(work_id):
                 kb_hash = kb_ch.get('content_hash') or ''
                 if kb_status == 'done':
                     rr_status = 'unchanged' if kb_hash == ch_hash else 'changed'
+                elif kb_status == 'skipped':
+                    rr_status = 'skipped'
             # Also check work-level KB (COO v2 shared knowledge base)
             if rr_status == 'unread':
                 try:
@@ -2297,6 +2300,8 @@ def _work_detail(work_id):
                     w_hash = w_ch.get('content_hash') or ''
                     if w_status == 'done':
                         rr_status = 'unchanged' if w_hash == ch_hash else 'changed'
+                    elif w_status == 'skipped':
+                        rr_status = 'skipped'
             row = {
                 'id': cid,
                 'title': ch.get('title', f'第{idx + 1}章'),
@@ -2322,6 +2327,14 @@ def _work_detail(work_id):
     book_lookup = {b['id']: b for b in books}
     lore = _work_lore_items(work_id)
     lore_lookup = {x['id']: x for x in lore}
+    # 档案柜排序：确保每份档案都有稳定的 pos（一次性迁移），再按 pos 排序
+    _missing_pos = [x for x in lore if not isinstance(x.get('pos'), (int, float))]
+    if _missing_pos:
+        _pos_base = max([x['pos'] for x in lore if isinstance(x.get('pos'), (int, float))] or [-1]) + 1
+        for _off, _it in enumerate(_missing_pos):
+            _it['pos'] = _pos_base + _off
+            save_json(os.path.join(WORKS_DIR, work_id, 'lore', f"{_it['id']}.json"), _it)
+    lore.sort(key=lambda x: (x.get('pos', 0), x.get('id', '')))
     line = []
     placed_lore = set()
     previous_book = None
@@ -4024,6 +4037,14 @@ class Handler(BaseHTTPRequestHandler):
                     resp['recent_logs'] = kb_storage.get_rt_logs(wid, 30)
                     resp['done_count'] = kb_storage.get_done_chapter_count(wid)
                     resp['has_source'] = bool(get_source(wid))
+                    try:
+                        resp['kb_overview'] = kb_storage.get_kb_overview(wid, resp.get('current_idx', -1))
+                        resp['kb_cloud'] = kb_storage.get_kb_cloud(wid, 40)
+                    except Exception as _kbe:
+                        print(f'[kb_overview error for {wid}]: {_kbe}')
+                        import traceback; traceback.print_exc()
+                        resp['kb_overview'] = {}
+                        resp['kb_cloud'] = []
                     self.json_resp(200, resp); return
                 if action == 'file':
                     ft = parse_qs(urlparse(self.path).query).get('type', ['source'])[0]
@@ -5047,11 +5068,14 @@ class Handler(BaseHTTPRequestHandler):
 
             if action == 'lore-create':
                 lid = _new_local_id('lore')
+                _existing_lore = _work_lore_items(wid)
+                _next_pos = max([x['pos'] for x in _existing_lore if isinstance(x.get('pos'), (int, float))] or [-1]) + 1
                 item = {
                     'id': lid,
                     'title': str(data.get('title') or '新设定').strip()[:200] or '新设定',
                     'kind': str(data.get('kind') or '').strip()[:100],
                     'content': str(data.get('content') or ''),
+                    'pos': _next_pos,
                     'updated': time.time(),
                 }
                 lore_dir = os.path.join(WORKS_DIR, wid, 'lore')
@@ -5192,21 +5216,24 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True}); return
 
             if action == 'lore-reorder':
-                # Accept a list of lore IDs in desired order
+                # 档案柜排序：把顺序写入每份档案的 pos，不触碰 reading_order（阅读线）
                 order = data.get('order')
                 if not isinstance(order, list):
                     self.json_resp(400, {'error': 'order 必须是数组'}); return
-                valid_ids = {x['id'] for x in _work_lore_items(wid)}
-                new_ro = []
+                lore_dir = os.path.join(WORKS_DIR, wid, 'lore')
+                valid = {x['id']: x for x in _work_lore_items(wid)}
+                pos = 0
                 for lid in order:
-                    if lid in valid_ids:
-                        new_ro.append({'type': 'lore', 'ref': lid})
-                # Append any lore not in the order list
-                for lid in valid_ids:
+                    it = valid.get(lid)
+                    if it is not None:
+                        it['pos'] = pos
+                        save_json(os.path.join(lore_dir, f'{lid}.json'), it)
+                        pos += 1
+                for lid, it in valid.items():
                     if lid not in order:
-                        new_ro.append({'type': 'lore', 'ref': lid})
-                work['reading_order'] = new_ro
-                save_work_meta(wid, work)
+                        it['pos'] = pos
+                        save_json(os.path.join(lore_dir, f'{lid}.json'), it)
+                        pos += 1
                 self.json_resp(200, {'ok': True}); return
 
             if action == 'delete':
@@ -5898,6 +5925,11 @@ class Handler(BaseHTTPRequestHandler):
                             'type': 'chapter', 'book': bid, 'chapter': cid,
                         })
                         save_work_meta(meta['work_id'], work)
+                # P4: 后台自动更新入队
+                try:
+                    enqueue_auto_kb(bid, cid, 'save')
+                except Exception:
+                    pass
                 self.json_resp(200, {'status': 'ok', 'chapter': ch}); return
 
             if action == 'set-current-chapter' and data.get('id'):
@@ -11365,6 +11397,107 @@ def _migrate_old_books():
             log_action('MIGRATE_OLD_BOOK', f'{bid}: 旧数据备份完毕，标记 needs_rebuild')
 
 
+# ─── P4: 后台自动更新调度器 ───
+
+_AUTO_KB_RUNNING = {}  # work_id -> True （防重入）
+
+def _find_work_for_book(book_id):
+    """查找书本所属的 work_id。"""
+    if not book_id:
+        return None
+    if str(book_id).startswith('work_'):
+        return book_id if get_work_meta(book_id) else None
+    meta = get_book_meta(book_id)
+    if meta and meta.get('work_id'):
+        return meta['work_id']
+    if os.path.isdir(WORKS_DIR):
+        for wid in os.listdir(WORKS_DIR):
+            work = get_work_meta(wid)
+            if work and book_id in (work.get('book_ids') or []):
+                return wid
+    return None
+
+
+def enqueue_auto_kb(book_id, chapter_id, reason='save'):
+    """保存后自动入队脏队列。"""
+    work_id = _find_work_for_book(book_id)
+    if not work_id:
+        return
+    settings = get_settings()
+    if not settings.get('auto_kb_update', True):
+        return
+    try:
+        kb_storage.init_db(work_id)
+    except Exception:
+        return
+    kb_storage.enqueue_dirty(work_id, book_id, chapter_id, reason=reason)
+
+
+def _auto_kb_scheduler_loop():
+    """全局守护线程：每 15s 检查脏队列，安静消费。"""
+    import time as _time
+    _last_edit = {}  # work_id -> last_edit_time
+    idle_delay = 45
+    while True:
+        _time.sleep(15)
+        try:
+            settings = get_settings()
+            if not settings.get('auto_kb_update', True):
+                continue
+            if not os.path.isdir(WORKS_DIR):
+                continue
+            for wid in os.listdir(WORKS_DIR):
+                if wid in _AUTO_KB_RUNNING:
+                    continue
+                work = get_work_meta(wid)
+                if not work:
+                    continue
+                # 不打断用户主动通读
+                try:
+                    kb_storage.init_db(wid)
+                    st = kb_storage.get_rt_state(wid)
+                except Exception:
+                    st = None
+                if st and st.get('status') in ('running', 'starting', 'resuming'):
+                    continue
+                # 幂等复位
+                kb_storage.reset_stale_dirty(wid)
+                pending = kb_storage.count_pending_dirty(wid)
+                if pending == 0:
+                    continue
+                # 去抖
+                lle = _last_edit.get(wid, 0)
+                if _time.time() - lle < idle_delay:
+                    continue
+                # 消费一批
+                _AUTO_KB_RUNNING[wid] = True
+                try:
+                    batch = kb_storage.dequeue_dirty_batch(wid, limit=5)
+                    if not batch:
+                        continue
+                    from kb_pipeline import sync_work_chapters, incremental_embed, render_markdown_views
+                    for item in batch:
+                        try:
+                            changed = {item['book_id']: [item['chapter_id']]}
+                            sync_work_chapters(wid, changed, settings)
+                            kb_storage.mark_dirty_done(wid, item['id'])
+                        except Exception as e:
+                            kb_storage.mark_dirty_done(wid, item['id'], error=str(e)[:200])
+                    # 嵌入增量
+                    try:
+                        incremental_embed(wid, settings)
+                    except Exception:
+                        pass
+                    try:
+                        render_markdown_views(wid)
+                    except Exception:
+                        pass
+                finally:
+                    _AUTO_KB_RUNNING.pop(wid, None)
+        except Exception:
+            pass
+
+
 class _QuietThreadingHTTPServer(ThreadingHTTPServer):
     """覆盖 handle_error：客户端断连（页面刷新 / SSE 关闭 / keepalive 超时）静默吞掉，
     其它异常按原 stderr+traceback 行为照旧。Windows 上这些 errno 出现得特别勤。"""
@@ -11407,6 +11540,19 @@ def run():
         except Exception as e:
             log_action('EMBEDDING_WARMUP_ERR', str(e)[:200])
     threading.Thread(target=_warmup_embedding_backend, name='embedding_warmup', daemon=True).start()
+    # P4: 启动时复位未完成的脏队列
+    try:
+        if os.path.isdir(WORKS_DIR):
+            for wid in os.listdir(WORKS_DIR):
+                try:
+                    kb_storage.init_db(wid)
+                    kb_storage.reset_stale_dirty(wid)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    # P4: 启动自动 KB 更新调度器
+    threading.Thread(target=_auto_kb_scheduler_loop, name='auto_kb_scheduler', daemon=True).start()
     server = _QuietThreadingHTTPServer((bind_host, PORT), Handler)
     print(f'Server running on http://{bind_host}:{PORT}')
     server.serve_forever()

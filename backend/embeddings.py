@@ -63,18 +63,26 @@ class LocalEmbedding(EmbeddingBackend):
                 self.backend_id = self._fallback.backend_id
                 self.dim = self._fallback.dim
                 return
-            cache_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'models_cache'
-            )
+            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            cache_dir = os.path.join(root_dir, 'models_cache')
             os.makedirs(cache_dir, exist_ok=True)
             try:
                 device = _pick_embedding_device()
+                # 优先使用 bundled 模型路径（打包时内置），无需联网
+                # 优先使用 bundled 模型路径
+                model_path = self.model_name
+                _local_name = self.model_name.replace('/', '_').replace('\\', '_')
+                builtin_path = os.path.join(root_dir, 'builtin', 'models', _local_name)
+                if os.path.isdir(builtin_path):
+                    model_path = builtin_path
                 kwargs = {'cache_folder': cache_dir}
                 if device:
                     kwargs['device'] = device
-                self._model = SentenceTransformer(self.model_name, **kwargs)
-                self.dim = self._model.get_sentence_embedding_dimension()
+                self._model = SentenceTransformer(model_path, **kwargs)
+                try:
+                    self.dim = self._model.get_embedding_dimension()
+                except AttributeError:
+                    self.dim = self._model.get_sentence_embedding_dimension()
             except Exception:
                 self._fallback = HashEmbedding()
                 self.backend_id = self._fallback.backend_id
@@ -151,18 +159,24 @@ class APIEmbedding(EmbeddingBackend):
             register_ai_connection = lambda *a, **kw: None
             unregister_ai_connection = lambda *a, **kw: None
         tid = threading.get_ident()
+        ctx = None
         try:
             ctx = _get_ssl_context()
-            resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        except Exception:
+            pass
+        try:
+            resp = urllib.request.urlopen(req, context=ctx, timeout=60)
             register_ai_connection(tid, resp)
             try:
                 result = json.loads(resp.read().decode('utf-8'))
             finally:
-                try: resp.close()
-                except Exception: pass
+                try:
+                    resp.close()
+                except Exception:
+                    pass
                 unregister_ai_connection(tid)
         except Exception as e:
-            raise RuntimeError(f'API 嵌入调用失败: {e}')
+            raise RuntimeError(f'API 嵌入调用失败: {e}') from e
         data = result.get('data', [])
         data.sort(key=lambda x: x.get('index', 0))
         vecs = [d['embedding'] for d in data]

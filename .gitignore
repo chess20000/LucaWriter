@@ -83,3 +83,10 @@ tmp_*.png
 
 # Allow .gitkeep in otherwise-ignored directories
 !.gitkeep
+
+# HuggingFace model cache
+models_cache/
+app/node_modules/
+*.coo
+*.png
+split_trilogy.py

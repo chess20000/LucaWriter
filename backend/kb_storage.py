@@ -268,12 +268,80 @@ def init_db(book_id):
           undone          INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_edit_log_book_time ON kb_edit_log(book_id, created_at DESC);
+
+        -- P1: 实体归并/模糊匹配
+        CREATE TABLE IF NOT EXISTS entity_aliases (
+          id          TEXT PRIMARY KEY,
+          book_id     TEXT NOT NULL,
+          entity_id   TEXT NOT NULL,
+          alias_norm  TEXT NOT NULL,
+          alias_raw   TEXT NOT NULL,
+          source      TEXT NOT NULL DEFAULT 'ai',
+          created_at  INTEGER NOT NULL,
+          FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_entity_aliases_lookup ON entity_aliases(book_id, alias_norm);
+
+        CREATE TABLE IF NOT EXISTS entity_merges (
+          id          TEXT PRIMARY KEY,
+          book_id     TEXT NOT NULL,
+          from_name   TEXT NOT NULL,
+          into_id     TEXT NOT NULL,
+          reason      TEXT,
+          similarity  REAL,
+          created_at  INTEGER NOT NULL
+        );
+
+        -- P3: 事实版本化
+        CREATE TABLE IF NOT EXISTS fact_revisions (
+          id           TEXT PRIMARY KEY,
+          book_id      TEXT NOT NULL,
+          entity_id    TEXT,
+          chapter_id   TEXT NOT NULL,
+          fact         TEXT NOT NULL,
+          snippet      TEXT,
+          confidence   REAL DEFAULT 0.6,
+          pass_no      INTEGER DEFAULT 1,
+          status       TEXT NOT NULL DEFAULT 'active',
+          supersedes   TEXT,
+          reason       TEXT,
+          created_at   INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_fact_rev_entity ON fact_revisions(book_id, entity_id, status);
+
+        -- P4: 后台自动更新队列
+        CREATE TABLE IF NOT EXISTS kb_dirty_queue (
+          id          TEXT PRIMARY KEY,
+          work_id     TEXT NOT NULL,
+          book_id     TEXT NOT NULL,
+          chapter_id  TEXT NOT NULL,
+          reason      TEXT,
+          enqueued_at INTEGER NOT NULL,
+          status      TEXT NOT NULL DEFAULT 'pending',
+          attempts    INTEGER DEFAULT 0,
+          UNIQUE(work_id, book_id, chapter_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_dirty_pending ON kb_dirty_queue(work_id, status, enqueued_at);
         ''')
         cols = {r['name'] for r in conn.execute('PRAGMA table_info(rt_state)').fetchall()}
         if 'active_start_idx' not in cols:
             conn.execute('ALTER TABLE rt_state ADD COLUMN active_start_idx INTEGER DEFAULT -1')
         if 'active_end_idx' not in cols:
             conn.execute('ALTER TABLE rt_state ADD COLUMN active_end_idx INTEGER DEFAULT -1')
+
+        # P1: 幂等迁移 - entities 加 name_norm/mention_cnt
+        ecols = {r['name'] for r in conn.execute('PRAGMA table_info(entities)').fetchall()}
+        if 'name_norm' not in ecols:
+            conn.execute('ALTER TABLE entities ADD COLUMN name_norm TEXT DEFAULT \'\'')
+        if 'mention_cnt' not in ecols:
+            conn.execute('ALTER TABLE entities ADD COLUMN mention_cnt INTEGER DEFAULT 0')
+
+        # P3: mentions 加 confidence/pass_no
+        mcols = {r['name'] for r in conn.execute('PRAGMA table_info(mentions)').fetchall()}
+        if 'confidence' not in mcols:
+            conn.execute('ALTER TABLE mentions ADD COLUMN confidence REAL DEFAULT 0.6')
+        if 'pass_no' not in mcols:
+            conn.execute('ALTER TABLE mentions ADD COLUMN pass_no INTEGER DEFAULT 1')
 
 # ─── Chapter DAO ───
 
@@ -432,14 +500,335 @@ def remaining_entities(book_id, exclude_ids):
     finally:
         conn.close()
 
+# ─── P1: 实体归并 / 模糊匹配 ───
+
+def normalize_name(s):
+    """保守归一化：NFKC + strip + 拉丁小写 + 去装饰空白。不做分词，避免误并。"""
+    import unicodedata
+    s = unicodedata.normalize('NFKC', s)
+    s = s.strip()
+    # 去成对标点内的空白（如《 阿Q 》→《阿Q》）
+    s = re.sub(r'[〈《（\[【]\s+', lambda m: m.group(0)[0], s)
+    s = re.sub(r'\s+[〉》）\]】]', lambda m: m.group(0)[-1], s)
+    # 拉丁字母小写
+    s = ''.join(c.lower() if 'a' <= c <= 'z' or 'A' <= c <= 'Z' else c for c in s)
+    # 压缩连续空白
+    s = re.sub(r'\s+', ' ', s)
+    return s
+
+# type 相容规则：完全相同 type → 相容；一方为未知 → 相容；同义类映射
+_TYPE_COMPAT = {
+    '人物': ('人物', '未分类', '未知'),
+    '地点': ('地点', '场所', '未分类', '未知'),
+    '场所': ('地点', '场所', '未分类', '未知'),
+    '势力': ('势力', '组织', '阵营', '未分类', '未知'),
+    '组织': ('势力', '组织', '阵营', '未分类', '未知'),
+    '阵营': ('势力', '组织', '阵营', '未分类', '未知'),
+    '物品': ('物品', '道具', '未分类', '未知'),
+    '道具': ('物品', '道具', '未分类', '未知'),
+    '事件': ('事件', '未分类', '未知'),
+    '规则': ('规则', '设定', '未分类', '未知'),
+    '设定': ('规则', '设定', '未分类', '未知'),
+}
+
+def _types_compatible(t1, t2):
+    if t1 == t2:
+        return True
+    t1n = t1 or '未分类'
+    t2n = t2 or '未分类'
+    if t1n in ('未分类', '未知') or t2n in ('未分类', '未知'):
+        return True
+    compat = _TYPE_COMPAT.get(t1n, (t1n, '未分类', '未知'))
+    if t2n in compat:
+        return True
+    return False
+
+def _insert_entity_aliases(conn, book_id, entity_id, canonical, aliases, source='ai'):
+    """将 canonical + aliases 写入 entity_aliases 表。"""
+    now = int(time.time())
+    seen = set()
+    names = [canonical] + (aliases or [])
+    for raw in names:
+        raw = str(raw).strip()
+        if not raw or raw in seen:
+            continue
+        seen.add(raw)
+        norm = normalize_name(raw)
+        eid = str(uuid.uuid4())
+        conn.execute(
+            'INSERT OR IGNORE INTO entity_aliases (id, book_id, entity_id, alias_norm, alias_raw, source, created_at) VALUES (?,?,?,?,?,?,?)',
+            (eid, book_id, entity_id, norm, raw, source, now)
+        )
+
+def resolve_entity(book_id, canonical_name, type_, aliases=None, first_chapter_id=None):
+    """替代 upsert_entity 的入口：按序解析实体（精确→别名→嵌入→新建）。"""
+    now = int(time.time())
+    eid = str(uuid.uuid4())
+    clean_aliases = []
+    for a in aliases or []:
+        a = str(a).strip()
+        if a and a != canonical_name and a not in clean_aliases:
+            clean_aliases.append(a)
+    name_norm = normalize_name(canonical_name)
+    aliases_json = json.dumps(clean_aliases, ensure_ascii=False)
+
+    with db_transaction(book_id) as conn:
+        # 1) 精确匹配 canonical_name
+        existing = conn.execute(
+            'SELECT * FROM entities WHERE book_id=? AND canonical_name=?',
+            (book_id, canonical_name)
+        ).fetchone()
+
+        if not existing:
+            # 2) 别名反查：normalize_name(incoming_canonical) 或任一 incoming_alias
+            norm_checks = [name_norm] + [normalize_name(a) for a in clean_aliases]
+            for nc in norm_checks:
+                row = conn.execute('''SELECT e.* FROM entities e
+                    JOIN entity_aliases a ON a.entity_id=e.id
+                    WHERE e.book_id=? AND a.alias_norm=?''', (book_id, nc)).fetchone()
+                if row and _types_compatible(row['type'], type_):
+                    existing = row
+                    break
+
+        if existing:
+            # 更新现有实体
+            eid = existing['id']
+            if clean_aliases:
+                old_aliases = []
+                try:
+                    old_aliases = json.loads(existing['aliases'] or '[]')
+                except Exception:
+                    old_aliases = []
+                merged = []
+                for a in old_aliases + clean_aliases:
+                    a = str(a).strip()
+                    if a and a != existing['canonical_name'] and a not in merged:
+                        merged.append(a)
+                conn.execute('UPDATE entities SET aliases=?, updated_at=? WHERE id=?',
+                    (json.dumps(merged, ensure_ascii=False), now, eid))
+            if first_chapter_id and not existing.get('first_chapter_id'):
+                conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?',
+                    (first_chapter_id, now, eid))
+            # 更新 name_norm
+            conn.execute('UPDATE entities SET name_norm=COALESCE(name_norm,?), updated_at=? WHERE id=?',
+                (name_norm, now, eid))
+            # 写入 alias 表
+            _insert_entity_aliases(conn, book_id, eid, existing['canonical_name'], clean_aliases)
+            return eid
+
+        # 3) 嵌入近邻（可选，需 embedding 后端可用）
+        # 不在事务内调嵌入，避免长事务；当前做精确+别名解析后直接新建
+        # 嵌入匹配在后续段落通过 resolve_entity_with_embedding 调用
+
+        # 4) 新建实体
+        conn.execute('''INSERT INTO entities
+            (id, book_id, canonical_name, type, aliases, first_chapter_id, updated_at, name_norm)
+            VALUES (?,?,?,?,?,?,?,?)''',
+            (eid, book_id, canonical_name, type_, aliases_json, first_chapter_id, now, name_norm))
+        _insert_entity_aliases(conn, book_id, eid, canonical_name, clean_aliases)
+        return eid
+
+def resolve_entity_with_embedding(book_id, canonical_name, type_, aliases=None, first_chapter_id=None,
+                                    embed_fn=None, tau_high=0.86, tau_low=0.78):
+    """resolve_entity 的嵌入增强版：在精确/别名均不命中时，走向量检索。"""
+    now = int(time.time())
+    eid = str(uuid.uuid4())
+    clean_aliases = []
+    for a in aliases or []:
+        a = str(a).strip()
+        if a and a != canonical_name and a not in clean_aliases:
+            clean_aliases.append(a)
+    name_norm = normalize_name(canonical_name)
+    aliases_json = json.dumps(clean_aliases, ensure_ascii=False)
+
+    with db_transaction(book_id) as conn:
+        # 1) 精确
+        existing = conn.execute(
+            'SELECT * FROM entities WHERE book_id=? AND canonical_name=?',
+            (book_id, canonical_name)
+        ).fetchone()
+        if not existing:
+            # 2) 别名
+            norm_checks = [name_norm] + [normalize_name(a) for a in clean_aliases]
+            for nc in norm_checks:
+                row = conn.execute('''SELECT e.* FROM entities e
+                    JOIN entity_aliases a ON a.entity_id=e.id
+                    WHERE e.book_id=? AND a.alias_norm=?''', (book_id, nc)).fetchone()
+                if row and _types_compatible(row['type'], type_):
+                    existing = row
+                    break
+
+        if existing:
+            eid = existing['id']
+            if clean_aliases:
+                old_aliases = []
+                try:
+                    old_aliases = json.loads(existing['aliases'] or '[]')
+                except Exception:
+                    old_aliases = []
+                merged = []
+                for a in old_aliases + clean_aliases:
+                    a = str(a).strip()
+                    if a and a != existing['canonical_name'] and a not in merged:
+                        merged.append(a)
+                conn.execute('UPDATE entities SET aliases=?, updated_at=? WHERE id=?',
+                    (json.dumps(merged, ensure_ascii=False), now, eid))
+            if first_chapter_id and not existing.get('first_chapter_id'):
+                conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?',
+                    (first_chapter_id, now, eid))
+            conn.execute('UPDATE entities SET name_norm=COALESCE(name_norm,?), updated_at=? WHERE id=?',
+                (name_norm, now, eid))
+            _insert_entity_aliases(conn, book_id, eid, existing['canonical_name'], clean_aliases)
+            return eid
+
+        # 3) 嵌入近邻
+        if embed_fn:
+            try:
+                query_text = f'{canonical_name} {type_} {clean_aliases[0] if clean_aliases else ""}'
+                candidates = _embed_entity_search(conn, book_id, query_text, embed_fn, tau_high)
+                if candidates:
+                    existing_row = candidates[0]
+                    eid = existing_row['id']
+                    # 合并
+                    _merge_entities_internal(conn, book_id, eid, canonical_name, type_, clean_aliases,
+                                              first_chapter_id, name_norm, now, reason='embedding',
+                                              similarity=candidates[0].get('_sim', tau_high))
+                    _insert_entity_aliases(conn, book_id, eid, canonical_name, clean_aliases)
+                    return eid
+            except Exception:
+                pass  # 嵌入失败→回落新建
+
+        # 4) 新建
+        conn.execute('''INSERT INTO entities
+            (id, book_id, canonical_name, type, aliases, first_chapter_id, updated_at, name_norm)
+            VALUES (?,?,?,?,?,?,?,?)''',
+            (eid, book_id, canonical_name, type_, aliases_json, first_chapter_id, now, name_norm))
+        _insert_entity_aliases(conn, book_id, eid, canonical_name, clean_aliases)
+        return eid
+
+def _embed_entity_search(conn, book_id, query_text, embed_fn, threshold):
+    """用嵌入检索 top-3 候选实体，返回 (entity_row, similarity) 列表。"""
+    try:
+        qv = embed_fn(query_text)
+    except Exception:
+        return []
+    if qv is None or len(qv) == 0:
+        return []
+    rows = conn.execute('''SELECT e.*, v.dimensions, v.embedding
+        FROM entities e
+        JOIN vector_entries v ON v.id=e.id AND v.book_id=e.book_id
+        WHERE e.book_id=? AND v.source_type='entity'
+        ORDER BY v.updated_at DESC''', (book_id,)).fetchall()
+    candidates = []
+    for r in rows:
+        try:
+            stored = np.frombuffer(r['embedding'], dtype=np.float32)
+            if len(stored) != r['dimensions']:
+                stored = stored[:r['dimensions']]
+            sim = float(np.dot(qv, stored) / (np.linalg.norm(qv) * np.linalg.norm(stored) + 1e-10))
+        except Exception:
+            sim = 0
+        r_dict = dict(r)
+        r_dict['_sim'] = sim
+        candidates.append(r_dict)
+    candidates.sort(key=lambda x: x['_sim'], reverse=True)
+    return [c for c in candidates[:3] if c['_sim'] >= threshold]
+
+def _merge_entities_internal(conn, book_id, into_id, canonical_name, type_, aliases,
+                              first_chapter_id, name_norm, now, reason='alias', similarity=None):
+    """将外来信息合并到已存在的 into_id 实体。不创建 entity_merges 记录（非全实体合并）。"""
+    existing = conn.execute('SELECT * FROM entities WHERE id=? AND book_id=?', (into_id, book_id)).fetchone()
+    if not existing:
+        return
+    # 合并别名
+    old_aliases = []
+    try:
+        old_aliases = json.loads(existing['aliases'] or '[]')
+    except Exception:
+        old_aliases = []
+    merged = []
+    for a in old_aliases + aliases:
+        a = str(a).strip()
+        if a and a != existing['canonical_name'] and a not in merged:
+            merged.append(a)
+    conn.execute('UPDATE entities SET aliases=?, updated_at=? WHERE id=?',
+        (json.dumps(merged, ensure_ascii=False), now, into_id))
+    if first_chapter_id and not existing.get('first_chapter_id'):
+        conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?',
+            (first_chapter_id, now, into_id))
+    conn.execute('UPDATE entities SET name_norm=COALESCE(name_norm,?), updated_at=? WHERE id=?',
+        (name_norm, now, into_id))
+
+def merge_entities(book_id, into_id, from_id):
+    """完整合并两个实体：mentions repoint、aliases 并集、mention_cnt 累加、写 entity_merges。"""
+    now = int(time.time())
+    with db_transaction(book_id) as conn:
+        from_entity = conn.execute('SELECT * FROM entities WHERE id=? AND book_id=?', (from_id, book_id)).fetchone()
+        into_entity = conn.execute('SELECT * FROM entities WHERE id=? AND book_id=?', (into_id, book_id)).fetchone()
+        if not from_entity or not into_entity:
+            return
+        # mentions repoint
+        conn.execute('UPDATE mentions SET entity_id=? WHERE entity_id=? AND entity_id IN (SELECT id FROM entities WHERE book_id=?)',
+            (into_id, from_id, book_id))
+        # aliases 并集
+        from_aliases = json.loads(from_entity['aliases'] or '[]')
+        into_aliases = json.loads(into_entity['aliases'] or '[]')
+        merged = list(into_aliases)
+        for a in from_aliases:
+            a = str(a).strip()
+            if a and a != into_entity['canonical_name'] and a not in merged:
+                merged.append(a)
+        # 把 from_name 也加入别名
+        if from_entity['canonical_name'] != into_entity['canonical_name']:
+            if from_entity['canonical_name'] not in merged:
+                merged.append(from_entity['canonical_name'])
+        conn.execute('UPDATE entities SET aliases=?, mention_cnt=COALESCE(mention_cnt,0)+(SELECT COUNT(*) FROM mentions WHERE entity_id=?), updated_at=? WHERE id=?',
+            (json.dumps(merged, ensure_ascii=False), from_id, now, into_id))
+        # first_chapter_id 取更早
+        if from_entity.get('first_chapter_id') and not into_entity.get('first_chapter_id'):
+            conn.execute('UPDATE entities SET first_chapter_id=?, updated_at=? WHERE id=?',
+                (from_entity['first_chapter_id'], now, into_id))
+        # 写入 entity_merges
+        merge_id = str(uuid.uuid4())
+        conn.execute('INSERT INTO entity_merges (id, book_id, from_name, into_id, reason, created_at) VALUES (?,?,?,?,?,?)',
+            (merge_id, book_id, from_entity['canonical_name'], into_id, 'manual', now))
+        # 从 from_entity 迁移 alias 记录
+        conn.execute('UPDATE entity_aliases SET entity_id=? WHERE entity_id=? AND book_id=?',
+            (into_id, from_id, book_id))
+        # 删除被并实体
+        conn.execute('DELETE FROM entities WHERE id=? AND book_id=?', (from_id, book_id))
+
+def backfill_entity_mentions(book_id):
+    """迁移脚本：回填 name_norm、拆 entity_aliases、算 mention_cnt。幂等。"""
+    init_db(book_id)
+    with db_transaction(book_id) as conn:
+        rows = conn.execute('SELECT * FROM entities WHERE book_id=?', (book_id,)).fetchall()
+        for r in rows:
+            eid = r['id']
+            # name_norm
+            if not r.get('name_norm'):
+                nn = normalize_name(r['canonical_name'])
+                conn.execute('UPDATE entities SET name_norm=? WHERE id=?', (nn, eid))
+            # 拆别名到 entity_aliases
+            aliases = []
+            try:
+                aliases = json.loads(r['aliases'] or '[]')
+            except Exception:
+                aliases = []
+            _insert_entity_aliases(conn, book_id, eid, r['canonical_name'], aliases, source='migration')
+            # mention_cnt
+            cnt = conn.execute('SELECT COUNT(*) as c FROM mentions WHERE entity_id=?', (eid,)).fetchone()['c']
+            conn.execute('UPDATE entities SET mention_cnt=? WHERE id=?', (cnt, eid))
+
 # ─── Mention DAO ───
 
-def add_mention(book_id, entity_id, chapter_id, fact, snippet=None):
+def add_mention(book_id, entity_id, chapter_id, fact, snippet=None, confidence=0.6, pass_no=1):
     mid = str(uuid.uuid4())
     now = int(time.time())
     with db_transaction(book_id) as conn:
-        conn.execute('INSERT INTO mentions (id, entity_id, chapter_id, fact, snippet, created_at) VALUES (?,?,?,?,?,?)',
-            (mid, entity_id, chapter_id, fact, snippet, now))
+        conn.execute('INSERT INTO mentions (id, entity_id, chapter_id, fact, snippet, confidence, pass_no, created_at) VALUES (?,?,?,?,?,?,?,?)',
+            (mid, entity_id, chapter_id, fact, snippet, confidence, pass_no, now))
+        conn.execute('UPDATE entities SET mention_cnt=COALESCE(mention_cnt,0)+1 WHERE id=?', (entity_id,))
     return mid
 
 def get_mentions_for_entity(book_id, entity_id):
@@ -461,6 +850,24 @@ def get_mentions_by_chapter(book_id, chapter_id):
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+def get_mentions_for_chapter(book_id, chapter_id):
+    """Alias for get_mentions_by_chapter."""
+    return get_mentions_by_chapter(book_id, chapter_id)
+
+
+def add_fact_revision(book_id, entity_id, chapter_id, fact, snippet=None,
+                       confidence=0.6, pass_no=1, status='active', supersedes=None, reason=None):
+    """写入 fact_revisions 表。"""
+    now = int(time.time())
+    rev_id = str(uuid.uuid4())
+    with db_transaction(book_id) as conn:
+        conn.execute('''INSERT INTO fact_revisions
+            (id, book_id, entity_id, chapter_id, fact, snippet, confidence, pass_no, status, supersedes, reason, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (rev_id, book_id, entity_id, chapter_id, fact, snippet, confidence, pass_no, status, supersedes, reason, now))
+    return rev_id
+
 
 def get_entity_recent_mentions_before(book_id, entity_id, before_idx=None, limit=3):
     conn = _get_conn(book_id)
@@ -1029,6 +1436,146 @@ def prune_vector_entries(book_id, expected_ids):
                 'DELETE FROM embedding_chunks WHERE book_id=? AND id=?', stale
             )
 
+# ─── P5: ANN 近似近邻检索 ───
+
+_ANN_INDICES = {}  # book_id -> _ANNIndex instance
+_ANN_LOCK = threading.Lock()
+
+class _ANNIndex:
+    """hnswlib 索引封装。缺库时回落暴力搜索。"""
+    def __init__(self, book_id, dim):
+        self.book_id = book_id
+        self.dim = dim
+        self.index = None
+        self.ids = []  # 原始 id 列表，与 index 位置对应
+        self._hnsw = None
+
+    def build(self, vectors, ids):
+        """用全量向量构建索引。vectors: list of np.array, ids: list of str"""
+        try:
+            import hnswlib
+            self._hnsw = hnswlib
+            num = len(vectors)
+            if num == 0:
+                return
+            self.index = hnswlib.Index(space='cosine', dim=self.dim)
+            self.index.init_index(max_elements=max(num, 100), ef_construction=200, M=16)
+            data = np.vstack(vectors).astype(np.float32)
+            self.index.add_items(data, np.arange(num))
+            self.index.set_ef(50)
+            self.ids = list(ids)
+        except ImportError:
+            self._hnsw = None
+            self.index = None
+            self.ids = []
+
+    def query(self, query_vec, top_k, where_filter=None):
+        """查询 top_k 近邻。返回 [(id, distance)]，支持 where 后过滤。"""
+        if self.index is not None and self._hnsw is not None and where_filter is None:
+            q = np.asarray(query_vec, dtype=np.float32).reshape(1, -1)
+            labels, distances = self.index.knn_query(q, k=min(top_k * 2, len(self.ids)))
+            results = []
+            for idx, dist in zip(labels[0], distances[0]):
+                if idx < len(self.ids):
+                    results.append((self.ids[idx], float(dist)))
+            return results[:top_k]
+        return None  # 回落暴力
+
+    def clear(self):
+        self.index = None
+        self.ids = []
+        self._hnsw = None
+
+
+def get_ann_index(book_id, force_rebuild=False):
+    """获取或重建 ANN 索引。"""
+    with _ANN_LOCK:
+        if force_rebuild and book_id in _ANN_INDICES:
+            _ANN_INDICES[book_id].clear()
+            del _ANN_INDICES[book_id]
+        if book_id in _ANN_INDICES:
+            return _ANN_INDICES[book_id]
+    # 检查 hnswlib 是否可用
+    try:
+        import hnswlib
+    except ImportError:
+        return None
+    # 加载向量数据
+    conn = _get_conn(book_id)
+    try:
+        rows = conn.execute('''SELECT id, embedding, dimensions, metadata_json
+            FROM vector_entries WHERE book_id=? ORDER BY id''', (book_id,)).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return None
+    dim = rows[0]['dimensions']
+    vectors = []
+    ids = []
+    for r in rows:
+        vec = np.frombuffer(r['embedding'], dtype=np.float32, count=r['dimensions'])
+        if len(vec) != dim:
+            continue
+        vectors.append(vec)
+        ids.append(r['id'])
+    if not vectors:
+        return None
+    idx = _ANNIndex(book_id, dim)
+    idx.build(vectors, ids)
+    with _ANN_LOCK:
+        _ANN_INDICES[book_id] = idx
+    return idx
+
+
+def rebuild_ann_index(book_id):
+    """显式重建 ANN 索引（嵌入变更后调用）。"""
+    get_ann_index(book_id, force_rebuild=True)
+
+
+def embed_query_ann(book_id, query_text, embedding_backend, top_k=10, where=None):
+    """embed_query 的 ANN 加速版。无 ANN 或 where 过滤时回落暴力。"""
+    query = np.asarray(embedding_backend.embed([query_text])[0], dtype=np.float32).reshape(-1)
+    query_norm = float(np.linalg.norm(query))
+    if not query.size or not np.isfinite(query_norm) or query_norm == 0:
+        return []
+
+    if where is not None:
+        # 有过滤条件 → 直接回落暴力
+        return embed_query(book_id, query_text, embedding_backend, top_k=top_k, where=where)
+
+    idx = get_ann_index(book_id)
+    if idx is not None:
+        ann_results = idx.query(query, top_k)
+        if ann_results is not None:
+            conn = _get_conn(book_id)
+            try:
+                id_list = [r[0] for r in ann_results]
+                if not id_list:
+                    return []
+                ph = ','.join('?' * len(id_list))
+                rows = conn.execute(
+                    f'SELECT id, metadata_json FROM vector_entries WHERE book_id=? AND id IN ({ph})',
+                    [book_id] + id_list
+                ).fetchall()
+                row_map = {r['id']: r for r in rows}
+                hits = []
+                for rid, dist in ann_results:
+                    row = row_map.get(rid)
+                    if not row:
+                        continue
+                    try:
+                        metadata = json.loads(row['metadata_json'] or '{}')
+                    except (TypeError, ValueError):
+                        metadata = {}
+                    hits.append({'id': rid, 'distance': dist, 'metadata': metadata})
+                return hits[:top_k]
+            finally:
+                conn.close()
+
+    # 回落暴力
+    return embed_query(book_id, query_text, embedding_backend, top_k=top_k, where=where)
+
+
 def embed_clear(book_id):
     init_db(book_id)
     with db_transaction(book_id) as conn:
@@ -1041,7 +1588,7 @@ def get_done_chapter_count(book_id):
     init_db(book_id)
     conn = _get_conn(book_id)
     try:
-        row = conn.execute('SELECT COUNT(*) as cnt FROM chapters WHERE book_id=? AND status=\'done\'', (book_id,)).fetchone()
+        row = conn.execute("SELECT COUNT(*) as cnt FROM chapters WHERE book_id=? AND status IN ('done','skipped')", (book_id,)).fetchone()
         return row['cnt'] if row else 0
     finally:
         conn.close()
@@ -1054,7 +1601,6 @@ def get_kb_overview(book_id, current_idx=None):
         for status in ('pending', 'processing', 'done', 'failed', 'skipped'):
             row = conn.execute('SELECT COUNT(*) as cnt FROM chapters WHERE book_id=? AND status=?', (book_id, status)).fetchone()
             overview[f'{status}_chapters'] = row['cnt'] if row else 0
-        overview['entities'] = conn.execute('SELECT COUNT(*) as cnt FROM entities WHERE book_id=?', (book_id,)).fetchone()['cnt']
         overview['mentions'] = conn.execute('''SELECT COUNT(*) as cnt
             FROM mentions m JOIN entities e ON m.entity_id=e.id
             WHERE e.book_id=?''', (book_id,)).fetchone()['cnt']
@@ -1283,6 +1829,22 @@ def undo_edit(book_id, log_id):
              e['new_value'], e['old_value'], f'撤销 log#{log_id}', 'undo', now))
         return e
 
+def get_kb_cloud(book_id, limit=40):
+    """Return top entities by mention count for word cloud visualization."""
+    init_db(book_id)
+    conn = _get_conn(book_id)
+    try:
+        rows = conn.execute('''SELECT e.id, e.canonical_name, e.type, COUNT(m.id) as weight
+            FROM entities e
+            LEFT JOIN mentions m ON m.entity_id=e.id
+            WHERE e.book_id=?
+            GROUP BY e.id
+            ORDER BY weight DESC
+            LIMIT ?''', (book_id, limit)).fetchall()
+        return [{'id': r['id'], 'name': r['canonical_name'], 'type': r['type'], 'weight': r['weight']} for r in rows]
+    finally:
+        conn.close()
+
 
 # ─── KB lookup helpers (for AI tool use) ───
 
@@ -1394,5 +1956,71 @@ def get_kb_record(book_id, table_name, record_id):
         else:
             return None
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ─── P4: 脏队列 DAO ───
+
+def enqueue_dirty(work_id, book_id, chapter_id, reason='save'):
+    """将变更章加入脏队列（同章去重）。"""
+    now = int(time.time())
+    eid = str(uuid.uuid4())
+    with db_transaction(work_id) as conn:
+        existing = conn.execute(
+            'SELECT id FROM kb_dirty_queue WHERE work_id=? AND book_id=? AND chapter_id=? AND status=?',
+            (work_id, book_id, chapter_id, 'pending')
+        ).fetchone()
+        if existing:
+            return existing['id']
+        conn.execute('''INSERT OR IGNORE INTO kb_dirty_queue
+            (id, work_id, book_id, chapter_id, reason, enqueued_at, status)
+            VALUES (?,?,?,?,?,?,'pending')''',
+            (eid, work_id, book_id, chapter_id, reason, now))
+    return eid
+
+
+def dequeue_dirty_batch(work_id, limit=5):
+    """取出该 work 的一批待处理章，标 processing。"""
+    conn = _get_conn(work_id)
+    try:
+        rows = conn.execute('''SELECT * FROM kb_dirty_queue
+            WHERE work_id=? AND status='pending'
+            ORDER BY enqueued_at ASC LIMIT ?''', (work_id, limit)).fetchall()
+        if not rows:
+            return []
+        ids = [r['id'] for r in rows]
+        ph = ','.join('?' * len(ids))
+        conn.execute(f"UPDATE kb_dirty_queue SET status='processing' WHERE id IN ({ph})", ids)
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def mark_dirty_done(work_id, item_id, error=None):
+    """标记脏队列项完成/错误。"""
+    with db_transaction(work_id) as conn:
+        if error:
+            conn.execute('UPDATE kb_dirty_queue SET status=?, attempts=attempts+1 WHERE id=?',
+                         ('error', item_id))
+        else:
+            conn.execute('UPDATE kb_dirty_queue SET status=? WHERE id=?',
+                         ('done', item_id))
+
+
+def reset_stale_dirty(work_id):
+    """启动时把 processing 复位为 pending。"""
+    with db_transaction(work_id) as conn:
+        conn.execute("UPDATE kb_dirty_queue SET status='pending' WHERE work_id=? AND status='processing'",
+                     (work_id,))
+
+def count_pending_dirty(work_id):
+    """统计待处理的脏队列项数。"""
+    conn = _get_conn(work_id)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM kb_dirty_queue WHERE work_id=? AND status='pending'",
+            (work_id,)).fetchone()
+        return row['cnt'] if row else 0
     finally:
         conn.close()
