@@ -2979,7 +2979,12 @@ def qa_context(book_id, user_query='', settings=None, chapter_tokens=0, history_
     vector_hits = []
     if user_query.strip() and backend:
         top_k = 8 if ctx_len < 32000 else 15 if ctx_len < 128000 else 30
-        vector_hits = embed_query(book_id, user_query, backend, top_k=top_k)
+        try:
+            vector_hits = embed_query(book_id, user_query, backend, top_k=top_k)
+        except Exception:
+            # 嵌入子进程本次取不到向量（崩溃/超时等）→ 退化为不带向量召回，
+            # 仍用实体名匹配等其它上下文继续答，绝不让一次嵌入失败打断对话。
+            vector_hits = []
 
     if re.search(r'第\s*\d+\s*章|什么时候|时间线|顺序|经过', user_query):
         parts.append(format_events(book_id, filter=[e['canonical_name'] for e in matched_entities] if matched_entities else None))

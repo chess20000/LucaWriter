@@ -346,9 +346,13 @@ body.electron.electron-platform-darwin .win-controls .wc-max::after{display:none
 #appLoading span{font-family:var(--font-serif);font-size:clamp(48px,8vw,120px);font-weight:200;color:var(--t3);opacity:.12;letter-spacing:.04em}
 body.loading .app{opacity:0;pointer-events:none}
 body:not(.loading) #appLoading{opacity:0;pointer-events:none}
-#editorLoadingOverlay{position:absolute;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;visibility:hidden;opacity:0;transition:opacity .2s;pointer-events:none}
-#editorLoadingOverlay.show{visibility:visible;opacity:1;pointer-events:auto}
-#editorLoadingOverlay span{font-size:13px;color:var(--t3);letter-spacing:.3px}
+#editorLoadingOverlay,#workLoadingOverlay{position:absolute;inset:0;z-index:100;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;visibility:hidden;opacity:0;transition:opacity .2s;pointer-events:none}
+#editorLoadingOverlay.show,#workLoadingOverlay.show{visibility:visible;opacity:1;pointer-events:auto}
+#editorLoadingOverlay span,#workLoadingOverlay span{font-size:13px;color:var(--t3);letter-spacing:.3px}
+@keyframes loadingBreathe{0%,100%{opacity:.22}50%{opacity:.92}}
+#workLoadingOverlay .loading-logo{width:72px;height:72px;object-fit:contain;opacity:.4}
+#workLoadingOverlay.show .loading-logo{animation:loadingBreathe 1.7s ease-in-out infinite}
+[data-theme-mode="light"] #workLoadingOverlay .loading-logo{filter:invert(1)}
 .book-list-panel{padding:6px}
 .book-list-item{padding:10px 12px;border-radius:var(--r2);font-size:13px;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:8px;margin:2px 0;transition:0s;border:1px solid transparent}
 .book-list-item:hover{color:var(--t1);background:var(--surface2)}
@@ -1024,7 +1028,7 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
 .local-llm-info-panel.open{display:block}
 
 /* === Work reading line === */
-.work-view{display:none;flex:1;min-height:0;padding:22px 28px;gap:20px;overflow:hidden}
+.work-view{display:none;flex:1;min-height:0;padding:22px 28px;gap:20px;overflow:hidden;position:relative}
 .work-view.active{display:grid;grid-template-columns:1fr 1fr;gap:16px;overflow:hidden}
 .work-panel,.work-reread{min-height:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r3);overflow:hidden;display:flex;flex-direction:column}
 .work-hero{display:grid;grid-template-columns:84px 1fr;gap:14px;padding:16px;border-bottom:1px solid var(--border)}
@@ -1330,6 +1334,7 @@ body:not(.loading) #appLoading{opacity:0;pointer-events:none}
       <button class="work-chat-send" onclick="sendWorkChat()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
      </div>
     </section>
+    <div id="workLoadingOverlay"><img class="loading-logo" src="logo-white.png" alt="LucaWriter"></div>
   </div>
 
  <div class="lore-view" id="loreView">
@@ -2303,13 +2308,15 @@ function openWork(id,cb){
  $('bottomPanel').style.display='none';
  $('workView').classList.add('active');
  updateBreadcrumb();
+ var _wl=$('workLoadingOverlay');if(_wl)_wl.classList.add('show');
  api('GET','/api/work/'+id,undefined,function(d,s){
-   if(s!==200||!d.work){toast(d.error||'作品加载失败','error');clearAppState();showBookShelf();return}
+   if(s!==200||!d.work){if(_wl)_wl.classList.remove('show');toast(d.error||'作品加载失败','error');clearAppState();showBookShelf();return}
   currentWork=d.work;currentWorkDetail=d;
    renderWorkView();
    _syncRTStateFromBackend();
    saveAppState();
   document.body.classList.remove('loading');
+  if(_wl)_wl.classList.remove('show');
   if(cb)cb();
  });
 }

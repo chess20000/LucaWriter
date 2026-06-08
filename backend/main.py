@@ -2757,21 +2757,29 @@ def _is_electron_mode():
     return bool(os.environ.get('DATA_DIR'))
 
 
+# 会话文件的"读-改-写"事务锁。save_json 自身只保证单次写入原子，
+# 但 validate_session(滑动续期)/make_session(登录)/logout 各自 load→改→save，
+# 并发时后写的会整体覆盖前写的 → 刚登录的新 token 会被一个还在途中的滑动续期写丢，
+# 表现为"登录时好时坏/刚登录就被踢回登录页"。这里串行化所有会话事务。
+_sessions_lock = threading.RLock()
+
+
 def validate_session(token):
     if not token: return False
-    sessions = load_json(SESSIONS_FILE, list)
-    now = time.time()
-    for s in sessions:
-        if hmac.compare_digest(s.get('token', ''), token) and s.get('expires', 0) > now:
-            # Sliding expiration: extend if more than halfway expired
-            created = s.get('created', 0)
-            if created > 0:
-                lifetime = s['expires'] - created
-                if lifetime > 0 and (s['expires'] - now) < lifetime * 0.5:
-                    s['expires'] = now + lifetime
-                    save_json(SESSIONS_FILE, sessions)
-            return True
-    return False
+    with _sessions_lock:
+        sessions = load_json(SESSIONS_FILE, list)
+        now = time.time()
+        for s in sessions:
+            if hmac.compare_digest(s.get('token', ''), token) and s.get('expires', 0) > now:
+                # Sliding expiration: extend if more than halfway expired
+                created = s.get('created', 0)
+                if created > 0:
+                    lifetime = s['expires'] - created
+                    if lifetime > 0 and (s['expires'] - now) < lifetime * 0.5:
+                        s['expires'] = now + lifetime
+                        save_json(SESSIONS_FILE, sessions)
+                return True
+        return False
 
 
 def _session_remember(token):
@@ -2806,14 +2814,15 @@ def get_cookie_token(headers):
 
 def make_session(username, remember=False, device_name=''):
     token = secrets.token_hex(32)
-    sessions = load_json(SESSIONS_FILE, list)
-    sessions = [s for s in sessions if s.get('expires', 0) > time.time()]
-    now = time.time()
-    if remember:
-        sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400 * 90, 'device_name': device_name})
-    else:
-        sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400, 'device_name': device_name})
-    save_json(SESSIONS_FILE, sessions)
+    with _sessions_lock:
+        sessions = load_json(SESSIONS_FILE, list)
+        sessions = [s for s in sessions if s.get('expires', 0) > time.time()]
+        now = time.time()
+        if remember:
+            sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400 * 90, 'device_name': device_name})
+        else:
+            sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400, 'device_name': device_name})
+        save_json(SESSIONS_FILE, sessions)
     return token
 
 
@@ -4907,8 +4916,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/auth/logout':
             t = get_cookie_token(self.headers)
             if t:
-                sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') != t]
-                save_json(SESSIONS_FILE, sessions)
+                with _sessions_lock:
+                    sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') != t]
+                    save_json(SESSIONS_FILE, sessions)
             # prevent _refresh_session_cookie from re-setting the session cookie
             self._authed_token = None
             self.json_resp(200, {'ok': True}, {'Set-Cookie': 'session=; Path=/; Max-Age=0; SameSite=Lax'}); return
@@ -5022,21 +5032,23 @@ class Handler(BaseHTTPRequestHandler):
             prefix = data.get('token_prefix', '')
             if not prefix:
                 self.json_resp(400, {'error': '缺少 token_prefix'}); return
-            sessions = load_json(SESSIONS_FILE, list)
-            removed = 0
-            new_sessions = []
-            for s in sessions:
-                if s.get('token', '').startswith(prefix):
-                    removed += 1
-                else:
-                    new_sessions.append(s)
-            save_json(SESSIONS_FILE, new_sessions)
+            with _sessions_lock:
+                sessions = load_json(SESSIONS_FILE, list)
+                removed = 0
+                new_sessions = []
+                for s in sessions:
+                    if s.get('token', '').startswith(prefix):
+                        removed += 1
+                    else:
+                        new_sessions.append(s)
+                save_json(SESSIONS_FILE, new_sessions)
             self.json_resp(200, {'ok': True, 'removed': removed}); return
 
         if path == '/api/sessions/revoke-all':
             t = get_cookie_token(self.headers)
-            sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') == t]
-            save_json(SESSIONS_FILE, sessions)
+            with _sessions_lock:
+                sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') == t]
+                save_json(SESSIONS_FILE, sessions)
             log_action('REVOKE_ALL', f'kept token: {t[:12] if t else "none"}')
             self.json_resp(200, {'ok': True}); return
 
@@ -5045,12 +5057,13 @@ class Handler(BaseHTTPRequestHandler):
             if not t:
                 self.json_resp(400, {'error': '无活动会话'}); return
             name = data.get('device_name', '').strip()[:50]
-            sessions = load_json(SESSIONS_FILE, list)
-            for s in sessions:
-                if s.get('token') == t:
-                    s['device_name'] = name
-                    break
-            save_json(SESSIONS_FILE, sessions)
+            with _sessions_lock:
+                sessions = load_json(SESSIONS_FILE, list)
+                for s in sessions:
+                    if s.get('token') == t:
+                        s['device_name'] = name
+                        break
+                save_json(SESSIONS_FILE, sessions)
             self.json_resp(200, {'ok': True, 'device_name': name}); return
 
         if path == '/api/works/create':
@@ -9865,6 +9878,13 @@ def _prepare_ai_request(settings, messages, max_tokens, temperature, stream=Fals
     headers = {'Content-Type': 'application/json'}
     if key:
         headers['Authorization'] = f'Bearer {key}'
+    # 兜底：保证发给模型的消息里至少有一条非空 user 消息。
+    # 部分模型（如 qwen 系）的 jinja 模板在找不到 user query 时会直接抛
+    # "No user query found in messages." 导致整轮失败，这里统一在出口处补一条占位 user。
+    if not any(isinstance(m, dict) and m.get('role') == 'user'
+               and isinstance(m.get('content'), str) and m.get('content').strip()
+               for m in messages):
+        messages = list(messages) + [{'role': 'user', 'content': '继续'}]
     body = {'model': model, 'messages': messages}
     if max_tokens is not None and max_tokens > 0:
         # DeepSeek API max_tokens 上限 393216，大上下文窗口可能导致计算值超限
@@ -11721,4 +11741,8 @@ def run():
 
 
 if __name__ == '__main__':
+    # 嵌入模型跑在 multiprocessing 子进程里（隔离 torch 原生崩溃）。
+    # 打包后子进程会重启本 exe，freeze_support 必须最先调用，否则子进程会再起一个服务器。
+    import multiprocessing
+    multiprocessing.freeze_support()
     run()

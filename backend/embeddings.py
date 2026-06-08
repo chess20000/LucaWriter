@@ -3,6 +3,7 @@ import re
 import json
 import hashlib
 import threading
+import multiprocessing
 import numpy as np
 from abc import ABC, abstractmethod
 
@@ -41,61 +42,189 @@ class EmbeddingBackend(ABC):
         pass
 
 
+class _ModelUnavailable(Exception):
+    """子进程报告模型无法加载（未安装 sentence_transformers / 加载报错）。"""
+
+
+def _resolve_local_model_path(model_name):
+    """优先用 bundled 内置模型路径（打包时内置，无需联网），否则原样返回模型名。"""
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _local_name = model_name.replace('/', '_').replace('\\', '_')
+    builtin_path = os.path.join(root_dir, 'builtin', 'models', _local_name)
+    if os.path.isdir(builtin_path):
+        return builtin_path, root_dir
+    return model_name, root_dir
+
+
+def _embedding_worker_main(conn, model_name):
+    """嵌入子进程入口：唯一加载 torch / SentenceTransformer 的地方。
+    放进独立进程后，torch 的原生崩溃（段错误/访问违例）只会杀死本子进程，
+    主服务进程毫发无伤，下次调用会自动重启本子进程。
+
+    协议（父子通过 Pipe 通信）：
+      启动后立刻回握手 ('ready', dim) 或 ('nomodel', err)；
+      之后每收到一个 list[str] 就回 ('ok', vecs) 或 ('err', msg)；收到 None 退出。"""
+    try:
+        from sentence_transformers import SentenceTransformer
+    except Exception as e:
+        try: conn.send(('nomodel', f'sentence_transformers 不可用: {e}'))
+        except Exception: pass
+        return
+    try:
+        model_path, root_dir = _resolve_local_model_path(model_name)
+        cache_dir = os.path.join(root_dir, 'models_cache')
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+        except Exception:
+            pass
+        kwargs = {'cache_folder': cache_dir}
+        device = _pick_embedding_device()
+        if device:
+            kwargs['device'] = device
+        model = SentenceTransformer(model_path, **kwargs)
+        try:
+            dim = model.get_embedding_dimension()
+        except AttributeError:
+            dim = model.get_sentence_embedding_dimension()
+        conn.send(('ready', int(dim or 0)))
+    except Exception as e:
+        try: conn.send(('nomodel', f'模型加载失败: {e}'))
+        except Exception: pass
+        return
+    while True:
+        try:
+            req = conn.recv()
+        except EOFError:
+            break
+        if req is None:
+            break
+        try:
+            vecs = model.encode(req, normalize_embeddings=True, show_progress_bar=False)
+            conn.send(('ok', vecs.tolist()))
+        except Exception as e:
+            try: conn.send(('err', str(e)))
+            except Exception: break
+
+
 class LocalEmbedding(EmbeddingBackend):
+    """本地嵌入后端。模型跑在隔离子进程里，崩溃不波及主进程。
+    embed() 对外行为与原来一致：模型不可用时永久退化到 HashEmbedding；
+    向量化报错照旧抛异常（但因隔离，主进程不会被原生崩溃带走）。"""
+
+    _LOAD_TIMEOUT = 180   # 首次加载（含子进程冷启动 + 模型载入）的握手超时
+    _ENCODE_TIMEOUT = 120  # 单批向量化超时
+
     def __init__(self, model_name='BAAI/bge-small-zh-v1.5'):
         self.model_name = model_name
         self.backend_id = f'local:{model_name}'
-        self._model = None
-        self._fallback = None
         self.dim = 0
-        self._load_lock = threading.Lock()
+        self._fallback = None          # HashEmbedding：模型不可用时的永久兜底
+        self._proc = None
+        self._conn = None
+        self._ctx = None
+        self._worker_ever_ready = False
+        self._lock = threading.Lock()
 
-    def _ensure_model(self):
-        if self._model is not None or self._fallback is not None:
-            return
-        with self._load_lock:
-            if self._model is not None or self._fallback is not None:
-                return
+    def _degrade_to_hash(self):
+        if self._fallback is None:
+            self._fallback = HashEmbedding()
+            self.backend_id = self._fallback.backend_id
+            self.dim = self._fallback.dim
+        return self._fallback
+
+    def _kill_worker(self):
+        proc, conn = self._proc, self._conn
+        self._proc = None
+        self._conn = None
+        if conn is not None:
+            try: conn.close()
+            except Exception: pass
+        if proc is not None:
             try:
-                from sentence_transformers import SentenceTransformer
-            except ImportError:
-                self._fallback = HashEmbedding()
-                self.backend_id = self._fallback.backend_id
-                self.dim = self._fallback.dim
-                return
-            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            cache_dir = os.path.join(root_dir, 'models_cache')
-            os.makedirs(cache_dir, exist_ok=True)
-            try:
-                device = _pick_embedding_device()
-                # 优先使用 bundled 模型路径（打包时内置），无需联网
-                # 优先使用 bundled 模型路径
-                model_path = self.model_name
-                _local_name = self.model_name.replace('/', '_').replace('\\', '_')
-                builtin_path = os.path.join(root_dir, 'builtin', 'models', _local_name)
-                if os.path.isdir(builtin_path):
-                    model_path = builtin_path
-                kwargs = {'cache_folder': cache_dir}
-                if device:
-                    kwargs['device'] = device
-                self._model = SentenceTransformer(model_path, **kwargs)
-                try:
-                    self.dim = self._model.get_embedding_dimension()
-                except AttributeError:
-                    self.dim = self._model.get_sentence_embedding_dimension()
+                if proc.is_alive():
+                    proc.terminate()
+                proc.join(timeout=3)
             except Exception:
-                self._fallback = HashEmbedding()
-                self.backend_id = self._fallback.backend_id
-                self.dim = self._fallback.dim
+                pass
+            try:
+                if proc.is_alive():
+                    proc.kill()
+            except Exception:
+                pass
+
+    def _ensure_worker(self):
+        """确保子进程在跑且已就绪。失败时抛 _ModelUnavailable（模型加载不了）
+        或其它异常（启动/握手崩溃，由调用方决定重试还是兜底）。"""
+        if self._proc is not None and self._proc.is_alive() and self._conn is not None:
+            return
+        self._kill_worker()
+        if self._ctx is None:
+            # 强制 spawn：主服务多线程，fork 之后用 torch 很容易死锁/崩溃
+            self._ctx = multiprocessing.get_context('spawn')
+        parent_conn, child_conn = self._ctx.Pipe()
+        proc = self._ctx.Process(
+            target=_embedding_worker_main,
+            args=(child_conn, self.model_name),
+            daemon=True,
+        )
+        proc.start()
+        child_conn.close()  # 父进程只持有 parent_conn，关掉子端才能正确检测 EOF
+        try:
+            if not parent_conn.poll(self._LOAD_TIMEOUT):
+                raise TimeoutError('嵌入子进程加载超时')
+            kind, payload = parent_conn.recv()
+        except Exception:
+            self._proc, self._conn = proc, parent_conn
+            self._kill_worker()
+            raise
+        if kind == 'ready':
+            self._proc = proc
+            self._conn = parent_conn
+            self._worker_ever_ready = True
+            if payload:
+                self.dim = payload
+            return
+        # 'nomodel' 或意外 → 模型加载不了
+        self._proc, self._conn = proc, parent_conn
+        self._kill_worker()
+        raise _ModelUnavailable(str(payload))
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        self._ensure_model()
         if not texts:
             return []
-        if self._fallback is not None:
-            return self._fallback.embed(texts)
-        vecs = self._model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        return vecs.tolist()
+        with self._lock:
+            if self._fallback is not None:
+                return self._fallback.embed(texts)
+            last_err = None
+            for _attempt in range(2):
+                try:
+                    self._ensure_worker()
+                except _ModelUnavailable:
+                    return self._degrade_to_hash().embed(texts)
+                except Exception as e:
+                    last_err = e
+                    self._kill_worker()
+                    # 从未成功加载过 → 当作加载失败，永久退化 hash（与原 load 失败一致）
+                    if not self._worker_ever_ready:
+                        return self._degrade_to_hash().embed(texts)
+                    continue
+                try:
+                    self._conn.send(texts)
+                    if not self._conn.poll(self._ENCODE_TIMEOUT):
+                        raise TimeoutError('嵌入子进程响应超时')
+                    kind, payload = self._conn.recv()
+                except (EOFError, BrokenPipeError, ConnectionResetError, OSError, TimeoutError) as e:
+                    # 子进程崩溃/卡死 → 杀掉，下一轮重启重试
+                    last_err = e
+                    self._kill_worker()
+                    continue
+                if kind == 'ok':
+                    return payload
+                if kind == 'err':
+                    # 子进程内向量化报错（非崩溃）→ 照旧抛出，语义同原 in-process encode
+                    raise RuntimeError(payload)
+                raise RuntimeError(f'嵌入子进程返回异常: {kind!r}')
+            raise RuntimeError(f'本地嵌入子进程多次崩溃，已放弃本次请求: {last_err}')
 
 
 class HashEmbedding(EmbeddingBackend):
