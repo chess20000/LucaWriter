@@ -25,7 +25,7 @@ electron/node_modules/
 # Logs
 *.log
 logs/
-server_err.txt
+server_err*.txt
 server_out.txt
 server_test_out.txt
 codex-server.err.log
@@ -90,3 +90,12 @@ app/node_modules/
 *.coo
 *.png
 split_trilogy.py
+
+# Debug / scratch files
+cookies*.txt
+note.txt
+overview.md
+
+# Design docs / handoff (not source code)
+agent*.md
+*方案.md
