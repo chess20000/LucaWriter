@@ -66,6 +66,9 @@ LOCAL_MODEL_DESIGN*
 *LUCA_Legend*
 !builtin/**
 
+# Bundled model binaries (user should download separately)
+builtin/models/**/*.safetensors
+
 # IDE / editor
 .DS_Store
 .idea/
@@ -95,6 +98,14 @@ split_trilogy.py
 cookies*.txt
 note.txt
 overview.md
+
+# Cooverter (standalone tool, not part of app)
+cooverter
+cooverter.bat
+cooverter.py
+
+# Test files (not part of app)
+tests/
 
 # Design docs / handoff (not source code)
 agent*.md
