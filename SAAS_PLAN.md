@@ -195,6 +195,17 @@ usage 入表、余额耗尽返回 402；流式与非流式都验。
 
 > 每个 session 完成的内容、遇到的问题、对计划的修改，按时间倒序记在这里。
 
+- 2026-06-11 **阶段 4 前半（4a）完成：`/write` 反向代理。** 按用户要求阶段 4 拆两小步省额度；本次只做反代，**4b（剩余）= 「我的」页入口按钮 + `POST /internal/coo-upload` + `GET /internal/balance`**，下个 session 做。
+  - 施工对象 `~/Documents/Coobox-prod/app.py`（**未提交**——该仓库本就有一批与本计划无关的未提交改动，留待用户处理；本次改动集中在文件末尾 `init_db()` 之前的「在线写作」段 + 4 处小改）：
+    - 路由 `/write/` + `/write/<path:rest>`（GET/POST）：`require_login()` 墙（未登录 302 /login?next=）→ `http.client` 反代 `LUCA_UPSTREAM`（默认 `127.0.0.1:21000`，timeout 300s，LucaWriter SSE 自带 30s keepalive 撑连接）。
+    - 注入 `X-Luca-User`（= Coobox users.id 转 str）+ `X-Luca-Sign`（HMAC-SHA256(LUCA_SAAS_SECRET, uid) hex），与 LucaWriter `_saas_verify` 对齐。**请求头剥离**：hop-by-hop + expect + host + content-length + cookie（Coobox 会话不下发）+ 客户端伪造的 X-Luca-*。
+    - 请求体 `request.stream` 流式透传（带原 Content-Length，http.client 不分块）；响应 `text/html` 整读注入 `<head><script>window.__LUCA_BASE='/write'</script>` 后重算长度，其余 `read1(65536)` 逐块 yield（SSE 不缓冲）+ `stream_with_context` + `direct_passthrough`；Location 头 `/x` → `/write/x` 重写；上游连不上 502 JSON。
+    - `csrf_protect` 豁免 `/write`（⚠️ 否则 `request.form.get` 会把上传流吞掉再 400；跨站防护与 `/api/` 同口径 SameSite=Lax）；`ANALYTICS_SKIP_PREFIXES` 加 `/write`。
+    - 新 env：`LUCA_UPSTREAM`、`LUCA_SAAS_SECRET`（与 LucaWriter 同值；未配置时 /write 返回 503）。
+  - 验证（脚本留在 `/tmp/coobox_p4/`：venv + launch_coobox.py + smoke.py，4b 可复用）：双进程联调（LucaWriter SaaS :21750 + Coobox :28000 隔离数据目录），8 项全过——未登录 302 / 登录 / HTML 注入 / saas-info 透传 / auth-status / JSON POST 建书+列表 / 伪造 X-Luca-* 头被剥离（仍见自己数据）/ SSE 首包 2ms 不缓冲。
+  - 坑：本地 `.env` 有 `COOBOX_COOKIE_SECURE=1`，http 冒烟必须在 launcher 里关 `SESSION_COOKIE_SECURE`，否则登录 cookie 不回传、CSRF 恒 400；Coobox 本地无 venv，系统 python 缺 webauthn，冒烟 venv 在 `/tmp/coobox_p4/venv`。
+  - 本仓库本次仅改 SAAS_PLAN.md（阶段 1-3 成果已在本 session 开头提交为 82d8d21）。
+
 - 2026-06-11 **阶段 3 完成。** 注：主体改造由一个**额度耗尽未及记日志**的 session 完成（已留在工作区），本 session 审计补全 + 验证 + 补记。
   - 那次中断 session 已完成（`frontend/index.html`，经逐项审计确认完整）：
     - **API 前缀**：`var API_BASE=window.__LUCA_BASE||''`（script 顶部）；`api()` helper 的 `x.open` 统一加前缀；零散直连点全部收口——EventSource(`/api/ai-activity`)、4 处导出 XHR（export/export-epub/export-coo×2）、封面 img src（书架卡片/作品页/卷行/封面上传预览）、2 处 fetch（local-llm open-models-dir/stop）。审计结论：剩余 `'/api/` 字面量全部作为参数传入 `api()`，无遗漏（grep src=/href=/sendBeacon/iframe 均空）。
