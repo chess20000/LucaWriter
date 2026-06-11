@@ -19,14 +19,16 @@ def get_kb_path(book_id):
     return os.path.join(get_book_dir(book_id), 'kb.db')
 
 def _get_lock(book_id):
-    lock = _db_locks.get(book_id)
+    # 锁按 db 路径而非 book_id：SaaS 多租户下不同租户可能有相同 book_id
+    key = get_kb_path(book_id)
+    lock = _db_locks.get(key)
     if lock is not None:
         return lock
     with _db_locks_meta:
-        lock = _db_locks.get(book_id)
+        lock = _db_locks.get(key)
         if lock is None:
             lock = threading.RLock()
-            _db_locks[book_id] = lock
+            _db_locks[key] = lock
         return lock
 
 @contextmanager
@@ -65,7 +67,28 @@ def wal_checkpoint(book_id, mode='passive'):
     except Exception:
         pass
 
+_initialized_dbs = {}  # db_path -> inode；os.replace 恢复快照/删库后 inode 变化会自动重跑建表
+_initialized_dbs_lock = threading.Lock()
+
 def init_db(book_id):
+    db_path = get_kb_path(book_id)
+    try:
+        ino = os.stat(db_path).st_ino
+    except OSError:
+        ino = None
+    if ino is not None:
+        with _initialized_dbs_lock:
+            if _initialized_dbs.get(db_path) == ino:
+                return
+    _init_db_schema(book_id)
+    try:
+        ino = os.stat(db_path).st_ino
+    except OSError:
+        return
+    with _initialized_dbs_lock:
+        _initialized_dbs[db_path] = ino
+
+def _init_db_schema(book_id):
     with db_transaction(book_id) as conn:
         conn.execute('PRAGMA foreign_keys=ON')
         conn.executescript('''

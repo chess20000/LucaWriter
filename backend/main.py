@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import copy
 import time
 import hashlib
 import hmac
@@ -21,6 +22,7 @@ import urllib.request
 import urllib.error
 import threading
 import queue
+import contextvars
 from datetime import datetime
 from ipaddress import ip_network, ip_address
 from http.cookies import SimpleCookie
@@ -128,18 +130,140 @@ def _find_data_dir():
 
 DATA_DIR = _find_data_dir()
 PORT = int(os.environ.get('LUCA_PORT', 20000 if os.environ.get('DATA_DIR') else 10000))
-BOOKS_DIR = os.path.join(DATA_DIR, 'books')
-WORKS_DIR = os.path.join(DATA_DIR, 'works')  # COO v2 世界观级共享目录
-LOG_DIR = os.path.join(DATA_DIR, 'logs')
-MESSAGES_DIR = os.path.join(DATA_DIR, 'messages')
-CHAT_SESSIONS_DIR = os.path.join(DATA_DIR, 'chat_sessions')
-os.makedirs(CHAT_SESSIONS_DIR, exist_ok=True)
-USER_FONTS_DIR = os.path.join(DATA_DIR, 'fonts')
-GLOBAL_CHAT_HISTORY_FILE = os.path.join(DATA_DIR, 'chat_history.json')
-SALT_FILE = os.path.join(DATA_DIR, 'salt')
-SETTINGS_FILE = os.path.join(DATA_DIR, 'settings.json')
-USERS_FILE = os.path.join(DATA_DIR, 'users.json')
-SESSIONS_FILE = os.path.join(DATA_DIR, 'sessions.json')
+
+# ===== SaaS 多租户 =====
+# LUCA_SAAS=1 时进入多租户模式：每个请求经 Coobox 反代注入 X-Luca-User + X-Luca-Sign，
+# 验签后把租户 uid 放进 contextvar，所有数据路径切到 DATA_DIR/tenants/<uid>/。
+# 单机模式（默认）所有路径函数返回原 DATA_DIR 下路径，行为完全不变。
+LUCA_SAAS = os.environ.get('LUCA_SAAS') == '1'
+LUCA_SAAS_SECRET = os.environ.get('LUCA_SAAS_SECRET', '')
+# SaaS 行为层（阶段 2）：AI 走 Coobox 计费网关，磁盘配额，coo-push 内部直传
+LUCA_AI_GATEWAY = os.environ.get('LUCA_AI_GATEWAY', 'http://127.0.0.1:8000/api/ai/v1')
+LUCA_AI_MODEL = os.environ.get('LUCA_AI_MODEL', 'deepseek-v4-flash')
+LUCA_INTERNAL_SECRET = os.environ.get('LUCA_INTERNAL_SECRET', '')
+LUCA_COOBOX_INTERNAL = os.environ.get('LUCA_COOBOX_INTERNAL', 'http://127.0.0.1:8000')
+LUCA_TENANT_QUOTA_MB = int(os.environ.get('LUCA_TENANT_QUOTA_MB', '100'))
+LUCA_WALLET_URL = os.environ.get('LUCA_WALLET_URL', '/me/wallet')
+
+_TENANT = contextvars.ContextVar('luca_tenant', default=None)
+
+
+class TenantRequired(Exception):
+    """SaaS 模式下在无租户上下文中访问了租户数据路径。"""
+
+
+def data_dir():
+    if not LUCA_SAAS:
+        return DATA_DIR
+    uid = _TENANT.get()
+    if not uid:
+        raise TenantRequired()
+    return os.path.join(DATA_DIR, 'tenants', uid)
+
+
+_TENANT_DIR_SUBDIRS = ('books', 'works', 'logs', 'messages', 'chat_sessions', 'fonts')
+_tenants_ready = set()
+_tenants_ready_lock = threading.Lock()
+
+
+def _ensure_tenant_dirs(uid):
+    with _tenants_ready_lock:
+        if uid in _tenants_ready:
+            return
+    base = os.path.join(DATA_DIR, 'tenants', uid)
+    for d in _TENANT_DIR_SUBDIRS:
+        os.makedirs(os.path.join(base, d), exist_ok=True)
+    with _tenants_ready_lock:
+        _tenants_ready.add(uid)
+
+
+def _list_tenants():
+    root = os.path.join(DATA_DIR, 'tenants')
+    if not os.path.isdir(root):
+        return []
+    return [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
+
+
+def books_dir(): return os.path.join(data_dir(), 'books')
+def works_dir(): return os.path.join(data_dir(), 'works')  # COO v2 世界观级共享目录
+def log_dir(): return os.path.join(data_dir(), 'logs')
+def messages_dir(): return os.path.join(data_dir(), 'messages')
+def chat_sessions_dir(): return os.path.join(data_dir(), 'chat_sessions')
+def user_fonts_dir(): return os.path.join(data_dir(), 'fonts')
+def global_chat_history_file(): return os.path.join(data_dir(), 'chat_history.json')
+def salt_file(): return os.path.join(data_dir(), 'salt')
+def settings_file(): return os.path.join(data_dir(), 'settings.json')
+def users_file(): return os.path.join(data_dir(), 'users.json')
+def sessions_file(): return os.path.join(data_dir(), 'sessions.json')
+def ai_providers_file(): return os.path.join(data_dir(), 'ai_providers.json')
+
+# SaaS 重任务（通读/嵌入/导入校验）全局并发限制；单机模式不启用
+LUCA_HEAVY_CONCURRENCY = int(os.environ.get('LUCA_HEAVY_CONCURRENCY', '1'))
+_heavy_semaphore = threading.Semaphore(LUCA_HEAVY_CONCURRENCY)
+
+
+def spawn_thread(target, args=(), kwargs=None, daemon=True, name=None, heavy=False):
+    """启动后台线程并把当前租户 contextvar 带进去。
+    SaaS 模式且 heavy=True 时过全局 Semaphore 排队（不拒绝）。"""
+    uid = _TENANT.get()
+    _kwargs = kwargs or {}
+
+    def _run():
+        _TENANT.set(uid)
+        if heavy and LUCA_SAAS:
+            with _heavy_semaphore:
+                target(*args, **_kwargs)
+        else:
+            target(*args, **_kwargs)
+
+    t = threading.Thread(target=_run, daemon=daemon, name=name)
+    t.start()
+    return t
+
+
+_disk_usage_cache = {}  # uid -> (ts, bytes)
+_disk_usage_lock = threading.Lock()
+
+
+def tenant_disk_usage():
+    """当前租户目录磁盘占用（字节），os.scandir 递归求和，每租户缓存 30s。"""
+    uid = _TENANT.get()
+    base = data_dir()
+    now = time.time()
+    with _disk_usage_lock:
+        ent = _disk_usage_cache.get(uid)
+        if ent and now - ent[0] < 30:
+            return ent[1]
+    total = 0
+    stack = [base]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            total += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    with _disk_usage_lock:
+        _disk_usage_cache[uid] = (now, total)
+    return total
+
+
+def check_tenant_quota():
+    """SaaS 磁盘配额检查：超限返回错误消息，未超返回 None。单机恒 None。"""
+    if not LUCA_SAAS:
+        return None
+    used = tenant_disk_usage()
+    if used >= LUCA_TENANT_QUOTA_MB * _MB:
+        return f'存储空间不足，已用 {used / _MB:.1f} / {LUCA_TENANT_QUOTA_MB} MB'
+    return None
+
 FONT_EXTS = {'.ttf': ('font/ttf', 'truetype'), '.otf': ('font/otf', 'opentype')}
 BUILTIN_EDITOR_FONT_IDS = {'builtin_serif', 'builtin_sans', 'builtin_mono'}
 _MB = 1024 * 1024
@@ -260,6 +384,8 @@ DEFAULT_SETTINGS = {
     'custom_colors': {},
     'vector_index': 'brute',  # brute|hnsw — ANN 近邻检索，缺库回落 brute
 }
+# SaaS 模式下设置保存接口忽略的提供商相关字段（AI 固定走云网关）
+_SAAS_LOCKED_SETTINGS = {'base_url', 'api_key', 'model', 'models', 'provider_presets', 'active_provider_idx'}
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
     'key_events': [], 'rules': [], 'updated': 0, 'chapter_summaries': {},
@@ -706,7 +832,7 @@ def _build_coo_zip(work_id, pen_name=''):
                     json.dumps(payload, ensure_ascii=False, indent=2),
                 )
                 summary_rel = ''
-                summary_path = os.path.join(BOOKS_DIR, local_bid, 'chapter_summaries', f'{cid}.md')
+                summary_path = os.path.join(books_dir(), local_bid, 'chapter_summaries', f'{cid}.md')
                 if os.path.isfile(summary_path):
                     summary_rel = f'ai/chapter_summaries/{safe}.md'
                     _coo_add_file(zf, summary_path, book_dir + summary_rel)
@@ -721,7 +847,7 @@ def _build_coo_zip(work_id, pen_name=''):
                 })
 
             child_cover = ''
-            child_cover_path = os.path.join(BOOKS_DIR, local_bid, 'cover')
+            child_cover_path = os.path.join(books_dir(), local_bid, 'cover')
             if os.path.isfile(child_cover_path):
                 with open(child_cover_path, 'rb') as f:
                     cover_raw = f.read()
@@ -730,10 +856,10 @@ def _build_coo_zip(work_id, pen_name=''):
                     zf.writestr(book_dir + child_cover, cover_raw)
 
             outline_rel = ''
-            if _coo_add_file(zf, os.path.join(BOOKS_DIR, local_bid, 'outline.md'), book_dir + 'ai/outline.md'):
+            if _coo_add_file(zf, os.path.join(books_dir(), local_bid, 'outline.md'), book_dir + 'ai/outline.md'):
                 outline_rel = book_dir + 'ai/outline.md'
             volume_rel = ''
-            if _coo_add_file(zf, os.path.join(BOOKS_DIR, local_bid, 'volume_summary.md'), book_dir + 'ai/volume_summary.md'):
+            if _coo_add_file(zf, os.path.join(books_dir(), local_bid, 'volume_summary.md'), book_dir + 'ai/volume_summary.md'):
                 volume_rel = book_dir + 'ai/volume_summary.md'
 
             # 章节路径改为根相对（包根），不再写子书 manifest
@@ -795,7 +921,7 @@ def _build_coo_zip(work_id, pen_name=''):
                 reading_order.append(row)
 
         work_cover = ''
-        work_cover_path = os.path.join(WORKS_DIR, work_id, 'cover')
+        work_cover_path = os.path.join(works_dir(), work_id, 'cover')
         if os.path.isfile(work_cover_path):
             with open(work_cover_path, 'rb') as f:
                 cover_raw = f.read()
@@ -859,7 +985,7 @@ def _build_coo_zip(work_id, pen_name=''):
                 'META-INF/coo-merge-sources.json',
                 json.dumps(merge_sources, ensure_ascii=False, indent=2),
             )
-        history_path = os.path.join(WORKS_DIR, work_id, 'coo-history.jsonl')
+        history_path = os.path.join(works_dir(), work_id, 'coo-history.jsonl')
         _coo_add_file(zf, history_path, 'META-INF/coo-history.jsonl')
 
     if not HAS_COO_PROVENANCE:
@@ -878,7 +1004,7 @@ def _build_coo_zip(work_id, pen_name=''):
     try:
         with zipfile.ZipFile(io.BytesIO(output), 'r') as final_zip:
             history = final_zip.read('META-INF/coo-history.jsonl')
-        with open(os.path.join(WORKS_DIR, work_id, 'coo-history.jsonl'), 'wb') as f:
+        with open(os.path.join(works_dir(), work_id, 'coo-history.jsonl'), 'wb') as f:
             f.write(history)
     except Exception:
         pass
@@ -896,12 +1022,25 @@ def _safe_coo_path(value):
     return value
 
 
+def _remember_pen_name(pen_name):
+    """记住最近一次导出/推送填写的笔名，用于新作品导出时预填。"""
+    try:
+        s = load_json_cached(settings_file())
+        if s.get('last_pen_name') != pen_name:
+            s['last_pen_name'] = pen_name
+            save_json(settings_file(), s)
+    except Exception:
+        pass
+
+
 def _normalize_coobox_server_url(value):
     value = str(value or '').strip().rstrip('/')
     if not value:
         return ''
     if any(ord(ch) < 32 for ch in value):
         raise ValueError('网站地址包含非法字符')
+    if '://' not in value:
+        value = 'https://' + value
     parsed = urlparse(value)
     if parsed.scheme not in ('http', 'https') or not parsed.hostname:
         raise ValueError('网站地址必须是完整的 http:// 或 https:// URL')
@@ -968,7 +1107,7 @@ def _import_coo_zip(raw):
         if chapters_ref:
             bid = _new_local_id('book')
             package_book_map[package_bid] = bid
-            bd = os.path.join(BOOKS_DIR, bid)
+            bd = os.path.join(books_dir(), bid)
             ch_dir = os.path.join(bd, 'chapters')
             os.makedirs(ch_dir, exist_ok=True)
             os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
@@ -1049,7 +1188,7 @@ def _import_coo_zip(raw):
         base_dir = manifest_path.rsplit('/', 1)[0] + '/'
         bid = _new_local_id('book')
         package_book_map[package_bid] = bid
-        bd = os.path.join(BOOKS_DIR, bid)
+        bd = os.path.join(books_dir(), bid)
         ch_dir = os.path.join(bd, 'chapters')
         os.makedirs(ch_dir, exist_ok=True)
         os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
@@ -1210,13 +1349,13 @@ def _import_coo_zip(raw):
 
 
 def _clear_work_generated_ai(work_id):
-    shared_dir = os.path.join(WORKS_DIR, work_id, 'shared')
+    shared_dir = os.path.join(works_dir(), work_id, 'shared')
     if os.path.isdir(shared_dir):
         shutil.rmtree(shared_dir)
     os.makedirs(shared_dir, exist_ok=True)
     work = get_work_meta(work_id) or {}
     for bid in work.get('book_ids') or []:
-        bd = os.path.join(BOOKS_DIR, bid)
+        bd = os.path.join(books_dir(), bid)
         for dirname in ('chapter_summaries', 'volume_summaries', '.vector_db', 'kb_archives'):
             path = os.path.join(bd, dirname)
             if os.path.isdir(path):
@@ -1234,8 +1373,8 @@ def _merge_imported_work(target_work_id, source_work_id):
     target = get_work_meta(target_work_id)
     if not target:
         raise ValueError('目标作品不存在')
-    backup_root = tempfile.mkdtemp(prefix='luca-merge-', dir=DATA_DIR)
-    target_work_dir = os.path.join(WORKS_DIR, target_work_id)
+    backup_root = tempfile.mkdtemp(prefix='luca-merge-', dir=data_dir())
+    target_work_dir = os.path.join(works_dir(), target_work_id)
     backup_work_dir = os.path.join(backup_root, 'work')
     backup_books_dir = os.path.join(backup_root, 'books')
     original_book_ids = list(target.get('book_ids') or [])
@@ -1244,7 +1383,7 @@ def _merge_imported_work(target_work_id, source_work_id):
             shutil.copytree(target_work_dir, backup_work_dir)
         os.makedirs(backup_books_dir, exist_ok=True)
         for book_id in original_book_ids:
-            source_dir = os.path.join(BOOKS_DIR, book_id)
+            source_dir = os.path.join(books_dir(), book_id)
             if os.path.isdir(source_dir):
                 shutil.copytree(
                     source_dir,
@@ -1256,7 +1395,7 @@ def _merge_imported_work(target_work_id, source_work_id):
         if os.path.isdir(backup_work_dir):
             shutil.copytree(backup_work_dir, target_work_dir)
         for book_id in original_book_ids:
-            target_dir = os.path.join(BOOKS_DIR, book_id)
+            target_dir = os.path.join(books_dir(), book_id)
             backup_dir = os.path.join(backup_books_dir, book_id)
             shutil.rmtree(target_dir, ignore_errors=True)
             if os.path.isdir(backup_dir):
@@ -1290,14 +1429,14 @@ def _merge_imported_work_apply(target_work_id, source_work_id):
             target_bid = source_bid
             source_to_target[source_bid] = target_bid
             source_meta['work_id'] = target_work_id
-            save_json(os.path.join(BOOKS_DIR, source_bid, 'meta.json'), source_meta)
+            save_json(os.path.join(books_dir(), source_bid, 'meta.json'), source_meta)
             if target_bid not in target.get('book_ids', []):
                 target.setdefault('book_ids', []).append(target_bid)
             continue
         source_to_target[source_bid] = target_bid
         target_meta = get_book_meta(target_bid) or {}
-        target_dir = os.path.join(BOOKS_DIR, target_bid)
-        source_dir = os.path.join(BOOKS_DIR, source_bid)
+        target_dir = os.path.join(books_dir(), target_bid)
+        source_dir = os.path.join(books_dir(), source_bid)
         target_chapters = os.path.join(target_dir, 'chapters')
         source_chapters = os.path.join(source_dir, 'chapters')
         os.makedirs(target_chapters, exist_ok=True)
@@ -1341,8 +1480,8 @@ def _merge_imported_work_apply(target_work_id, source_work_id):
         if key in source:
             target[key] = source[key]
 
-    target_lore_dir = os.path.join(WORKS_DIR, target_work_id, 'lore')
-    source_lore_dir = os.path.join(WORKS_DIR, source_work_id, 'lore')
+    target_lore_dir = os.path.join(works_dir(), target_work_id, 'lore')
+    source_lore_dir = os.path.join(works_dir(), source_work_id, 'lore')
     os.makedirs(target_lore_dir, exist_ok=True)
     if os.path.isdir(source_lore_dir):
         for filename in os.listdir(source_lore_dir):
@@ -1372,11 +1511,11 @@ def _merge_imported_work_apply(target_work_id, source_work_id):
     )
     target['reading_order'] = incoming_line
 
-    source_cover = os.path.join(WORKS_DIR, source_work_id, 'cover')
+    source_cover = os.path.join(works_dir(), source_work_id, 'cover')
     if os.path.isfile(source_cover):
-        shutil.copy2(source_cover, os.path.join(WORKS_DIR, target_work_id, 'cover'))
+        shutil.copy2(source_cover, os.path.join(works_dir(), target_work_id, 'cover'))
     try:
-        history_path = os.path.join(WORKS_DIR, source_work_id, 'coo-history.jsonl')
+        history_path = os.path.join(works_dir(), source_work_id, 'coo-history.jsonl')
         events = []
         if os.path.isfile(history_path):
             with open(history_path, 'r', encoding='utf-8') as f:
@@ -1417,13 +1556,18 @@ def _merge_imported_work_apply(target_work_id, source_work_id):
 
     for source_bid in source.get('book_ids') or []:
         if source_to_target.get(source_bid) != source_bid:
-            shutil.rmtree(os.path.join(BOOKS_DIR, source_bid), ignore_errors=True)
-    shutil.rmtree(os.path.join(WORKS_DIR, source_work_id), ignore_errors=True)
+            shutil.rmtree(os.path.join(books_dir(), source_bid), ignore_errors=True)
+    shutil.rmtree(os.path.join(works_dir(), source_work_id), ignore_errors=True)
     return _work_detail(target_work_id)
 
 
 def ensure_dirs():
-    for d in [DATA_DIR, BOOKS_DIR, WORKS_DIR, LOG_DIR, MESSAGES_DIR, USER_FONTS_DIR]:
+    if LUCA_SAAS:
+        # 租户子目录在首次请求时由 _ensure_tenant_dirs 创建；根 logs 给无租户上下文的服务日志用
+        for d in [DATA_DIR, os.path.join(DATA_DIR, 'tenants'), os.path.join(DATA_DIR, 'logs')]:
+            os.makedirs(d, exist_ok=True)
+        return
+    for d in [DATA_DIR, books_dir(), works_dir(), log_dir(), messages_dir(), user_fonts_dir(), chat_sessions_dir()]:
         os.makedirs(d, exist_ok=True)
 
 
@@ -1491,16 +1635,15 @@ def _import_builtin_books():
 
 
 def get_salt():
-    if os.path.exists(SALT_FILE):
-        with open(SALT_FILE, 'r') as f:
+    if os.path.exists(salt_file()):
+        with open(salt_file(), 'r') as f:
             s = f.read().strip()
             if s: return s
     salt = secrets.token_hex(32)
-    with open(SALT_FILE, 'w') as f: f.write(salt)
+    with open(salt_file(), 'w') as f: f.write(salt)
     return salt
 
 
-_salt = get_salt()
 
 _ENCRYPT_KEY_FILE = os.path.join(DATA_DIR, '.enckey')
 
@@ -1599,7 +1742,7 @@ def _record_failed_attempt(users, u):
     if user['failed_attempts'] >= MAX_LOGIN_ATTEMPTS:
         user['locked_until'] = time.time() + LOCKOUT_MINUTES * 60
         log_action('ACCOUNT_LOCKED', f'{u}: {user["failed_attempts"]} failed attempts')
-    save_json(USERS_FILE, users)
+    save_json(users_file(), users)
 
 def _reset_failed_attempts(users, u):
     if u not in users:
@@ -1607,7 +1750,7 @@ def _reset_failed_attempts(users, u):
     user = users[u]
     user.pop('failed_attempts', None)
     user.pop('locked_until', None)
-    save_json(USERS_FILE, users)
+    save_json(users_file(), users)
 
 def hash_password(pw):
     salt = secrets.token_hex(16)
@@ -1625,7 +1768,7 @@ def verify_password(pw, stored):
         except Exception:
             return False
     # 兼容旧版 SHA-256 哈希
-    return hashlib.sha256((pw + _salt).encode()).hexdigest() == stored
+    return hashlib.sha256((pw + get_salt()).encode()).hexdigest() == stored
 
 def is_old_password_hash(stored):
     return not stored.startswith('pbkdf2:')
@@ -1644,6 +1787,28 @@ def load_json(path, default=dict):
                 except: return default()
             return default()
     return default()
+
+
+_json_cache = {}
+_json_cache_lock = threading.Lock()
+
+def load_json_cached(path, default=dict):
+    """带 mtime_ns+size 校验的 JSON 读缓存，只给每个请求都要读的小文件用
+    （settings/users/sessions）。返回深拷贝，语义与 load_json 一致；
+    save_json 走 os.replace 会改 mtime，缓存自动失效。"""
+    try:
+        st = os.stat(path)
+        key = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return default()
+    with _json_cache_lock:
+        ent = _json_cache.get(path)
+        if ent and ent[0] == key:
+            return copy.deepcopy(ent[1])
+    data = load_json(path, default)
+    with _json_cache_lock:
+        _json_cache[path] = (key, data)
+    return copy.deepcopy(data)
 
 
 _json_write_lock = threading.Lock()
@@ -1672,7 +1837,11 @@ _log_lock = threading.Lock()
 def log_action(action, details=''):
     try:
         today = datetime.now().strftime('%Y-%m-%d')
-        log_file = os.path.join(LOG_DIR, f'{today}.log')
+        try:
+            d = log_dir()
+        except TenantRequired:
+            d = os.path.join(DATA_DIR, 'logs')  # SaaS 无租户上下文的服务级日志
+        log_file = os.path.join(d, f'{today}.log')
         ts = datetime.now().strftime('%H:%M:%S')
         line = f"[{ts}] {action}"
         if details: line += f" - {details}"
@@ -1796,7 +1965,7 @@ def _normalize_editor_font_presets(presets):
         return []
     clean = []
     seen = set()
-    fonts_root = os.path.normpath(USER_FONTS_DIR)
+    fonts_root = os.path.normpath(user_fonts_dir())
     for p in presets:
         if not isinstance(p, dict):
             continue
@@ -1807,7 +1976,7 @@ def _normalize_editor_font_presets(presets):
         ext = os.path.splitext(file_name)[1].lower()
         if ext not in FONT_EXTS:
             continue
-        fp = os.path.normpath(os.path.join(USER_FONTS_DIR, file_name))
+        fp = os.path.normpath(os.path.join(user_fonts_dir(), file_name))
         if not fp.startswith(fonts_root) or not os.path.isfile(fp):
             continue
         content_type, fmt = FONT_EXTS[ext]
@@ -1837,7 +2006,7 @@ def _looks_like_font(raw, ext):
 
 
 def get_settings():
-    s = load_json(SETTINGS_FILE)
+    s = load_json_cached(settings_file())
     changed = False
     for k, v in DEFAULT_SETTINGS.items():
         if k not in s: s[k] = v; changed = True
@@ -1938,7 +2107,7 @@ def get_settings():
         idx = 0
         s['active_provider_idx'] = idx
         changed = True
-    if changed: save_json(SETTINGS_FILE, s)
+    if changed: save_json(settings_file(), s)
     # 解密所有预设的 api_key
     for p in presets:
         if p.get('api_key'):
@@ -1970,6 +2139,12 @@ def get_settings():
         s['base_url'] = active.get('base_url', '')
         s['api_key'] = active.get('api_key', '')
         s['model'] = active.get('model', '')
+    if LUCA_SAAS:
+        # AI 提供商强制走 Coobox 计费网关；内部密钥只在服务端进程内流转，
+        # /api/settings 返回浏览器前必须抹掉 api_key（见 Handler 两处）。
+        s['base_url'] = LUCA_AI_GATEWAY
+        s['model'] = LUCA_AI_MODEL
+        s['api_key'] = f'{LUCA_INTERNAL_SECRET}:{_TENANT.get() or ""}'
     return s
 
 
@@ -1984,7 +2159,7 @@ def _save_settings_with_encrypted_keys(settings):
         save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
     if save_settings.get('search_api_key'):
         save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
-    save_json(SETTINGS_FILE, save_settings)
+    save_json(settings_file(), save_settings)
 
 
 def _activate_local_llm_provider():
@@ -2124,15 +2299,15 @@ def get_book_dir(book_id):
     The knowledge-base layer historically accepts a ``book_id``. Work-level
     readthrough keeps that API but stores its files under works/<id>/shared.
     """
-    work_path = os.path.join(WORKS_DIR, book_id)
+    work_path = os.path.join(works_dir(), book_id)
     if str(book_id).startswith('work_') or os.path.isdir(work_path):
         return get_work_kb_dir(book_id)
-    return os.path.join(BOOKS_DIR, book_id)
+    return os.path.join(books_dir(), book_id)
 
 
 def get_work_dir(work_id):
     """COO v2: 世界观级共享目录。"""
-    d = os.path.join(WORKS_DIR, work_id)
+    d = os.path.join(works_dir(), work_id)
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -2145,12 +2320,12 @@ def get_work_kb_dir(work_id):
 
 
 def get_book_meta(book_id):
-    p = os.path.join(BOOKS_DIR, book_id, 'meta.json')
+    p = os.path.join(books_dir(), book_id, 'meta.json')
     return load_json(p) if os.path.exists(p) else None
 
 
 def get_work_meta(work_id):
-    p = os.path.join(WORKS_DIR, work_id, 'meta.json')
+    p = os.path.join(works_dir(), work_id, 'meta.json')
     return load_json(p) if os.path.exists(p) else None
 
 
@@ -2173,7 +2348,7 @@ def _create_child_book(work_id, title='第一卷', create_first_chapter=True):
     if not work:
         raise ValueError('作品不存在')
     bid = _new_local_id('book')
-    bd = os.path.join(BOOKS_DIR, bid)
+    bd = os.path.join(books_dir(), bid)
     ch_dir = os.path.join(bd, 'chapters')
     os.makedirs(ch_dir, exist_ok=True)
     os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
@@ -2236,7 +2411,7 @@ def _create_work(title='新作品', first_book_title='第一卷', create_first_c
 
 
 def _work_lore_items(work_id):
-    lore_dir = os.path.join(WORKS_DIR, work_id, 'lore')
+    lore_dir = os.path.join(works_dir(), work_id, 'lore')
     items = []
     if not os.path.isdir(lore_dir):
         return items
@@ -2325,6 +2500,52 @@ def _sync_book_reading_items(book_id, deleted_chapter=None, reordered=None):
     save_work_meta(work_id, work)
 
 
+_chapter_brief_cache = {}
+_chapter_brief_lock = threading.Lock()
+
+def _chapter_brief(bid, cid):
+    """章节轻量信息（title/updated/word_count/content_hash），按文件 mtime_ns+size 缓存。
+    避免作品详情每次都重读全书章节 JSON 并对全文做 md5。文件不存在返回 None。
+    缓存键用文件完整路径：SaaS 多租户下不同租户可能有相同 bid/cid（.coo 导入保留原 id）。"""
+    p = os.path.join(get_book_dir(bid), 'chapters', f'{cid}.json')
+    try:
+        st = os.stat(p)
+    except OSError:
+        return None
+    key = (st.st_mtime_ns, st.st_size)
+    with _chapter_brief_lock:
+        ent = _chapter_brief_cache.get(p)
+        if ent and ent[0] == key:
+            return ent[1]
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            ch = json.load(f)
+    except Exception:
+        return None
+    content = ch.get('content', '') or ''
+    brief = {
+        'title': ch.get('title'),
+        'updated': ch.get('updated', 0),
+        'word_count': len(content),
+        'preview': ' '.join(content.split())[:120],
+        'content_hash': ch.get('content_hash') or hashlib.md5(content.encode()).hexdigest(),
+    }
+    with _chapter_brief_lock:
+        _chapter_brief_cache[p] = (key, brief)
+    return brief
+
+
+def _kb_chapter_map(kb_id):
+    """一次性取出某个 KB 里全部章节状态，避免每章一次 SQLite 连接。kb.db 不存在时不创建。"""
+    try:
+        if not os.path.exists(kb_storage.get_kb_path(kb_id)):
+            return {}
+        kb_storage.init_db(kb_id)
+        return {c['id']: c for c in kb_storage.list_chapters_db(kb_id)}
+    except Exception:
+        return {}
+
+
 def _work_detail(work_id):
     work = get_work_meta(work_id)
     if not work:
@@ -2334,19 +2555,24 @@ def _work_detail(work_id):
         save_work_meta(work_id, work)
     books = []
     chapter_lookup = {}
+    work_kb = _kb_chapter_map(work_id)
     for order_index, bid in enumerate(work.get('book_ids', []), start=1):
         meta = get_book_meta(bid)
         if not meta:
             continue
+        book_kb = _kb_chapter_map(bid)
         chapters = []
         for idx, cid in enumerate(meta.get('chapter_order') or []):
-            ch = _read_chapter_file(bid, cid) or {}
-            ch_hash = ch.get('content_hash') or hashlib.md5((ch.get('content', '') or '').encode()).hexdigest()
-            kb_ch = None
-            try:
-                kb_storage.init_db(bid)
-                kb_ch = kb_storage.get_chapter(bid, cid)
-            except: pass
+            brief = _chapter_brief(bid, cid)
+            if brief:
+                title = brief['title'] if brief['title'] is not None else f'第{idx + 1}章'
+                ch_updated = brief['updated']
+                word_count = brief['word_count']
+                ch_hash = brief['content_hash']
+            else:
+                title, ch_updated, word_count = f'第{idx + 1}章', 0, 0
+                ch_hash = hashlib.md5(b'').hexdigest()
+            kb_ch = book_kb.get(cid)
             rr_status = 'unread'
             if kb_ch:
                 kb_status = kb_ch.get('status') or 'pending'
@@ -2357,10 +2583,7 @@ def _work_detail(work_id):
                     rr_status = 'skipped'
             # Also check work-level KB (COO v2 shared knowledge base)
             if rr_status == 'unread':
-                try:
-                    kb_storage.init_db(work_id)
-                    w_ch = kb_storage.get_chapter(work_id, f'{bid}::{cid}')
-                except: w_ch = None
+                w_ch = work_kb.get(f'{bid}::{cid}')
                 if w_ch:
                     w_status = w_ch.get('status') or 'pending'
                     w_hash = w_ch.get('content_hash') or ''
@@ -2370,9 +2593,9 @@ def _work_detail(work_id):
                         rr_status = 'skipped'
             row = {
                 'id': cid,
-                'title': ch.get('title', f'第{idx + 1}章'),
-                'updated': ch.get('updated', 0),
-                'word_count': len(ch.get('content', '') or ''),
+                'title': title,
+                'updated': ch_updated,
+                'word_count': word_count,
                 'reread_status': rr_status,
             }
             chapters.append(row)
@@ -2386,7 +2609,7 @@ def _work_detail(work_id):
             'order': order_index,
             'created': meta.get('created', 0),
             'updated': meta.get('updated', 0),
-            'has_cover': os.path.isfile(os.path.join(BOOKS_DIR, bid, 'cover')),
+            'has_cover': os.path.isfile(os.path.join(books_dir(), bid, 'cover')),
             'chapter_count': len(chapters),
             'chapters': chapters,
         })
@@ -2399,7 +2622,7 @@ def _work_detail(work_id):
         _pos_base = max([x['pos'] for x in lore if isinstance(x.get('pos'), (int, float))] or [-1]) + 1
         for _off, _it in enumerate(_missing_pos):
             _it['pos'] = _pos_base + _off
-            save_json(os.path.join(WORKS_DIR, work_id, 'lore', f"{_it['id']}.json"), _it)
+            save_json(os.path.join(works_dir(), work_id, 'lore', f"{_it['id']}.json"), _it)
     lore.sort(key=lambda x: (x.get('pos', 0), x.get('id', '')))
     line = []
     placed_lore = set()
@@ -2435,7 +2658,7 @@ def _work_detail(work_id):
     return {
         'work': {
             **work,
-            'has_cover': os.path.isfile(os.path.join(WORKS_DIR, work_id, 'cover')),
+            'has_cover': os.path.isfile(os.path.join(works_dir(), work_id, 'cover')),
             'book_count': len(books),
             'chapter_count': sum(b['chapter_count'] for b in books),
         },
@@ -2448,17 +2671,17 @@ def _work_detail(work_id):
 
 def _migrate_legacy_series_to_works():
     """Convert old series containers into works without losing source data."""
-    if not os.path.isdir(BOOKS_DIR):
+    if not os.path.isdir(books_dir()):
         return
     existing = {}
-    if os.path.isdir(WORKS_DIR):
-        for wid in os.listdir(WORKS_DIR):
+    if os.path.isdir(works_dir()):
+        for wid in os.listdir(works_dir()):
             work = get_work_meta(wid)
             if work and work.get('legacy_group_id'):
                 existing[work['legacy_group_id']] = wid
-    archive_root = os.path.join(DATA_DIR, 'legacy_group_archive')
-    for legacy_id in sorted(os.listdir(BOOKS_DIR)):
-        legacy_dir = os.path.join(BOOKS_DIR, legacy_id)
+    archive_root = os.path.join(data_dir(), 'legacy_group_archive')
+    for legacy_id in sorted(os.listdir(books_dir())):
+        legacy_dir = os.path.join(books_dir(), legacy_id)
         if not os.path.isdir(legacy_dir):
             continue
         legacy = load_json(os.path.join(legacy_dir, 'meta.json'), dict)
@@ -2478,7 +2701,7 @@ def _migrate_legacy_series_to_works():
                 child['work_id'] = work_id
                 child['book_uid'] = child.get('book_uid') or _new_stable_uid()
                 child.pop('series_id', None)
-                save_json(os.path.join(BOOKS_DIR, child_id, 'meta.json'), child)
+                save_json(os.path.join(books_dir(), child_id, 'meta.json'), child)
                 reading_order.extend(
                     {'type': 'chapter', 'book': child_id, 'chapter': chapter_id}
                     for chapter_id in child.get('chapter_order', [])
@@ -2516,20 +2739,20 @@ def _migrate_legacy_series_to_works():
 
 def _ensure_work_index():
     """Migrate old containers and wrap standalone books as one-book works."""
-    os.makedirs(WORKS_DIR, exist_ok=True)
+    os.makedirs(works_dir(), exist_ok=True)
     _migrate_legacy_series_to_works()
     assigned = set()
-    for wid in os.listdir(WORKS_DIR):
+    for wid in os.listdir(works_dir()):
         work = get_work_meta(wid)
         if work:
             assigned.update(work.get('book_ids') or [])
-    if not os.path.isdir(BOOKS_DIR):
+    if not os.path.isdir(books_dir()):
         return
-    for bid in sorted(os.listdir(BOOKS_DIR)):
+    for bid in sorted(os.listdir(books_dir())):
         meta = get_book_meta(bid)
         if meta and 'coo_password' in meta:
             meta.pop('coo_password', None)
-            save_json(os.path.join(BOOKS_DIR, bid, 'meta.json'), meta)
+            save_json(os.path.join(books_dir(), bid, 'meta.json'), meta)
         if not meta or meta.get('type') == 'series' or bid in assigned:
             continue
         linked = meta.get('work_id')
@@ -2560,7 +2783,7 @@ def _ensure_work_index():
         }
         meta['work_id'] = wid
         meta['book_uid'] = meta.get('book_uid') or _new_stable_uid()
-        save_json(os.path.join(BOOKS_DIR, bid, 'meta.json'), meta)
+        save_json(os.path.join(books_dir(), bid, 'meta.json'), meta)
         os.makedirs(os.path.join(get_work_dir(wid), 'lore'), exist_ok=True)
         save_work_meta(wid, work)
 
@@ -2648,16 +2871,16 @@ def build_pyramid_context(book_id):
 
 
 def has_users():
-    return bool(load_json(USERS_FILE))
+    return bool(load_json_cached(users_file()))
 
 
 def _get_user_book_titles():
     """获取用户创建的所有书籍标题（排除内置示例书）"""
     titles = []
-    if not os.path.isdir(BOOKS_DIR):
+    if not os.path.isdir(books_dir()):
         return titles
-    for bid in os.listdir(BOOKS_DIR):
-        bd = os.path.join(BOOKS_DIR, bid)
+    for bid in os.listdir(books_dir()):
+        bd = os.path.join(books_dir(), bid)
         if not os.path.isdir(bd):
             continue
         # 跳过内置示例书
@@ -2679,8 +2902,8 @@ def _get_user_book_titles():
 def _build_bookshelf_tree():
     """构建作品、书本、章节三级目录树。"""
     works = []
-    if os.path.isdir(WORKS_DIR):
-        for work_id in sorted(os.listdir(WORKS_DIR)):
+    if os.path.isdir(works_dir()):
+        for work_id in sorted(os.listdir(works_dir())):
             work = get_work_meta(work_id)
             if not work:
                 continue
@@ -2767,7 +2990,7 @@ _sessions_lock = threading.RLock()
 def validate_session(token):
     if not token: return False
     with _sessions_lock:
-        sessions = load_json(SESSIONS_FILE, list)
+        sessions = load_json_cached(sessions_file(), list)
         now = time.time()
         for s in sessions:
             if hmac.compare_digest(s.get('token', ''), token) and s.get('expires', 0) > now:
@@ -2777,7 +3000,7 @@ def validate_session(token):
                     lifetime = s['expires'] - created
                     if lifetime > 0 and (s['expires'] - now) < lifetime * 0.5:
                         s['expires'] = now + lifetime
-                        save_json(SESSIONS_FILE, sessions)
+                        save_json(sessions_file(), sessions)
                 return True
         return False
 
@@ -2785,7 +3008,7 @@ def validate_session(token):
 def _session_remember(token):
     """Check if a session was created with 'remember' (90-day expiry)."""
     if not token: return False
-    sessions = load_json(SESSIONS_FILE, list)
+    sessions = load_json_cached(sessions_file(), list)
     now = time.time()
     for s in sessions:
         if hmac.compare_digest(s.get('token', ''), token) and s.get('expires', 0) > now:
@@ -2815,14 +3038,14 @@ def get_cookie_token(headers):
 def make_session(username, remember=False, device_name=''):
     token = secrets.token_hex(32)
     with _sessions_lock:
-        sessions = load_json(SESSIONS_FILE, list)
+        sessions = load_json(sessions_file(), list)
         sessions = [s for s in sessions if s.get('expires', 0) > time.time()]
         now = time.time()
         if remember:
             sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400 * 90, 'device_name': device_name})
         else:
             sessions.append({'token': token, 'user': username, 'created': now, 'expires': now + 86400, 'device_name': device_name})
-        save_json(SESSIONS_FILE, sessions)
+        save_json(sessions_file(), sessions)
     return token
 
 
@@ -2874,7 +3097,8 @@ def migrate_old_data():
     except: pass
 
 
-migrate_old_data()
+if not LUCA_SAAS:
+    migrate_old_data()  # v0 迁移只存在于单机老数据；租户目录都是新格式
 
 
 _CHAPTER_SPLIT_RE = re.compile(r'^\s*(?:第[一二三四五六七八九十百千万\d]+[章回节]|Chapter\s+\d+|CHAPTER\s+\d+)')
@@ -3648,7 +3872,8 @@ def _do_import_book_task(task_id, raw, filename, ext):
         bg_task_done(task_id, f'解析失败: {str(e)[:100]}')
 
 
-_import_builtin_books()
+if not LUCA_SAAS:
+    _import_builtin_books()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -3714,6 +3939,8 @@ class Handler(BaseHTTPRequestHandler):
         except: return {}
 
     def is_authed(self):
+        if LUCA_SAAS:
+            return _TENANT.get() is not None
         if not has_users(): return False
         token = get_cookie_token(self.headers)
         if not token: return False
@@ -3721,6 +3948,26 @@ class Handler(BaseHTTPRequestHandler):
             self._authed_token = token
             return True
         return False
+
+    def _saas_verify(self):
+        """SaaS 模式逐请求验签：X-Luca-User + X-Luca-Sign = HMAC-SHA256(secret, uid)。
+        通过则 set 租户 contextvar；失败 401。单机模式直接放行。"""
+        if not LUCA_SAAS:
+            return True
+        # keep-alive 连接复用线程，先清掉上一请求残留的租户
+        _TENANT.set(None)
+        uid = (self.headers.get('X-Luca-User') or '').strip()
+        sign = (self.headers.get('X-Luca-Sign') or '').strip()
+        if not uid or not sign or not LUCA_SAAS_SECRET or not is_valid_id(uid):
+            self.json_resp(401, {'error': 'SaaS 鉴权失败'})
+            return False
+        expected = hmac.new(LUCA_SAAS_SECRET.encode(), uid.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, sign):
+            self.json_resp(401, {'error': 'SaaS 鉴权失败'})
+            return False
+        _TENANT.set(uid)
+        _ensure_tenant_dirs(uid)
+        return True
 
     def _refresh_session_cookie(self):
         """Refresh session cookie on every authenticated response to prevent expiry."""
@@ -3734,9 +3981,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Set-Cookie', cookie)
 
     def _check_access(self):
+        if LUCA_SAAS:
+            # SaaS 只接受 Coobox 回环反代，不读租户 settings
+            if self.client_address[0] != '127.0.0.1':
+                self.json_resp(403, {'error': '仅限本机访问'})
+                return False
+            return True
         scope = '127.0.0.1'
         try:
-            s = load_json(SETTINGS_FILE)
+            s = load_json_cached(settings_file())
             scope = s.get('access_scope', '127.0.0.1')
         except Exception:
             pass
@@ -3747,8 +4000,11 @@ class Handler(BaseHTTPRequestHandler):
         return True
 
     def _check_csrf(self):
+        if LUCA_SAAS:
+            # 回环 + HMAC 验签即信任边界，浏览器 Origin 由 Coobox 反代层校验
+            return True
         try:
-            s = load_json(SETTINGS_FILE)
+            s = load_json_cached(settings_file())
             scope = s.get('access_scope', '127.0.0.1')
         except Exception:
             scope = '127.0.0.1'
@@ -3798,6 +4054,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         self._track_me()
+        if not self._saas_verify(): return
         if not self._check_access(): return
         # Refresh session cookie on every authenticated request to prevent expiry
         self.is_authed()
@@ -3882,6 +4139,9 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
         if path == '/api/auth/status':
+            if LUCA_SAAS:
+                self.json_resp(200, {'has_users': True, 'logged_in': True})
+                return
             self.json_resp(200, {'has_users': has_users(), 'logged_in': self.is_authed()})
             return
 
@@ -3894,7 +4154,33 @@ class Handler(BaseHTTPRequestHandler):
                     'theme_accent': gs.get('theme_accent', '#E8CC7A'),
                     'theme_mode': gs.get('theme_mode', ''),
                 }
+            elif LUCA_SAAS:
+                # 内部密钥绝不下发浏览器
+                gs['api_key'] = ''
             self.json_resp(200, gs); return
+
+        if path == '/api/saas-info':
+            if not LUCA_SAAS:
+                self.json_resp(200, {'saas': False}); return
+            uid = _TENANT.get() or ''
+            balance_cents = None
+            try:
+                req = urllib.request.Request(
+                    f'{LUCA_COOBOX_INTERNAL}/internal/balance?uid={quote(uid)}',
+                    headers={'X-Internal-Secret': LUCA_INTERNAL_SECRET,
+                             'Accept': 'application/json', 'User-Agent': 'LucaWriter/1.0'})
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    balance_cents = json.loads(resp.read().decode('utf-8')).get('balance_cents')
+            except Exception:
+                pass
+            self.json_resp(200, {
+                'saas': True,
+                'model': LUCA_AI_MODEL,
+                'quota_used': tenant_disk_usage(),
+                'quota_limit': LUCA_TENANT_QUOTA_MB * _MB,
+                'balance_cents': balance_cents,
+                'wallet_url': LUCA_WALLET_URL,
+            }); return
 
         if not self.is_authed():
             self.json_resp(401, {'error': '未登录'}); return
@@ -3952,8 +4238,8 @@ class Handler(BaseHTTPRequestHandler):
             ext = os.path.splitext(file_name)[1].lower()
             if ext not in FONT_EXTS:
                 self.json_resp(404, {'error': 'Not found'}); return
-            fp = os.path.normpath(os.path.join(USER_FONTS_DIR, file_name))
-            fonts_root = os.path.normpath(USER_FONTS_DIR)
+            fp = os.path.normpath(os.path.join(user_fonts_dir(), file_name))
+            fonts_root = os.path.normpath(user_fonts_dir())
             if not fp.startswith(fonts_root) or not os.path.isfile(fp):
                 self.json_resp(404, {'error': 'Not found'}); return
             with open(fp, 'rb') as f:
@@ -3968,7 +4254,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/sessions':
-            sessions = load_json(SESSIONS_FILE, list)
+            sessions = load_json(sessions_file(), list)
             now = time.time()
             t = get_cookie_token(self.headers)
             result = []
@@ -3987,11 +4273,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/works':
             _ensure_work_index()
             works = []
-            for wid in os.listdir(WORKS_DIR):
-                detail = _work_detail(wid)
-                if not detail:
+            for wid in os.listdir(works_dir()):
+                work = get_work_meta(wid)
+                if not work:
                     continue
-                work = detail['work']
+                # 列表只需要 meta 级信息，不走 _work_detail（那会读全部章节文件）
+                book_count = 0
+                chapter_count = 0
+                for bid in work.get('book_ids') or []:
+                    bmeta = get_book_meta(bid)
+                    if not bmeta:
+                        continue
+                    book_count += 1
+                    chapter_count += len(bmeta.get('chapter_order') or [])
                 works.append({
                     'id': wid,
                     'work_uid': work.get('work_uid', ''),
@@ -4000,9 +4294,9 @@ class Handler(BaseHTTPRequestHandler):
                     'description': work.get('description', ''),
                     'created': work.get('created', 0),
                     'updated': work.get('updated', 0),
-                    'book_count': work.get('book_count', 0),
-                    'chapter_count': work.get('chapter_count', 0),
-                    'has_cover': work.get('has_cover', False),
+                    'book_count': book_count,
+                    'chapter_count': chapter_count,
+                    'has_cover': os.path.isfile(os.path.join(works_dir(), wid, 'cover')),
                 })
             works.sort(key=lambda x: x.get('updated', 0), reverse=True)
             self.json_resp(200, {'works': works}); return
@@ -4016,11 +4310,11 @@ class Handler(BaseHTTPRequestHandler):
             if not sub:
                 self.json_resp(200, _work_detail(wid)); return
             if sub == 'cover':
-                cover_path = os.path.join(WORKS_DIR, wid, 'cover')
+                cover_path = os.path.join(works_dir(), wid, 'cover')
                 if not os.path.isfile(cover_path):
                     work = get_work_meta(wid) or {}
                     for bid in work.get('book_ids') or []:
-                        fallback = os.path.join(BOOKS_DIR, bid, 'cover')
+                        fallback = os.path.join(books_dir(), bid, 'cover')
                         if os.path.isfile(fallback):
                             cover_path = fallback
                             break
@@ -4049,6 +4343,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {
                     'server_url': work.get('coo_server_url', ''),
                     'email': work.get('coo_email', ''),
+                    'author': work.get('author', ''),
+                    'last_pen_name': str(load_json_cached(settings_file()).get('last_pen_name') or ''),
                 }); return
             if sub == 'sync-kb':
                 settings = get_settings()
@@ -4087,11 +4383,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(200, {'status': 'no_changes', 'msg': '所有书本已是最新'}); return
                 # Start background sync thread
                 tid = bg_task_start('work-sync-kb', wid, f'同步 {len(book_changes)} 本书')
-                threading.Thread(
-                    target=_do_work_sync_kb,
-                    args=(tid, wid, book_changes, settings),
-                    daemon=True,
-                ).start()
+                spawn_thread(_do_work_sync_kb, args=(tid, wid, book_changes, settings), heavy=True)
                 self.json_resp(200, {'status': 'started', 'books': len(book_changes), 'chapters': total_changed}); return
             if sub == 'readthrough':
                 action = parts[5] if len(parts) > 5 else 'status'
@@ -4201,8 +4493,8 @@ class Handler(BaseHTTPRequestHandler):
                         kb_storage.set_rt_state(bid, status='running', phase='启动中', total=total,
                                                 current_idx=-1, active_start_idx=-1, active_end_idx=-1,
                                                 pause_requested=0, stream_buffer='', error='')
-                        threading.Thread(target=_do_readthrough_wrapper, args=(bid, settings, cfg, False),
-                                         name=f'kb_readthrough_{bid}', daemon=True).start()
+                        spawn_thread(_do_readthrough_wrapper, args=(bid, settings, cfg, False),
+                                     name=f'kb_readthrough_{bid}', heavy=True)
                         started += 1
                     if started > 0:
                         kb_storage.init_db(wid)
@@ -4253,7 +4545,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:
                     self.json_resp(500, {'error': str(e)}); return
             if sub == 'lore-trash-list':
-                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                trash_dir = os.path.join(works_dir(), wid, 'lore', '.trash')
                 items = []
                 if os.path.isdir(trash_dir):
                     for fn in sorted(os.listdir(trash_dir), reverse=True):
@@ -4267,9 +4559,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/books':
             books = []
-            if os.path.isdir(BOOKS_DIR):
-                for d in sorted(os.listdir(BOOKS_DIR)):
-                    bp = os.path.join(BOOKS_DIR, d)
+            if os.path.isdir(books_dir()):
+                for d in sorted(os.listdir(books_dir())):
+                    bp = os.path.join(books_dir(), d)
                     if not os.path.isdir(bp): continue
                     meta = load_json(os.path.join(bp, 'meta.json'))
                     if not meta: continue
@@ -4316,22 +4608,26 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(404, {'error': '书本不存在'}); return
             meta = get_book_meta(bid) or {}
             ch_dir = os.path.join(get_book_dir(bid), 'chapters')
-            chapters = []
-            order = meta.get('chapter_order', [])
+            ids = []
             if os.path.isdir(ch_dir):
                 for fn in os.listdir(ch_dir):
                     if fn.endswith('.json') and not fn.startswith('.'):
-                        try:
-                            with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
-                                ch = json.load(f)
-                                ch['id'] = fn.replace('.json', '')
-                                chapters.append(ch)
-                        except: continue
-            ch_map = {c['id']: c for c in chapters}
+                        ids.append(fn[:-len('.json')])
+            id_set = set(ids)
+            ordered_ids, seen = [], set()
+            for cid in meta.get('chapter_order', []):
+                if cid in id_set and cid not in seen:
+                    ordered_ids.append(cid); seen.add(cid)
+            for cid in ids:
+                if cid not in seen:
+                    ordered_ids.append(cid); seen.add(cid)
+            # 只返回轻量字段，不带 content，大书打开不再整本传输
             ordered = []
-            for cid in order:
-                if cid in ch_map: ordered.append(ch_map.pop(cid))
-            ordered.extend(ch_map.values())
+            for cid in ordered_ids:
+                brief = _chapter_brief(bid, cid)
+                if not brief: continue
+                ordered.append({'id': cid, 'title': brief['title'], 'updated': brief['updated'],
+                                'word_count': brief['word_count'], 'preview': brief.get('preview', '')})
             self.json_resp(200, {'chapters': ordered, 'chapter_order': [c['id'] for c in ordered], 'current_chapter_id': meta.get('current_chapter_id', '')}); return
 
         if path.startswith('/api/book/') and '/chapter/' in path:
@@ -4721,11 +5017,7 @@ class Handler(BaseHTTPRequestHandler):
             cfg = get_readthrough_config(bid)
             if cfg.get('model'): settings['model'] = cfg['model']
             tid = bg_task_start('reread-incremental', bid, '更新')
-            threading.Thread(
-                target=_do_readthrough_wrapper,
-                args=(bid, settings, cfg, True),
-                daemon=True,
-            ).start()
+            spawn_thread(_do_readthrough_wrapper, args=(bid, settings, cfg, True), heavy=True)
             self.json_resp(200, {'status': 'started', 'chapters': changed_count}); return
 
         # 通用后台任务状态查询
@@ -4753,14 +5045,14 @@ class Handler(BaseHTTPRequestHandler):
                     active = []
                     with _bg_lock:
                         for t in _bg_tasks.values():
-                            if t['book_id'] == bid and t['status'] == 'running':
+                            if t['book_id'] == bid and t['status'] == 'running' and _bg_task_visible(t):
                                 active.append(dict(t))
                     self.json_resp(200, {'tasks': active}); return
             elif sub == 'list':
                 tasks = []
                 with _bg_lock:
                     for t in _bg_tasks.values():
-                        if t['book_id'] == bid:
+                        if t['book_id'] == bid and _bg_task_visible(t):
                             tasks.append(dict(t))
                 tasks.sort(key=lambda x: x.get('updated', 0), reverse=True)
                 self.json_resp(200, {'tasks': tasks}); return
@@ -4827,6 +5119,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         self._track_me()
+        if not self._saas_verify(): return
         if not self._check_access(): return
         if not self._check_csrf(): return
         # Refresh session cookie on every authenticated request to prevent expiry
@@ -4844,7 +5137,13 @@ class Handler(BaseHTTPRequestHandler):
         if data is None: self.json_resp(413, {'error': 'Too large'}); return
 
         if path == '/api/auth/status':
+            if LUCA_SAAS:
+                self.json_resp(200, {'has_users': True, 'logged_in': True}); return
             self.json_resp(200, {'has_users': has_users(), 'logged_in': self.is_authed()}); return
+
+        # SaaS 模式自带账号体系停用，登录/登出/改密一律拒绝（认证由 Coobox 负责）
+        if LUCA_SAAS and path.startswith('/api/auth/'):
+            self.json_resp(403, {'error': 'SaaS 模式不支持此操作'}); return
 
         if path == '/api/auth/setup':
             if has_users(): self.json_resp(403, {'error': '已有用户'}); return
@@ -4857,7 +5156,7 @@ class Handler(BaseHTTPRequestHandler):
             if not u: self.json_resp(400, {'error': '请输入用户名'}); return
             # 密码可以为空（不设密码直接登录）
             pw_hash = hash_password(p) if p else ''
-            save_json(USERS_FILE, {u: {'password': pw_hash, 'created': time.time()}})
+            save_json(users_file(), {u: {'password': pw_hash, 'created': time.time()}})
             token = make_session(u, remember=remember, device_name=device_name)
             log_action('SETUP', u)
             max_age = 7776000 if remember else 86400
@@ -4874,7 +5173,7 @@ class Handler(BaseHTTPRequestHandler):
             if not u: self.json_resp(400, {'error': '请输入用户名'}); return
             if not check_rate_limit(f'login:{self.client_address[0]}', 10, 60):
                 self.json_resp(429, {'error': '请求过于频繁，请稍后再试'}); return
-            users = load_json(USERS_FILE)
+            users = load_json(users_file())
             if u not in users:
                 self.json_resp(401, {'error': '用户名或密码错误'}); return
             if _check_account_lockout(users, u):
@@ -4892,7 +5191,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True, 'username': u, 'has_password': False}, {'Set-Cookie': cookie}); return
             if not verify_password(p, pw_stored):
                 _record_failed_attempt(users, u)
-                users2 = load_json(USERS_FILE)
+                users2 = load_json(users_file())
                 failed = users2[u].get('failed_attempts', 0)
                 remaining = MAX_LOGIN_ATTEMPTS - failed
                 if remaining > 0:
@@ -4903,7 +5202,7 @@ class Handler(BaseHTTPRequestHandler):
             # 旧格式哈希自动升级为 PBKDF2
             if pw_stored and is_old_password_hash(pw_stored):
                 users[u]['password'] = hash_password(p)
-                save_json(USERS_FILE, users)
+                save_json(users_file(), users)
                 log_action('PW_UPGRADE', u)
             token = make_session(u, remember=remember, device_name=device_name)
             log_action('LOGIN', u)
@@ -4917,8 +5216,8 @@ class Handler(BaseHTTPRequestHandler):
             t = get_cookie_token(self.headers)
             if t:
                 with _sessions_lock:
-                    sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') != t]
-                    save_json(SESSIONS_FILE, sessions)
+                    sessions = [s for s in load_json(sessions_file(), list) if s.get('token') != t]
+                    save_json(sessions_file(), sessions)
             # prevent _refresh_session_cookie from re-setting the session cookie
             self._authed_token = None
             self.json_resp(200, {'ok': True}, {'Set-Cookie': 'session=; Path=/; Max-Age=0; SameSite=Lax'}); return
@@ -4932,10 +5231,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not success:
                     self.json_resp(403, {'error': f'验证失败: {msg}'}); return
                 # 验证通过，删除用户文件
-                if os.path.exists(USERS_FILE):
-                    os.remove(USERS_FILE)
-                if os.path.exists(SESSIONS_FILE):
-                    os.remove(SESSIONS_FILE)
+                if os.path.exists(users_file()):
+                    os.remove(users_file())
+                if os.path.exists(sessions_file()):
+                    os.remove(sessions_file())
                 log_action('RESET-PASSWORD', f'from {self.client_address[0]} (verified)')
                 self.json_resp(200, {'ok': True, 'message': '密码已重置，请重新创建账户'}); return
             else:
@@ -4955,6 +5254,8 @@ class Handler(BaseHTTPRequestHandler):
             }); return
 
         if path == '/api/editor-fonts':
+            qerr = check_tenant_quota()
+            if qerr: self.json_resp(413, {'error': qerr}); return
             filename = str(data.get('filename') or '')
             font_b64 = str(data.get('data') or '')
             ext = os.path.splitext(filename)[1].lower()
@@ -4974,7 +5275,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(400, {'error': '字体文件格式不匹配'}); return
             fid = 'font_' + str(int(time.time() * 1000)) + '_' + secrets.token_hex(4)
             file_name = fid + ext
-            fp = os.path.join(USER_FONTS_DIR, file_name)
+            fp = os.path.join(user_fonts_dir(), file_name)
             with open(fp, 'wb') as f:
                 f.write(raw)
             settings = get_settings()
@@ -4997,7 +5298,7 @@ class Handler(BaseHTTPRequestHandler):
                 save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
             if save_settings.get('search_api_key'):
                 save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
-            save_json(SETTINGS_FILE, save_settings)
+            save_json(settings_file(), save_settings)
             self.json_resp(200, {'ok': True, 'font': preset, 'settings': get_settings()}); return
 
         if path == '/api/editor-fonts/delete':
@@ -5010,8 +5311,8 @@ class Handler(BaseHTTPRequestHandler):
                 settings['editor_font_preset_id'] = ''
             if target:
                 file_name = os.path.basename(target.get('file') or '')
-                fp = os.path.normpath(os.path.join(USER_FONTS_DIR, file_name))
-                fonts_root = os.path.normpath(USER_FONTS_DIR)
+                fp = os.path.normpath(os.path.join(user_fonts_dir(), file_name))
+                fonts_root = os.path.normpath(user_fonts_dir())
                 if fp.startswith(fonts_root) and os.path.isfile(fp):
                     try: os.remove(fp)
                     except Exception: pass
@@ -5025,7 +5326,7 @@ class Handler(BaseHTTPRequestHandler):
                 save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
             if save_settings.get('search_api_key'):
                 save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
-            save_json(SETTINGS_FILE, save_settings)
+            save_json(settings_file(), save_settings)
             self.json_resp(200, {'ok': True, 'settings': get_settings()}); return
 
         if path == '/api/sessions/revoke':
@@ -5033,7 +5334,7 @@ class Handler(BaseHTTPRequestHandler):
             if not prefix:
                 self.json_resp(400, {'error': '缺少 token_prefix'}); return
             with _sessions_lock:
-                sessions = load_json(SESSIONS_FILE, list)
+                sessions = load_json(sessions_file(), list)
                 removed = 0
                 new_sessions = []
                 for s in sessions:
@@ -5041,14 +5342,14 @@ class Handler(BaseHTTPRequestHandler):
                         removed += 1
                     else:
                         new_sessions.append(s)
-                save_json(SESSIONS_FILE, new_sessions)
+                save_json(sessions_file(), new_sessions)
             self.json_resp(200, {'ok': True, 'removed': removed}); return
 
         if path == '/api/sessions/revoke-all':
             t = get_cookie_token(self.headers)
             with _sessions_lock:
-                sessions = [s for s in load_json(SESSIONS_FILE, list) if s.get('token') == t]
-                save_json(SESSIONS_FILE, sessions)
+                sessions = [s for s in load_json(sessions_file(), list) if s.get('token') == t]
+                save_json(sessions_file(), sessions)
             log_action('REVOKE_ALL', f'kept token: {t[:12] if t else "none"}')
             self.json_resp(200, {'ok': True}); return
 
@@ -5058,12 +5359,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(400, {'error': '无活动会话'}); return
             name = data.get('device_name', '').strip()[:50]
             with _sessions_lock:
-                sessions = load_json(SESSIONS_FILE, list)
+                sessions = load_json(sessions_file(), list)
                 for s in sessions:
                     if s.get('token') == t:
                         s['device_name'] = name
                         break
-                save_json(SESSIONS_FILE, sessions)
+                save_json(sessions_file(), sessions)
             self.json_resp(200, {'ok': True, 'device_name': name}); return
 
         if path == '/api/works/create':
@@ -5095,6 +5396,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True, 'book': book}); return
 
             if action == 'import-volume':
+                qerr = check_tenant_quota()
+                if qerr: self.json_resp(413, {'error': qerr}); return
                 filename = data.get('filename', '')
                 file_b64 = data.get('data', '')
                 if not filename or not file_b64:
@@ -5124,7 +5427,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(400, {'error': '未能解析出章节'}); return
                 vol_title = book_title or os.path.splitext(os.path.basename(filename))[0]
                 bid = _new_local_id('book')
-                bd = os.path.join(BOOKS_DIR, bid)
+                bd = os.path.join(books_dir(), bid)
                 ch_dir = os.path.join(bd, 'chapters')
                 os.makedirs(ch_dir, exist_ok=True)
                 os.makedirs(os.path.join(bd, 'trash'), exist_ok=True)
@@ -5202,7 +5505,7 @@ class Handler(BaseHTTPRequestHandler):
                     'pos': _next_pos,
                     'updated': time.time(),
                 }
-                lore_dir = os.path.join(WORKS_DIR, wid, 'lore')
+                lore_dir = os.path.join(works_dir(), wid, 'lore')
                 os.makedirs(lore_dir, exist_ok=True)
                 save_json(os.path.join(lore_dir, f'{lid}.json'), item)
                 work.setdefault('reading_order', []).append({'type': 'lore', 'ref': lid})
@@ -5213,7 +5516,7 @@ class Handler(BaseHTTPRequestHandler):
                 lid = str(data.get('lore_id') or data.get('ref') or '')
                 if not is_valid_id(lid):
                     self.json_resp(400, {'error': '设定 ID 无效'}); return
-                lore_path = os.path.join(WORKS_DIR, wid, 'lore', f'{lid}.json')
+                lore_path = os.path.join(works_dir(), wid, 'lore', f'{lid}.json')
                 item = load_json(lore_path, dict)
                 if not item:
                     self.json_resp(404, {'error': '档案不存在'}); return
@@ -5250,6 +5553,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True}); return
 
             if action == 'upload-cover':
+                qerr = check_tenant_quota()
+                if qerr: self.json_resp(413, {'error': qerr}); return
                 cover_b64 = data.get('cover', '')
                 try:
                     if ',' in cover_b64:
@@ -5259,7 +5564,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(400, {'error': '封面数据无效'}); return
                 if not cover_raw or len(cover_raw) > 20 * _MB:
                     self.json_resp(400, {'error': '封面为空或过大'}); return
-                with open(os.path.join(WORKS_DIR, wid, 'cover'), 'wb') as f:
+                with open(os.path.join(works_dir(), wid, 'cover'), 'wb') as f:
                     f.write(cover_raw)
                 save_work_meta(wid, work)
                 self.json_resp(200, {'ok': True}); return
@@ -5269,10 +5574,10 @@ class Handler(BaseHTTPRequestHandler):
                 lid = str(data.get('lore_id') or '')
                 if not is_valid_id(lid):
                     self.json_resp(400, {'error': '档案 ID 无效'}); return
-                lore_path = os.path.join(WORKS_DIR, wid, 'lore', f'{lid}.json')
+                lore_path = os.path.join(works_dir(), wid, 'lore', f'{lid}.json')
                 if not os.path.isfile(lore_path):
                     self.json_resp(404, {'error': '档案不存在'}); return
-                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                trash_dir = os.path.join(works_dir(), wid, 'lore', '.trash')
                 os.makedirs(trash_dir, exist_ok=True)
                 # Record original position in reading_order for restore
                 ro = work.get('reading_order', [])
@@ -5295,11 +5600,11 @@ class Handler(BaseHTTPRequestHandler):
                 lid = str(data.get('lore_id') or '')
                 if not is_valid_id(lid):
                     self.json_resp(400, {'error': '档案 ID 无效'}); return
-                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                trash_dir = os.path.join(works_dir(), wid, 'lore', '.trash')
                 trash_path = os.path.join(trash_dir, f'{lid}.json')
                 if not os.path.isfile(trash_path):
                     self.json_resp(404, {'error': '回收站中未找到该档案'}); return
-                lore_dir = os.path.join(WORKS_DIR, wid, 'lore')
+                lore_dir = os.path.join(works_dir(), wid, 'lore')
                 # Restore file
                 shutil.move(trash_path, os.path.join(lore_dir, f'{lid}.json'))
                 # Read meta for original position
@@ -5321,7 +5626,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True}); return
 
             if action == 'lore-trash-list':
-                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                trash_dir = os.path.join(works_dir(), wid, 'lore', '.trash')
                 items = []
                 if os.path.isdir(trash_dir):
                     for fn in sorted(os.listdir(trash_dir), reverse=True):
@@ -5334,7 +5639,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'trash': items}); return
 
             if action == 'lore-trash-clear':
-                trash_dir = os.path.join(WORKS_DIR, wid, 'lore', '.trash')
+                trash_dir = os.path.join(works_dir(), wid, 'lore', '.trash')
                 if os.path.isdir(trash_dir):
                     shutil.rmtree(trash_dir, ignore_errors=True)
                 self.json_resp(200, {'ok': True}); return
@@ -5344,7 +5649,7 @@ class Handler(BaseHTTPRequestHandler):
                 order = data.get('order')
                 if not isinstance(order, list):
                     self.json_resp(400, {'error': 'order 必须是数组'}); return
-                lore_dir = os.path.join(WORKS_DIR, wid, 'lore')
+                lore_dir = os.path.join(works_dir(), wid, 'lore')
                 valid = {x['id']: x for x in _work_lore_items(wid)}
                 pos = 0
                 for lid in order:
@@ -5362,8 +5667,8 @@ class Handler(BaseHTTPRequestHandler):
 
             if action == 'delete':
                 for bid in work.get('book_ids') or []:
-                    shutil.rmtree(os.path.join(BOOKS_DIR, bid), ignore_errors=True)
-                shutil.rmtree(os.path.join(WORKS_DIR, wid), ignore_errors=True)
+                    shutil.rmtree(os.path.join(books_dir(), bid), ignore_errors=True)
+                shutil.rmtree(os.path.join(works_dir(), wid), ignore_errors=True)
                 log_action('WORK_DELETE', wid)
                 self.json_resp(200, {'ok': True}); return
 
@@ -5373,6 +5678,12 @@ class Handler(BaseHTTPRequestHandler):
                     output = _build_coo_zip(wid, pen_name)
                 except Exception as e:
                     self.json_resp(500, {'error': f'打包失败: {str(e)[:160]}'}); return
+                if pen_name:
+                    work = get_work_meta(wid) or work
+                    if work.get('author') != pen_name:
+                        work['author'] = pen_name
+                        save_work_meta(wid, work)
+                    _remember_pen_name(pen_name)
                 safe_title = re.sub(
                     r'[^\w\u4e00-\u9fff.\-]', '_', work.get('title', 'work')
                 )[:100] or 'work'
@@ -5399,6 +5710,48 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True}); return
 
             if action == 'coo-push':
+                if LUCA_SAAS:
+                    # 内部直传：服务端回环调 Coobox，不走 email+password 公网登录
+                    uid = _TENANT.get() or ''
+                    pen_name = str(data.get('pen_name') or '').strip()
+                    try:
+                        coo_bytes = _build_coo_zip(
+                            wid, pen_name or str(work.get('author') or '').strip() or uid
+                        )
+                        upload_req = urllib.request.Request(
+                            LUCA_COOBOX_INTERNAL + '/internal/coo-upload', data=coo_bytes, method='POST',
+                            headers={
+                                'Content-Type': 'application/vnd.coobox.coo+zip',
+                                'X-Internal-Secret': LUCA_INTERNAL_SECRET,
+                                'X-Luca-User': uid,
+                                'X-COO-Filename': quote(work.get('title', 'work') + '.coo', safe=''),
+                                'Accept': 'application/json',
+                                'User-Agent': 'LucaWriter/1.0',
+                            },
+                        )
+                        with urllib.request.urlopen(upload_req, timeout=120) as resp:
+                            upload_result = json.loads(resp.read().decode('utf-8'))
+                        if pen_name:
+                            work = get_work_meta(wid) or work
+                            work['author'] = pen_name
+                            _remember_pen_name(pen_name)
+                            save_work_meta(wid, work)
+                        self.json_resp(200, {
+                            'ok': True, 'size': len(coo_bytes),
+                            'work_id': upload_result.get('work_id'),
+                            'updated': bool(upload_result.get('updated')),
+                        }); return
+                    except urllib.error.HTTPError as e:
+                        try:
+                            body = json.loads(e.read().decode('utf-8', errors='replace'))
+                            message = body.get('error') or body.get('message')
+                        except Exception:
+                            message = ''
+                        self.json_resp(e.code if 400 <= e.code < 600 else 502, {
+                            'error': message or f'Coobox 返回 HTTP {e.code}'
+                        }); return
+                    except Exception as e:
+                        self.json_resp(502, {'error': f'推送失败: {str(e)[:180]}'}); return
                 try:
                     server_url = _normalize_coobox_server_url(
                         data.get('server_url') or work.get('coo_server_url')
@@ -5409,11 +5762,14 @@ class Handler(BaseHTTPRequestHandler):
                 password = str(data.get('password') or '')
                 if not server_url or not email or not password:
                     self.json_resp(400, {'error': '请填写网站地址、邮箱和密码'}); return
+                pen_name = str(data.get('pen_name') or '').strip()
                 try:
                     login_body = json.dumps({'email': email, 'password': password}).encode('utf-8')
+                    # Cloudflare 浏览器完整性检查会以 1010 拒掉 Python-urllib 默认 UA
                     login_req = urllib.request.Request(
                         server_url + '/api/client/login', data=login_body, method='POST',
-                        headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+                        headers={'Content-Type': 'application/json', 'Accept': 'application/json',
+                                 'User-Agent': 'LucaWriter/1.0'},
                     )
                     with urllib.request.urlopen(login_req, timeout=20, context=_get_ssl_context()) as resp:
                         login_result = json.loads(resp.read().decode('utf-8'))
@@ -5421,7 +5777,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not token:
                         raise ValueError(login_result.get('error') or '服务器未返回登录令牌')
                     coo_bytes = _build_coo_zip(
-                        wid, str(data.get('pen_name') or work.get('author') or email).strip()
+                        wid, pen_name or str(work.get('author') or email).strip()
                     )
                     upload_req = urllib.request.Request(
                         server_url + '/api/client/upload', data=coo_bytes, method='POST',
@@ -5430,6 +5786,7 @@ class Handler(BaseHTTPRequestHandler):
                             'Authorization': 'Bearer ' + token,
                             'X-COO-Filename': quote(work.get('title', 'work') + '.coo', safe=''),
                             'Accept': 'application/json',
+                            'User-Agent': 'LucaWriter/1.0',
                         },
                     )
                     with urllib.request.urlopen(upload_req, timeout=120, context=_get_ssl_context()) as resp:
@@ -5437,6 +5794,9 @@ class Handler(BaseHTTPRequestHandler):
                     work = get_work_meta(wid) or work
                     work['coo_server_url'] = server_url
                     work['coo_email'] = email
+                    if pen_name:
+                        work['author'] = pen_name
+                        _remember_pen_name(pen_name)
                     work.pop('coo_password', None)
                     save_work_meta(wid, work)
                     self.json_resp(200, {
@@ -5457,6 +5817,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(502, {'error': f'推送失败: {str(e)[:180]}'}); return
 
             if action == 'merge-coo':
+                qerr = check_tenant_quota()
+                if qerr: self.json_resp(413, {'error': qerr}); return
                 file_b64 = str(data.get('data') or '')
                 if not file_b64:
                     self.json_resp(400, {'error': '缺少 COO 文件'}); return
@@ -5472,25 +5834,21 @@ class Handler(BaseHTTPRequestHandler):
                     if source_work_id and get_work_meta(source_work_id):
                         source = get_work_meta(source_work_id) or {}
                         for source_bid in source.get('book_ids') or []:
-                            shutil.rmtree(os.path.join(BOOKS_DIR, source_bid), ignore_errors=True)
-                        shutil.rmtree(os.path.join(WORKS_DIR, source_work_id), ignore_errors=True)
+                            shutil.rmtree(os.path.join(books_dir(), source_bid), ignore_errors=True)
+                        shutil.rmtree(os.path.join(works_dir(), source_work_id), ignore_errors=True)
                     self.json_resp(400, {'error': str(e)}); return
                 except Exception as e:
                     if source_work_id and get_work_meta(source_work_id):
                         source = get_work_meta(source_work_id) or {}
                         for source_bid in source.get('book_ids') or []:
-                            shutil.rmtree(os.path.join(BOOKS_DIR, source_bid), ignore_errors=True)
-                        shutil.rmtree(os.path.join(WORKS_DIR, source_work_id), ignore_errors=True)
+                            shutil.rmtree(os.path.join(books_dir(), source_bid), ignore_errors=True)
+                        shutil.rmtree(os.path.join(works_dir(), source_work_id), ignore_errors=True)
                     self.json_resp(500, {'error': f'合并失败: {str(e)[:180]}'}); return
 
                 settings = get_settings()
                 started = bool(settings.get('base_url') and settings.get('model'))
                 if started:
-                    threading.Thread(
-                        target=_do_work_readthrough_wrapper,
-                        args=(wid, settings, {}, False),
-                        daemon=True,
-                    ).start()
+                    spawn_thread(_do_work_readthrough_wrapper, args=(wid, settings, {}, False), heavy=True)
                 self.json_resp(200, {
                     'ok': True,
                     'work': (detail or {}).get('work', {}),
@@ -5535,11 +5893,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(200, {'status': 'no_changes', 'msg': '所有书本已是最新'}); return
                 # Start background sync thread
                 tid = bg_task_start('work-sync-kb', wid, f'同步 {len(book_changes)} 本书')
-                threading.Thread(
-                    target=_do_work_sync_kb,
-                    args=(tid, wid, book_changes, settings),
-                    daemon=True,
-                ).start()
+                spawn_thread(_do_work_sync_kb, args=(tid, wid, book_changes, settings), heavy=True)
                 self.json_resp(200, {'status': 'started', 'books': len(book_changes), 'chapters': total_changed}); return
 
             if action == 'readthrough':
@@ -5563,11 +5917,8 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             self.json_resp(409, {'error': '作品通读正在进行中'}); return
                     resume = bool(data.get('resume'))
-                    threading.Thread(
-                        target=_do_work_readthrough_wrapper,
-                        args=(wid, settings, data.get('config') or {}, resume),
-                        daemon=True,
-                    ).start()
+                    spawn_thread(_do_work_readthrough_wrapper,
+                                 args=(wid, settings, data.get('config') or {}, resume), heavy=True)
                     self.json_resp(200, {'status': 'started'}); return
                 if sub in ('pause', 'stop'):
                     kb_storage.init_db(wid)
@@ -5590,6 +5941,8 @@ class Handler(BaseHTTPRequestHandler):
             self.json_resp(200, {'book': meta, 'work': work}); return
 
         if path == '/api/books/import':
+            qerr = check_tenant_quota()
+            if qerr: self.json_resp(413, {'error': qerr}); return
             filename = data.get('filename', '')
             file_b64 = data.get('data', '')
             if not filename or not file_b64:
@@ -5649,6 +6002,8 @@ class Handler(BaseHTTPRequestHandler):
             }); return
 
         if path == '/api/books/import-coo':
+            qerr = check_tenant_quota()
+            if qerr: self.json_resp(413, {'error': qerr}); return
             file_b64 = data.get('data', '')
             if not file_b64:
                 self.json_resp(400, {'error': '缺少文件'}); return
@@ -5697,7 +6052,7 @@ class Handler(BaseHTTPRequestHandler):
             if not meta: self.json_resp(404, {'error': '书本不存在'}); return
             meta['title'] = data.get('title', meta['title'])
             meta['updated'] = time.time()
-            save_json(os.path.join(BOOKS_DIR, bid, 'meta.json'), meta)
+            save_json(os.path.join(books_dir(), bid, 'meta.json'), meta)
             if meta.get('work_id') and get_work_meta(meta['work_id']):
                 work = get_work_meta(meta['work_id'])
                 save_work_meta(meta['work_id'], work)
@@ -5708,7 +6063,7 @@ class Handler(BaseHTTPRequestHandler):
             if not is_valid_id(bid): self.json_resp(400, {'error': 'Invalid ID'}); return
             meta = get_book_meta(bid) or {}
             work_id = meta.get('work_id')
-            bd = os.path.join(BOOKS_DIR, bid)
+            bd = os.path.join(books_dir(), bid)
             if os.path.isdir(bd): shutil.rmtree(bd, ignore_errors=True)
             work = get_work_meta(work_id) if work_id else None
             if work:
@@ -5720,7 +6075,7 @@ class Handler(BaseHTTPRequestHandler):
                 if work['book_ids']:
                     save_work_meta(work_id, work)
                 else:
-                    shutil.rmtree(os.path.join(WORKS_DIR, work_id), ignore_errors=True)
+                    shutil.rmtree(os.path.join(works_dir(), work_id), ignore_errors=True)
             log_action('BOOK_DELETE', bid)
             self.json_resp(200, {'ok': True}); return
 
@@ -5750,8 +6105,7 @@ class Handler(BaseHTTPRequestHandler):
                 if existing and existing.get('status') == 'running':
                     self.json_resp(200, {'task_id': existing['id'], 'status': 'running'}); return
                 tid = bg_task_start('import-verify', bid, '导入校验')
-                threading.Thread(target=_do_import_verify_task,
-                                 args=(tid, bid, settings), daemon=True).start()
+                spawn_thread(_do_import_verify_task, args=(tid, bid, settings), heavy=True)
                 self.json_resp(200, {'task_id': tid, 'status': 'running'}); return
 
             if action == 'consistency-check':
@@ -5811,9 +6165,8 @@ class Handler(BaseHTTPRequestHandler):
                 if existing_rr and existing_rr.get('status') == 'running':
                     self.json_resp(400, {'error': '已有局部重读任务在进行中'}); return
                 tid = bg_task_start('kb-reread', bid, '局部重读')
-                threading.Thread(target=_do_kb_reread_task,
-                                 args=(tid, bid, chapter_ids, correction, focus_texts, settings),
-                                 daemon=True).start()
+                spawn_thread(_do_kb_reread_task,
+                             args=(tid, bid, chapter_ids, correction, focus_texts, settings), heavy=True)
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'timeline-arrange':
@@ -5957,7 +6310,7 @@ class Handler(BaseHTTPRequestHandler):
                         bg_task_done(task_id)
                     except Exception as e:
                         bg_task_done(task_id, str(e))
-                threading.Thread(target=do_timeline_task, args=(tid, bid, settings), daemon=True).start()
+                spawn_thread(do_timeline_task, args=(tid, bid, settings))
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'timeline-detail':
@@ -6031,9 +6384,9 @@ class Handler(BaseHTTPRequestHandler):
             if action == 'chapter' and data.get('id'):
                 cid = data['id']
                 if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
-                _debug_content = data.get('content', '')
-                print(f'[DEBUG_SAVE] cid={cid} title={repr(data.get("title",""))} content_type={type(_debug_content).__name__} content_repr={repr(_debug_content)[:200]}', flush=True)
-                ch = {'id': cid, 'title': data.get('title', ''), 'content': _debug_content, 'updated': time.time()}
+                qerr = check_tenant_quota()
+                if qerr: self.json_resp(413, {'error': qerr}); return
+                ch = {'id': cid, 'title': data.get('title', ''), 'content': data.get('content', ''), 'updated': time.time()}
                 save_json(os.path.join(ch_dir, f"{cid}.json"), ch)
                 meta = get_book_meta(bid) or {}
                 is_new = cid not in meta.get('chapter_order', [])
@@ -6759,7 +7112,7 @@ class Handler(BaseHTTPRequestHandler):
                                             existing_cc = bg_task_get_by_book_type(book_id, 'chapter-complete')
                                             if not (existing_cc and existing_cc.get('status') == 'running'):
                                                 tid_cc = bg_task_start('chapter-complete', book_id, f'本章通读')
-                                                threading.Thread(target=_do_chapter_complete_wrapper, args=(tid_cc, book_id, ccid, settings_cc), daemon=True).start()
+                                                spawn_thread(_do_chapter_complete_wrapper, args=(tid_cc, book_id, ccid, settings_cc), heavy=True)
                                                 complete_chapter_triggered = True
                                                 tool_calls.append({'type': 'complete_chapter', 'label': '本章通读', 'status': 'running'})
                             except Exception as e:
@@ -6804,11 +7157,9 @@ class Handler(BaseHTTPRequestHandler):
                                         existing_rr = bg_task_get_by_book_type(book_id, 'kb-reread')
                                         if not (existing_rr and existing_rr.get('status') == 'running'):
                                             tid_rr = bg_task_start('kb-reread', book_id, '局部重读')
-                                            threading.Thread(
-                                                target=_do_kb_reread_task,
-                                                args=(tid_rr, book_id, chapter_ids, correction, focus_texts, settings_rr),
-                                                daemon=True,
-                                            ).start()
+                                            spawn_thread(_do_kb_reread_task,
+                                                         args=(tid_rr, book_id, chapter_ids, correction, focus_texts, settings_rr),
+                                                         heavy=True)
                                             kb_reread_started = True
                                             tool_calls.append({'type': 'kb_reread', 'label': '局部重读', 'status': 'running'})
                             except Exception as e:
@@ -6881,11 +7232,9 @@ class Handler(BaseHTTPRequestHandler):
                                     existing_rr = bg_task_get_by_book_type(book_id, 'kb-reread')
                                     if not (existing_rr and existing_rr.get('status') == 'running'):
                                         tid_rr = bg_task_start('kb-reread', book_id, '局部重读')
-                                        threading.Thread(
-                                            target=_do_kb_reread_task,
-                                            args=(tid_rr, book_id, chapter_ids, user_text, [], settings_rr),
-                                            daemon=True,
-                                        ).start()
+                                        spawn_thread(_do_kb_reread_task,
+                                                     args=(tid_rr, book_id, chapter_ids, user_text, [], settings_rr),
+                                                     heavy=True)
                                         kb_reread_started = True
                                         kb_reread_fallback = True
                                         tool_calls.append({'type': 'kb_reread', 'label': '局部重读（自动兜底）', 'status': 'running'})
@@ -6933,7 +7282,7 @@ class Handler(BaseHTTPRequestHandler):
                             if _network_search_mode == 'auto':
                                 result = result + '\n\n🌐 正在操作浏览器…'
                                 bg_task_update(task_id, result=result, reasoning=reason, progress=50)
-                                threading.Thread(target=_do_browser_search_launch, args=(task_id, book_id, _browse_query or '', cfg_settings, _browse_link or None), daemon=True).start()
+                                spawn_thread(_do_browser_search_launch, args=(task_id, book_id, _browse_query or '', cfg_settings, _browse_link or None))
                             else:
                                 # 'on' 模式：等待用户确认
                                 result = result + '\n\n🔍 Luca 想搜索：' + (_browse_query or _browse_link or '')
@@ -6968,7 +7317,7 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             _replace_pending_chat_msg(chat_sid, task_id, '[错误: ' + err_str + ']')
                             bg_task_done(task_id, err_str)
-                threading.Thread(target=do_chat_task, args=(tid, bid, _chat_sid, text, settings, data.get('history', [])), daemon=True).start()
+                spawn_thread(do_chat_task, args=(tid, bid, _chat_sid, text, settings, data.get('history', [])))
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'annotations':
@@ -7293,7 +7642,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(400, {'error': '已有本章通读任务在进行中'}); return
                 tid = bg_task_start('chapter-complete', bid, f'本章通读')
                 text = data.get('text', None)
-                threading.Thread(target=_do_chapter_complete_wrapper, args=(tid, bid, cid, settings, text), daemon=True).start()
+                spawn_thread(_do_chapter_complete_wrapper, args=(tid, bid, cid, settings, text), heavy=True)
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'reader-prediction':
@@ -7340,7 +7689,7 @@ class Handler(BaseHTTPRequestHandler):
                         bg_task_done(task_id)
                     except Exception as e:
                         bg_task_done(task_id, str(e))
-                threading.Thread(target=do_prediction_task, args=(tid, bid, settings), daemon=True).start()
+                spawn_thread(do_prediction_task, args=(tid, bid, settings))
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             if action == 'import':
@@ -7455,11 +7804,13 @@ class Handler(BaseHTTPRequestHandler):
                         bg_task_done(task_id)
                     except Exception as e:
                         bg_task_done(task_id, str(e))
-                threading.Thread(target=do_update_source, args=(tid, bid, text, chapter_title, settings), daemon=True).start()
+                spawn_thread(do_update_source, args=(tid, bid, text, chapter_title, settings))
                 self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
             # ---- 封面上传 ----
             if action == 'upload-cover':
+                qerr = check_tenant_quota()
+                if qerr: self.json_resp(413, {'error': qerr}); return
                 cover_b64 = data.get('cover', '')
                 if not cover_b64:
                     self.json_resp(400, {'error': '缺少封面数据'}); return
@@ -7479,6 +7830,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True}); return
 
         if path == '/api/import-book':
+            qerr = check_tenant_quota()
+            if qerr: self.json_resp(413, {'error': qerr}); return
             filename = data.get('filename', '')
             file_b64 = data.get('data', '')
             if not filename or not file_b64:
@@ -7496,7 +7849,7 @@ class Handler(BaseHTTPRequestHandler):
             log_action('IMPORT_BOOK_START', f'{filename} size={file_size} ext={ext}')
             # 解析放后台线程：避免通过 Cloudflare Tunnel 等代理时 HTTP 响应被 100s 空闲超时切掉
             tid = bg_task_start('import-book', '', filename)
-            threading.Thread(target=_do_import_book_task, args=(tid, raw, filename, ext), daemon=True).start()
+            spawn_thread(_do_import_book_task, args=(tid, raw, filename, ext))
             self.json_resp(200, {'task_id': tid, 'async': True}); return
 
         if path == '/api/settings':
@@ -7505,6 +7858,8 @@ class Handler(BaseHTTPRequestHandler):
             settings = get_settings()
             log_action('SETTINGS_SAVE', f"request model_context_length={data.get('model_context_length', 'NOT_PRESENT')}")
             for k in DEFAULT_SETTINGS:
+                if LUCA_SAAS and k in _SAAS_LOCKED_SETTINGS:
+                    continue
                 if k in data:
                     v = data[k]
                     if k in ('ai_frequency', 'ai_max_tokens', 'outline_frequency', 'model_context_length', 'content_font_size', 'editor_font_weight'):
@@ -7616,13 +7971,15 @@ class Handler(BaseHTTPRequestHandler):
                 save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
             if save_settings.get('search_api_key'):
                 save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
-            save_json(SETTINGS_FILE, save_settings)
+            save_json(settings_file(), save_settings)
             log_action('SETTINGS_SAVE_OK', f"saved model_context_length={settings.get('model_context_length')}")
             # 如果当前激活预设不是本地 Llama.cpp，自动关闭本地服务器
             active_preset = (settings.get('provider_presets') or [{}])[settings.get('active_provider_idx', 0)]
             active_name = (active_preset.get('name') or '').lower()
             if 'llama.cpp' not in active_name and _local_llm_status():
                 _stop_local_llm()
+            if LUCA_SAAS:
+                settings['api_key'] = ''
             self.json_resp(200, settings); return
 
         if path == '/api/local-llm/start':
@@ -7698,7 +8055,7 @@ class Handler(BaseHTTPRequestHandler):
                         _save_chat_history(sid, [{'type': 'ai', 'text': reply.strip()}])
                     except Exception as e:
                         log_action('WARMUP_ERR', str(e)[:200])
-                threading.Thread(target=_warmup, args=(sid,), daemon=True).start()
+                spawn_thread(_warmup, args=(sid,))
             self.json_resp(200, {'id': sid}); return
 
         if path.startswith('/api/chat-session/') and path.endswith('/messages'):
@@ -7846,7 +8203,7 @@ class Handler(BaseHTTPRequestHandler):
                         save_settings['api_key'] = _encrypt_str(save_settings['api_key'])
                     if save_settings.get('search_api_key'):
                         save_settings['search_api_key'] = _encrypt_str(save_settings['search_api_key'])
-                    save_json(SETTINGS_FILE, save_settings)
+                    save_json(settings_file(), save_settings)
                     self.json_resp(200, {'models': ml[:50]})
             except Exception as e:
                 err = str(e)[:200]
@@ -7919,7 +8276,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(400, {'error': '搜索请求为空'}); return
             if task_id:
                 bg_task_update(task_id, pending_browse=None, result='🌐 正在操作浏览器…（用户已确认）', progress=50)
-                threading.Thread(target=_do_browser_search_launch, args=(task_id, bid, query or '', settings, link or None), daemon=True).start()
+                spawn_thread(_do_browser_search_launch, args=(task_id, bid, query or '', settings, link or None))
             self.json_resp(200, {'success': True}); return
 
         # 浏览器搜索拒绝
@@ -7974,8 +8331,8 @@ class Handler(BaseHTTPRequestHandler):
                 kb_storage.set_rt_state(bid, status='running', phase='启动中', total=total,
                                         current_idx=-1, active_start_idx=-1, active_end_idx=-1,
                                         pause_requested=0, stream_buffer='', error='')
-                threading.Thread(target=_do_readthrough_wrapper, args=(bid, settings, cfg, False),
-                                 name=f'kb_readthrough_{bid}', daemon=True).start()
+                spawn_thread(_do_readthrough_wrapper, args=(bid, settings, cfg, False),
+                             name=f'kb_readthrough_{bid}', heavy=True)
                 self.json_resp(200, {'status': 'started'}); return
             if path.endswith('/pause') or path.endswith('/readthrough/pause') or path.endswith('/stop') or path.endswith('/readthrough/stop'):
                 kb_storage.set_rt_state(bid, phase='暂停中')
@@ -7998,8 +8355,8 @@ class Handler(BaseHTTPRequestHandler):
                 kb_storage.set_rt_state(bid, status='running', phase='继续中',
                                         active_start_idx=-1, active_end_idx=-1,
                                         pause_requested=0)
-                threading.Thread(target=_do_readthrough_wrapper, args=(bid, settings, cfg, True),
-                                 name=f'kb_readthrough_{bid}', daemon=True).start()
+                spawn_thread(_do_readthrough_wrapper, args=(bid, settings, cfg, True),
+                             name=f'kb_readthrough_{bid}', heavy=True)
                 self.json_resp(200, {'status': 'started'}); return
             if path.endswith('/reset') or path.endswith('/readthrough/reset') or path.endswith('/clear') or path.endswith('/readthrough/clear'):
                 st = kb_storage.get_rt_state(bid)
@@ -8034,12 +8391,12 @@ class Handler(BaseHTTPRequestHandler):
                 settings = get_settings()
                 if not settings.get('base_url') or not settings.get('model'):
                     self.json_resp(400, {'error': '请先配置API'}); return
-                threading.Thread(target=kb_pipeline.do_chapter_complete, args=(bid, chapter_id, settings), daemon=True).start()
+                spawn_thread(kb_pipeline.do_chapter_complete, args=(bid, chapter_id, settings), heavy=True)
                 self.json_resp(200, {'status': 'started'}); return
             if path.endswith('/embedding/rebuild') or path.endswith('/readthrough/embedding/rebuild'):
                 settings = get_settings()
                 kb_storage.embed_clear(bid)
-                threading.Thread(target=kb_pipeline.incremental_embed, args=(bid, settings), daemon=True).start()
+                spawn_thread(kb_pipeline.incremental_embed, args=(bid, settings), heavy=True)
                 self.json_resp(200, {'status': 'started'}); return
             if path.endswith('/config') or path.endswith('/readthrough/config'):
                 cfg = get_readthrough_config(bid)
@@ -8234,7 +8591,7 @@ class Handler(BaseHTTPRequestHandler):
                     bg_task_done(task_id)
                 except Exception as e:
                     bg_task_done(task_id, str(e))
-            threading.Thread(target=do_generate_task, args=(tid, bid, gen_type, settings), daemon=True).start()
+            spawn_thread(do_generate_task, args=(tid, bid, gen_type, settings))
             self.json_resp(200, {'status': 'started', 'task_id': tid}); return
 
         if path == '/api/restart-server':
@@ -8260,9 +8617,14 @@ def bg_task_start(task_type, book_id, name):
             'id': tid, 'type': task_type, 'book_id': book_id, 'name': name,
             'status': 'running', 'progress': 0, 'result': '', 'error': '',
             'reasoning': '', 'created': time.time(), 'updated': time.time(),
-            'stream_buffer': '',
+            'stream_buffer': '', 'tenant': _TENANT.get(),
         }
     return tid
+
+
+def _bg_task_visible(t):
+    """任务的租户过滤：单机两边都是 None 恒真；SaaS 下 book_id 可能跨租户重复（.coo 导入保留原 id），必须按租户隔离。"""
+    return t.get('tenant') == _TENANT.get()
 
 def bg_task_update(tid, **kwargs):
     with _bg_lock:
@@ -8291,19 +8653,20 @@ def bg_task_should_stop(tid):
 
 def bg_task_get(tid):
     with _bg_lock:
-        return dict(_bg_tasks.get(tid, {})) if tid in _bg_tasks else None
+        t = _bg_tasks.get(tid)
+        return dict(t) if t and _bg_task_visible(t) else None
 
 def bg_task_get_by_book_type(book_id, task_type):
     with _bg_lock:
         for t in _bg_tasks.values():
-            if t['book_id'] == book_id and t['type'] == task_type:
+            if t['book_id'] == book_id and t['type'] == task_type and _bg_task_visible(t):
                 return dict(t)
         return None
 
 def bg_task_get_running_luca_chat():
     with _bg_lock:
         for t in _bg_tasks.values():
-            if t.get('type') == 'chat' and t.get('status') == 'running':
+            if t.get('type') == 'chat' and t.get('status') == 'running' and _bg_task_visible(t):
                 return dict(t)
         return None
 
@@ -8458,21 +8821,21 @@ def _legacy_chat_history_path(entity_id):
 
 def _iter_legacy_chat_history_paths():
     paths = []
-    if os.path.isdir(BOOKS_DIR):
-        for d in sorted(os.listdir(BOOKS_DIR)):
-            bd = os.path.join(BOOKS_DIR, d)
+    if os.path.isdir(books_dir()):
+        for d in sorted(os.listdir(books_dir())):
+            bd = os.path.join(books_dir(), d)
             if not os.path.isdir(bd):
                 continue
             paths.append(os.path.join(bd, 'chat_history.json'))
             msg_dir = os.path.join(bd, 'messages')
             if os.path.isdir(msg_dir):
                 paths.extend(glob.glob(os.path.join(msg_dir, '*.json')))
-    if os.path.isdir(MESSAGES_DIR):
-        paths.extend(glob.glob(os.path.join(MESSAGES_DIR, '*.json')))
+    if os.path.isdir(messages_dir()):
+        paths.extend(glob.glob(os.path.join(messages_dir(), '*.json')))
     uniq = []
     seen = set()
     for p in paths:
-        if p == GLOBAL_CHAT_HISTORY_FILE or p in seen or not os.path.isfile(p):
+        if p == global_chat_history_file() or p in seen or not os.path.isfile(p):
             continue
         seen.add(p)
         uniq.append(p)
@@ -8480,7 +8843,7 @@ def _iter_legacy_chat_history_paths():
     return uniq
 
 def _migrate_global_chat_history_locked():
-    if os.path.exists(GLOBAL_CHAT_HISTORY_FILE):
+    if os.path.exists(global_chat_history_file()):
         return
     merged = []
     seen_exact = set()
@@ -8501,24 +8864,24 @@ def _migrate_global_chat_history_locked():
             seen_exact.add(sig)
             merged.append(m)
     if merged:
-        save_json(GLOBAL_CHAT_HISTORY_FILE, merged)
+        save_json(global_chat_history_file(), merged)
 
 def _get_chat_history_path(entity_id):
     if entity_id and entity_id.startswith('cs_'):
-        return os.path.join(CHAT_SESSIONS_DIR, f'{entity_id}.json')
-    return GLOBAL_CHAT_HISTORY_FILE
+        return os.path.join(chat_sessions_dir(), f'{entity_id}.json')
+    return global_chat_history_file()
 
 def _list_chat_sessions():
     sessions = []
-    if not os.path.isdir(CHAT_SESSIONS_DIR):
+    if not os.path.isdir(chat_sessions_dir()):
         return sessions
-    for f in os.listdir(CHAT_SESSIONS_DIR):
+    for f in os.listdir(chat_sessions_dir()):
         if not f.endswith('.json'):
             continue
         sid = f[:-5]
         if not sid.startswith('cs_'):
             continue
-        path = os.path.join(CHAT_SESSIONS_DIR, f)
+        path = os.path.join(chat_sessions_dir(), f)
         msgs = load_json(path, list)
         title = ''
         preview = ''
@@ -8540,20 +8903,20 @@ def _list_chat_sessions():
 def _create_chat_session():
     import uuid
     sid = 'cs_' + uuid.uuid4().hex[:10]
-    save_json(os.path.join(CHAT_SESSIONS_DIR, f'{sid}.json'), [])
+    save_json(os.path.join(chat_sessions_dir(), f'{sid}.json'), [])
     return sid
 
 def _migrate_global_to_sessions():
-    existing = [f for f in os.listdir(CHAT_SESSIONS_DIR) if f.endswith('.json')] if os.path.isdir(CHAT_SESSIONS_DIR) else []
+    existing = [f for f in os.listdir(chat_sessions_dir()) if f.endswith('.json')] if os.path.isdir(chat_sessions_dir()) else []
     if existing:
         return
-    if not os.path.exists(GLOBAL_CHAT_HISTORY_FILE):
+    if not os.path.exists(global_chat_history_file()):
         return
-    msgs = load_json(GLOBAL_CHAT_HISTORY_FILE, list)
+    msgs = load_json(global_chat_history_file(), list)
     if not msgs:
         return
     sid = _create_chat_session()
-    save_json(os.path.join(CHAT_SESSIONS_DIR, f'{sid}.json'), msgs)
+    save_json(os.path.join(chat_sessions_dir(), f'{sid}.json'), msgs)
 
 def _load_chat_history(entity_id):
     path = _get_chat_history_path(entity_id)
@@ -9143,9 +9506,16 @@ def _read_chapter_file(bid, cid):
     return None
 
 def get_ai_providers():
-    return load_json(AI_PROVIDERS_FILE, dict)
-
-AI_PROVIDERS_FILE = os.path.join(DATA_DIR, 'ai_providers.json')
+    if LUCA_SAAS:
+        return {'providers': [{
+            'name': 'Coobox 云模型',
+            'base_url': LUCA_AI_GATEWAY,
+            'api_key': f'{LUCA_INTERNAL_SECRET}:{_TENANT.get() or ""}',
+            'model': LUCA_AI_MODEL,
+            'mode': 'basic',
+            'template_id': 'openai',
+        }]}
+    return load_json(ai_providers_file(), dict)
 
 # ===== 本地 Llama.cpp 服务器控制 =====
 _LOCAL_LLM_RUNTIME_DIR = os.environ.get('LOCAL_LLM_RUNTIME_DIR') or os.environ.get('LOCAL_LLM_DIR') or os.path.normpath(os.path.join(SCRIPT_DIR, '..', 'local_llm'))
@@ -9325,7 +9695,7 @@ def _sync_local_provider_url(port):
     """把"本地 Llama.cpp" provider preset 的 base_url 同步到真实端口。
     用户首次进设置面板看到的 URL 会跟当前实际端口一致。"""
     try:
-        s = load_json(SETTINGS_FILE) or {}
+        s = load_json(settings_file()) or {}
         presets = s.get('provider_presets') or []
         changed = False
         for p in presets:
@@ -9341,7 +9711,7 @@ def _sync_local_provider_url(port):
                 s['api_key'] = ''
                 s['model'] = presets[idx].get('model', '')
             s['provider_presets'] = presets
-            save_json(SETTINGS_FILE, s)
+            save_json(settings_file(), s)
     except Exception:
         pass
 
@@ -11251,7 +11621,7 @@ def _schedule_timeline_arrange(book_id, cfg_settings):
     if existing and existing.get('status') == 'running':
         return False
     tid_tl = bg_task_start('timeline-arrange', book_id, '时间线编排')
-    threading.Thread(target=_run_timeline_arrange_task, args=(tid_tl, book_id, cfg_settings), daemon=True).start()
+    spawn_thread(_run_timeline_arrange_task, args=(tid_tl, book_id, cfg_settings))
     return True
 
 
@@ -11433,7 +11803,7 @@ def _schedule_kb_after_write_jobs(book_id, cfg_settings, include_prediction=True
             existing = bg_task_get_by_book_type(book_id, 'prediction')
             if not existing or existing.get('status') != 'running':
                 tid_pr = bg_task_start('prediction', book_id, '更新预言')
-                threading.Thread(target=_run_prediction_update_task, args=(tid_pr, book_id, cfg_settings), daemon=True).start()
+                spawn_thread(_run_prediction_update_task, args=(tid_pr, book_id, cfg_settings))
         except Exception as e:
             log_action('PREDICTION_SCHEDULE_ERR', str(e)[:120])
 
@@ -11546,10 +11916,10 @@ def do_summary(bid, settings, config=None, resume=False):
 
 def _migrate_old_books():
     """扫描旧书，迁移到新版 KB 数据库"""
-    if not os.path.isdir(BOOKS_DIR):
+    if not os.path.isdir(books_dir()):
         return
-    for bid in os.listdir(BOOKS_DIR):
-        bd = os.path.join(BOOKS_DIR, bid)
+    for bid in os.listdir(books_dir()):
+        bd = os.path.join(books_dir(), bid)
         if not os.path.isdir(bd) or bid.startswith('builtin_'):
             continue
         meta_path = os.path.join(bd, 'meta.json')
@@ -11592,8 +11962,8 @@ def _find_work_for_book(book_id):
     meta = get_book_meta(book_id)
     if meta and meta.get('work_id'):
         return meta['work_id']
-    if os.path.isdir(WORKS_DIR):
-        for wid in os.listdir(WORKS_DIR):
+    if os.path.isdir(works_dir()):
+        for wid in os.listdir(works_dir()):
             work = get_work_meta(wid)
             if work and book_id in (work.get('book_ids') or []):
                 return wid
@@ -11616,66 +11986,80 @@ def enqueue_auto_kb(book_id, chapter_id, reason='save'):
 
 
 def _auto_kb_scheduler_loop():
-    """全局守护线程：每 15s 检查脏队列，安静消费。"""
+    """全局守护线程：每 15s 检查脏队列，安静消费。SaaS 模式逐租户扫描。"""
     import time as _time
-    _last_edit = {}  # work_id -> last_edit_time
+    _last_edit = {}  # (租户前缀+)work_id -> last_edit_time
     idle_delay = 45
+
+    def _scan_once(key_prefix=''):
+        settings = get_settings()
+        if not settings.get('auto_kb_update', True):
+            return
+        if not os.path.isdir(works_dir()):
+            return
+        for wid in os.listdir(works_dir()):
+            k = key_prefix + wid
+            if k in _AUTO_KB_RUNNING:
+                continue
+            work = get_work_meta(wid)
+            if not work:
+                continue
+            # 不打断用户主动通读
+            try:
+                kb_storage.init_db(wid)
+                st = kb_storage.get_rt_state(wid)
+            except Exception:
+                st = None
+            if st and st.get('status') in ('running', 'starting', 'resuming'):
+                continue
+            # 幂等复位
+            kb_storage.reset_stale_dirty(wid)
+            pending = kb_storage.count_pending_dirty(wid)
+            if pending == 0:
+                continue
+            # 去抖
+            lle = _last_edit.get(k, 0)
+            if _time.time() - lle < idle_delay:
+                continue
+            # 消费一批
+            _AUTO_KB_RUNNING[k] = True
+            try:
+                batch = kb_storage.dequeue_dirty_batch(wid, limit=5)
+                if not batch:
+                    continue
+                from kb_pipeline import sync_work_chapters, incremental_embed, render_markdown_views
+                for item in batch:
+                    try:
+                        changed = {item['book_id']: [item['chapter_id']]}
+                        sync_work_chapters(wid, changed, settings)
+                        kb_storage.mark_dirty_done(wid, item['id'])
+                    except Exception as e:
+                        kb_storage.mark_dirty_done(wid, item['id'], error=str(e)[:200])
+                # 嵌入增量
+                try:
+                    incremental_embed(wid, settings)
+                except Exception:
+                    pass
+                try:
+                    render_markdown_views(wid)
+                except Exception:
+                    pass
+            finally:
+                _AUTO_KB_RUNNING.pop(k, None)
+
     while True:
         _time.sleep(15)
         try:
-            settings = get_settings()
-            if not settings.get('auto_kb_update', True):
-                continue
-            if not os.path.isdir(WORKS_DIR):
-                continue
-            for wid in os.listdir(WORKS_DIR):
-                if wid in _AUTO_KB_RUNNING:
-                    continue
-                work = get_work_meta(wid)
-                if not work:
-                    continue
-                # 不打断用户主动通读
-                try:
-                    kb_storage.init_db(wid)
-                    st = kb_storage.get_rt_state(wid)
-                except Exception:
-                    st = None
-                if st and st.get('status') in ('running', 'starting', 'resuming'):
-                    continue
-                # 幂等复位
-                kb_storage.reset_stale_dirty(wid)
-                pending = kb_storage.count_pending_dirty(wid)
-                if pending == 0:
-                    continue
-                # 去抖
-                lle = _last_edit.get(wid, 0)
-                if _time.time() - lle < idle_delay:
-                    continue
-                # 消费一批
-                _AUTO_KB_RUNNING[wid] = True
-                try:
-                    batch = kb_storage.dequeue_dirty_batch(wid, limit=5)
-                    if not batch:
-                        continue
-                    from kb_pipeline import sync_work_chapters, incremental_embed, render_markdown_views
-                    for item in batch:
-                        try:
-                            changed = {item['book_id']: [item['chapter_id']]}
-                            sync_work_chapters(wid, changed, settings)
-                            kb_storage.mark_dirty_done(wid, item['id'])
-                        except Exception as e:
-                            kb_storage.mark_dirty_done(wid, item['id'], error=str(e)[:200])
-                    # 嵌入增量
+            if LUCA_SAAS:
+                for uid in _list_tenants():
+                    _TENANT.set(uid)
                     try:
-                        incremental_embed(wid, settings)
+                        _scan_once(uid + ':')
                     except Exception:
                         pass
-                    try:
-                        render_markdown_views(wid)
-                    except Exception:
-                        pass
-                finally:
-                    _AUTO_KB_RUNNING.pop(wid, None)
+                _TENANT.set(None)
+            else:
+                _scan_once()
         except Exception:
             pass
 
@@ -11694,15 +12078,16 @@ class _QuietThreadingHTTPServer(ThreadingHTTPServer):
 
 def run():
     bind_host = '127.0.0.1'
-    try:
-        s = load_json(SETTINGS_FILE)
-        scope = s.get('access_scope', '127.0.0.1')
-        if scope in ('127.0.0.1', '0.0.0.0'):
-            bind_host = scope
-    except Exception:
-        pass
-    _migrate_old_books()
-    _ensure_work_index()
+    if not LUCA_SAAS:
+        try:
+            s = load_json(settings_file())
+            scope = s.get('access_scope', '127.0.0.1')
+            if scope in ('127.0.0.1', '0.0.0.0'):
+                bind_host = scope
+        except Exception:
+            pass
+        _migrate_old_books()
+        _ensure_work_index()
     # 提前生成硬件策略缓存。embeddings.py 会读它决定嵌入模型放 CPU 还是 GPU，
     # 必须在 _warmup_embedding_backend 触发首次加载之前就位。
     try:
@@ -11711,6 +12096,7 @@ def run():
         log_action('STRATEGY_PREWARM_ERR', str(e)[:200])
     # 后台预热本地嵌入模型，避免用户首次给 Luca 发消息时遭遇 1-2 秒冷启动加载延迟。
     # 仅本地模型有"磁盘→RAM"加载开销；API 嵌入跳过以免浪费配额。
+    # SaaS 跳过：warmup 依赖租户 settings，启动时无租户上下文。
     def _warmup_embedding_backend():
         try:
             from embeddings import get_embedding_backend, LocalEmbedding
@@ -11721,18 +12107,27 @@ def run():
                 log_action('EMBEDDING_WARMUP', f'backend={backend.backend_id} elapsed={time.time()-t0:.2f}s')
         except Exception as e:
             log_action('EMBEDDING_WARMUP_ERR', str(e)[:200])
-    threading.Thread(target=_warmup_embedding_backend, name='embedding_warmup', daemon=True).start()
-    # P4: 启动时复位未完成的脏队列
-    try:
-        if os.path.isdir(WORKS_DIR):
-            for wid in os.listdir(WORKS_DIR):
-                try:
-                    kb_storage.init_db(wid)
-                    kb_storage.reset_stale_dirty(wid)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    if not LUCA_SAAS:
+        threading.Thread(target=_warmup_embedding_backend, name='embedding_warmup', daemon=True).start()
+    # P4: 启动时复位未完成的脏队列（SaaS 逐租户）
+    def _reset_dirty_queues():
+        try:
+            if os.path.isdir(works_dir()):
+                for wid in os.listdir(works_dir()):
+                    try:
+                        kb_storage.init_db(wid)
+                        kb_storage.reset_stale_dirty(wid)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    if LUCA_SAAS:
+        for _uid in _list_tenants():
+            _TENANT.set(_uid)
+            _reset_dirty_queues()
+        _TENANT.set(None)
+    else:
+        _reset_dirty_queues()
     # P4: 启动自动 KB 更新调度器
     threading.Thread(target=_auto_kb_scheduler_loop, name='auto_kb_scheduler', daemon=True).start()
     server = _QuietThreadingHTTPServer((bind_host, PORT), Handler)
