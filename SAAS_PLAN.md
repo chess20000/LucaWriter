@@ -195,6 +195,15 @@ usage 入表、余额耗尽返回 402；流式与非流式都验。
 
 > 每个 session 完成的内容、遇到的问题、对计划的修改，按时间倒序记在这里。
 
+- 2026-06-11 **阶段 4 后半（4b）完成，阶段 4 整体收口。** 改动仍在 `~/Documents/Coobox-prod`（**未提交**，同 4a 一并留待用户处理）。下一步：**阶段 5（Coobox 计费系统）**。
+  - 「我的」页入口（`templates/me.html`）：账号管理行加 `在线写作` 按钮 → `/write/`（target=_blank）。
+  - 内部接口（`app.py` 在线写作段末尾，`_internal_guard()` 验 `X-Internal-Secret` = env `LUCA_INTERNAL_SECRET`，未配置/不符一律 403）：
+    - `GET /internal/balance?uid=`：查 `wallets.balance_cents`；**wallets 表没建（阶段 5 才建）或无记录都回 `{balance_cents:null}`**，已按阶段 5 schema 建表实测查询路径可用。
+    - `POST /internal/coo-upload`：验 uid 存在且未禁用（403）→ 读原始 .coo 字节 → 复用 `import_coo(f, uid)`（同 `/api/client/upload` 的包装模式：ValueError→400、其余→500，文案进 `error` 字段供 LucaWriter 前端展示）；`X-COO-Filename` unquote 后作为 f.filename。响应 `{work_id, updated}` 与 LucaWriter SaaS coo-push 分支解析对齐。
+    - `csrf_protect` 豁免追加 `/internal/`（否则 POST 无表单 token 恒 400）。
+  - 验证（`/tmp/coobox_p4/smoke_4b.py`，9 项全过）：内部接口无/错 secret 403；balance 无表回 null、种 1234 后实时返回；coo-upload 未知用户 403/垃圾包体 400；**端到端**——经 `/write` 代理建作品 → coo-push 内部直传 → LucaWriter 构建+签名 .coo → Coobox 验签入库 `owner_id` 归属正确、笔名落 author、再推 `updated:true`；saas-info 经代理显示实时余额；/me 页含入口。
+  - 备忘：冒烟基建沿用 4a（`/tmp/coobox_p4/` venv+launcher+脚本），LucaWriter 测试进程需加 env `LUCA_INTERNAL_SECRET` + `LUCA_COOBOX_INTERNAL=http://127.0.0.1:28000`。
+
 - 2026-06-11 **阶段 4 前半（4a）完成：`/write` 反向代理。** 按用户要求阶段 4 拆两小步省额度；本次只做反代，**4b（剩余）= 「我的」页入口按钮 + `POST /internal/coo-upload` + `GET /internal/balance`**，下个 session 做。
   - 施工对象 `~/Documents/Coobox-prod/app.py`（**未提交**——该仓库本就有一批与本计划无关的未提交改动，留待用户处理；本次改动集中在文件末尾 `init_db()` 之前的「在线写作」段 + 4 处小改）：
     - 路由 `/write/` + `/write/<path:rest>`（GET/POST）：`require_login()` 墙（未登录 302 /login?next=）→ `http.client` 反代 `LUCA_UPSTREAM`（默认 `127.0.0.1:21000`，timeout 300s，LucaWriter SSE 自带 30s keepalive 撑连接）。
