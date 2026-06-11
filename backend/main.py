@@ -23,6 +23,7 @@ import urllib.error
 import threading
 import queue
 import contextvars
+import traceback
 from datetime import datetime
 from ipaddress import ip_network, ip_address
 from http.cookies import SimpleCookie
@@ -38,6 +39,10 @@ if not os.environ.get('SSL_CERT_FILE'):
             os.environ['SSL_CERT_FILE'] = _macos_cert
 
 import numpy as np
+
+# 直接执行 backend/main.py 时模块名是 __main__。知识库模块内部会 import main；
+# 先注册别名，避免加载第二份 main（尤其会产生第二个 _TENANT contextvar）。
+sys.modules.setdefault('main', sys.modules[__name__])
 
 import kb_pipeline
 import kb_storage
@@ -255,13 +260,38 @@ def tenant_disk_usage():
     return total
 
 
-def check_tenant_quota():
-    """SaaS 磁盘配额检查：超限返回错误消息，未超返回 None。单机恒 None。"""
+def invalidate_tenant_disk_usage():
+    """写入后清掉当前租户占用缓存，让配额和设置页立即反映真实值。"""
+    if not LUCA_SAAS:
+        return
+    with _disk_usage_lock:
+        _disk_usage_cache.pop(_TENANT.get(), None)
+
+
+def projected_file_growth(path, new_size):
+    """返回覆盖 path 后最多新增的字节数；只计增长，不把覆盖误算成整份新增。"""
+    try:
+        old_size = os.path.getsize(path)
+    except OSError:
+        old_size = 0
+    return max(0, int(new_size or 0) - old_size)
+
+
+def projected_json_growth(path, data):
+    raw_size = len(json.dumps(data, indent=2, ensure_ascii=False).encode('utf-8'))
+    return projected_file_growth(path, raw_size)
+
+
+def check_tenant_quota(extra_bytes=0):
+    """SaaS 磁盘配额检查，包含本次预计新增量。单机恒 None。"""
     if not LUCA_SAAS:
         return None
     used = tenant_disk_usage()
-    if used >= LUCA_TENANT_QUOTA_MB * _MB:
-        return f'存储空间不足，已用 {used / _MB:.1f} / {LUCA_TENANT_QUOTA_MB} MB'
+    limit = LUCA_TENANT_QUOTA_MB * _MB
+    projected = used + max(0, int(extra_bytes or 0))
+    if used >= limit or projected > limit:
+        label = '预计使用' if projected > used else '已用'
+        return f'存储空间不足，{label} {projected / _MB:.1f} / {LUCA_TENANT_QUOTA_MB} MB'
     return None
 
 FONT_EXTS = {'.ttf': ('font/ttf', 'truetype'), '.otf': ('font/otf', 'opentype')}
@@ -1823,6 +1853,7 @@ def save_json(path, data):
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             os.replace(tmp, path)
+            invalidate_tenant_disk_usage()
         except Exception:
             try:
                 if os.path.exists(tmp):
@@ -5254,8 +5285,6 @@ class Handler(BaseHTTPRequestHandler):
             }); return
 
         if path == '/api/editor-fonts':
-            qerr = check_tenant_quota()
-            if qerr: self.json_resp(413, {'error': qerr}); return
             filename = str(data.get('filename') or '')
             font_b64 = str(data.get('data') or '')
             ext = os.path.splitext(filename)[1].lower()
@@ -5276,6 +5305,8 @@ class Handler(BaseHTTPRequestHandler):
             fid = 'font_' + str(int(time.time() * 1000)) + '_' + secrets.token_hex(4)
             file_name = fid + ext
             fp = os.path.join(user_fonts_dir(), file_name)
+            qerr = check_tenant_quota(projected_file_growth(fp, len(raw)))
+            if qerr: self.json_resp(413, {'error': qerr}); return
             with open(fp, 'wb') as f:
                 f.write(raw)
             settings = get_settings()
@@ -5396,8 +5427,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True, 'book': book}); return
 
             if action == 'import-volume':
-                qerr = check_tenant_quota()
-                if qerr: self.json_resp(413, {'error': qerr}); return
                 filename = data.get('filename', '')
                 file_b64 = data.get('data', '')
                 if not filename or not file_b64:
@@ -5411,6 +5440,8 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(400, {'error': '文件数据无效'}); return
                 if len(raw) > 150 * 1024 * 1024:
                     self.json_resp(400, {'error': '文件超过 150MB'}); return
+                qerr = check_tenant_quota(len(raw))
+                if qerr: self.json_resp(413, {'error': qerr}); return
                 parser = IMPORT_PARSERS[ext]
                 result = parser(raw, filename)
                 cover_data = None
@@ -5553,8 +5584,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True}); return
 
             if action == 'upload-cover':
-                qerr = check_tenant_quota()
-                if qerr: self.json_resp(413, {'error': qerr}); return
                 cover_b64 = data.get('cover', '')
                 try:
                     if ',' in cover_b64:
@@ -5564,7 +5593,10 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(400, {'error': '封面数据无效'}); return
                 if not cover_raw or len(cover_raw) > 20 * _MB:
                     self.json_resp(400, {'error': '封面为空或过大'}); return
-                with open(os.path.join(works_dir(), wid, 'cover'), 'wb') as f:
+                cover_path = os.path.join(works_dir(), wid, 'cover')
+                qerr = check_tenant_quota(projected_file_growth(cover_path, len(cover_raw)))
+                if qerr: self.json_resp(413, {'error': qerr}); return
+                with open(cover_path, 'wb') as f:
                     f.write(cover_raw)
                 save_work_meta(wid, work)
                 self.json_resp(200, {'ok': True}); return
@@ -5817,8 +5849,6 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(502, {'error': f'推送失败: {str(e)[:180]}'}); return
 
             if action == 'merge-coo':
-                qerr = check_tenant_quota()
-                if qerr: self.json_resp(413, {'error': qerr}); return
                 file_b64 = str(data.get('data') or '')
                 if not file_b64:
                     self.json_resp(400, {'error': '缺少 COO 文件'}); return
@@ -5826,6 +5856,8 @@ class Handler(BaseHTTPRequestHandler):
                     raw = base64.b64decode(file_b64, validate=True)
                 except Exception:
                     self.json_resp(400, {'error': 'COO 文件数据无效'}); return
+                qerr = check_tenant_quota(len(raw))
+                if qerr: self.json_resp(413, {'error': qerr}); return
                 source_work_id = ''
                 try:
                     source_work_id, _, _ = _import_coo_zip(raw)
@@ -5941,8 +5973,6 @@ class Handler(BaseHTTPRequestHandler):
             self.json_resp(200, {'book': meta, 'work': work}); return
 
         if path == '/api/books/import':
-            qerr = check_tenant_quota()
-            if qerr: self.json_resp(413, {'error': qerr}); return
             filename = data.get('filename', '')
             file_b64 = data.get('data', '')
             if not filename or not file_b64:
@@ -5956,6 +5986,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(400, {'error': '文件数据无效'}); return
             if len(raw) > 150 * 1024 * 1024:
                 self.json_resp(400, {'error': '文件超过 150MB，请拆分后再导入'}); return
+            qerr = check_tenant_quota(len(raw))
+            if qerr: self.json_resp(413, {'error': qerr}); return
             try:
                 parser = IMPORT_PARSERS[ext]
                 result = parser(raw, filename)
@@ -6002,8 +6034,6 @@ class Handler(BaseHTTPRequestHandler):
             }); return
 
         if path == '/api/books/import-coo':
-            qerr = check_tenant_quota()
-            if qerr: self.json_resp(413, {'error': qerr}); return
             file_b64 = data.get('data', '')
             if not file_b64:
                 self.json_resp(400, {'error': '缺少文件'}); return
@@ -6011,6 +6041,8 @@ class Handler(BaseHTTPRequestHandler):
                 raw = base64.b64decode(file_b64)
             except Exception:
                 self.json_resp(400, {'error': '文件数据无效'}); return
+            qerr = check_tenant_quota(len(raw))
+            if qerr: self.json_resp(413, {'error': qerr}); return
             try:
                 wid, meta, manifest = _import_coo_zip(raw)
             except ValueError as e:
@@ -6384,10 +6416,11 @@ class Handler(BaseHTTPRequestHandler):
             if action == 'chapter' and data.get('id'):
                 cid = data['id']
                 if not is_valid_id(cid): self.json_resp(400, {'error': 'Invalid ID'}); return
-                qerr = check_tenant_quota()
-                if qerr: self.json_resp(413, {'error': qerr}); return
                 ch = {'id': cid, 'title': data.get('title', ''), 'content': data.get('content', ''), 'updated': time.time()}
-                save_json(os.path.join(ch_dir, f"{cid}.json"), ch)
+                chapter_path = os.path.join(ch_dir, f"{cid}.json")
+                qerr = check_tenant_quota(projected_json_growth(chapter_path, ch))
+                if qerr: self.json_resp(413, {'error': qerr}); return
+                save_json(chapter_path, ch)
                 meta = get_book_meta(bid) or {}
                 is_new = cid not in meta.get('chapter_order', [])
                 if is_new:
@@ -7310,7 +7343,8 @@ class Handler(BaseHTTPRequestHandler):
                             bg_task_done(task_id)
                             _schedule_idle_compress(chat_sid)
                     except Exception as e:
-                        err_str = str(e)
+                        err_str = str(e).strip() or type(e).__name__
+                        log_action('CHAT_TASK_ERROR', traceback.format_exc()[-2000:])
                         if bg_task_should_stop(task_id):
                             _replace_pending_chat_msg(chat_sid, task_id, '[已停止]')
                             bg_task_done(task_id, '已停止')
@@ -7809,8 +7843,6 @@ class Handler(BaseHTTPRequestHandler):
 
             # ---- 封面上传 ----
             if action == 'upload-cover':
-                qerr = check_tenant_quota()
-                if qerr: self.json_resp(413, {'error': qerr}); return
                 cover_b64 = data.get('cover', '')
                 if not cover_b64:
                     self.json_resp(400, {'error': '缺少封面数据'}); return
@@ -7821,6 +7853,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     self.json_resp(400, {'error': '封面数据无效'}); return
                 cover_path = os.path.join(bd, 'cover')
+                qerr = check_tenant_quota(projected_file_growth(cover_path, len(cover_raw)))
+                if qerr: self.json_resp(413, {'error': qerr}); return
                 with open(cover_path, 'wb') as f:
                     f.write(cover_raw)
                 meta = get_book_meta(bid) or {}
@@ -7830,8 +7864,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(200, {'ok': True}); return
 
         if path == '/api/import-book':
-            qerr = check_tenant_quota()
-            if qerr: self.json_resp(413, {'error': qerr}); return
             filename = data.get('filename', '')
             file_b64 = data.get('data', '')
             if not filename or not file_b64:
@@ -7846,6 +7878,8 @@ class Handler(BaseHTTPRequestHandler):
             file_size = len(raw)
             if file_size > 150 * 1024 * 1024:
                 self.json_resp(400, {'error': '文件超过 150MB，请拆分成 smaller 文件'}); return
+            qerr = check_tenant_quota(file_size)
+            if qerr: self.json_resp(413, {'error': qerr}); return
             log_action('IMPORT_BOOK_START', f'{filename} size={file_size} ext={ext}')
             # 解析放后台线程：避免通过 Cloudflare Tunnel 等代理时 HTTP 响应被 100s 空闲超时切掉
             tid = bg_task_start('import-book', '', filename)

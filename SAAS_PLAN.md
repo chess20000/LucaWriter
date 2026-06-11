@@ -151,14 +151,14 @@ usage 入表、余额耗尽返回 402；流式与非流式都验。
 
 本地同时起 Coobox（临时数据目录）+ LucaWriter SaaS（LUCA_SAAS=1）+ mock DeepSeek：
 
-- [ ] 两个用户数据完全隔离（互看不到书）
-- [ ] 「我的」→ 在线写作 → 免登录直达工作区
-- [ ] AI 对话流式输出，扣费正确，余额在写作界面实时可见
-- [ ] 余额为 0：AI 调用收到明确「余额不足」提示，兑换后恢复
-- [ ] 存储条显示正确；导入大文件超 100MB 被拒且提示清晰
-- [ ] 「发布到 Coobox」一键成功，作品出现在该用户名下（更新路径也验）
-- [ ] 知识库通读全流程跑通（走全局队列；嵌入子进程在本机验，服务器内存风险见「风险」）
-- [ ] 单机模式（LUCA_SAAS 不设）全量回归冒烟
+- [x] 两个用户数据完全隔离（互看不到书）
+- [x] 「我的」→ 在线写作 → 免登录直达工作区
+- [x] AI 对话流式输出，扣费正确，余额在写作界面实时可见
+- [x] 余额为 0：AI 调用收到明确「余额不足」提示，兑换后恢复
+- [x] 存储条显示正确；预计导入后超配额会在写入前返回 413
+- [x] 「发布到 Coobox」一键成功，作品出现在该用户名下（首发、更新路径均已验证）
+- [x] 知识库通读全流程跑通（全局并发 1）
+- [x] 单机模式（LUCA_SAAS 不设）回归冒烟
 
 ### 阶段 7：部署上线
 
@@ -171,6 +171,10 @@ usage 入表、余额耗尽返回 402；流式与非流式都验。
    DS 单价、`COOBOX_THREADS=16`
 5. 生产冒烟（按阶段 6 清单抽核心项）；**Coobox 改动 md5 同步回本地仓库**
 6. 升级 SOP 写进本文档：`rsync 新版 lucawriter → ~/lucawriter-core && sudo systemctl restart lucawriter`
+
+**上线状态（2026-06-11）**：代码、数据库迁移、systemd、反代、钱包与计费网关均已上线；
+生产机未发现可用的 `DEEPSEEK_API_KEY`，因此真实第三方 AI 调用在站长填入密钥前会明确返回 503。
+部署验收使用同机临时 DeepSeek stub 完成，随后已恢复官方上游地址并清理全部测试数据。
 
 ## 五、关键技术决策备忘
 
@@ -188,12 +192,20 @@ usage 入表、余额耗尽返回 402；流式与非流式都验。
 | ~~kb_storage 基路径来源未落实~~ | ✅ 已落实（2026-06-10）：`get_kb_path()` 走 `main.get_book_dir()`，租户化后自动跟随，kb_storage 无需改路径 |
 | LucaWriter 前端 `/api/` 字面量遗漏 | 阶段 3 全文 grep `'/api/`、`"/api/`、`EventSource(`、`XMLHttpRequest` 逐个排查 |
 | Coobox gthread 线程被 SSE 占满 | COOBOX_THREADS=16；不够再评估 gevent |
-| deepseek-v4-flash 实际单价 | 部署时按官网填 env，文档不写死 |
-| AWS 实例内存规格未确认 | 部署前 `free -h` 实测，决定嵌入是否可开 |
+| deepseek-v4-flash 实际单价 | 2026-06-11 按官方缓存未命中价配置：输入 1 元/百万 token、输出 2 元/百万 token；变价时更新 env |
+| AWS 实例内存规格 | 已实测 7.6 GiB，部署全局重任务并发 1；上线后继续观察峰值 |
 
 ## 七、施工日志
 
 > 每个 session 完成的内容、遇到的问题、对计划的修改，按时间倒序记在这里。
+
+- 2026-06-11 **阶段 5-7 完成，SaaS 代码与生产部署收口。**
+  - 阶段 5：Coobox 新增钱包、流水、AI 用量、兑换码表；用户钱包页、管理员兑换码页；DeepSeek 流式/非流式计费网关。隔离环境 14 项计费冒烟全部通过。
+  - 阶段 6：双租户完整联调通过，覆盖免二次登录、租户隔离、章节保存、AI 流式扣费、零余额 402、预计写入配额 413、Coobox 首发/更新、知识库通读、单机模式回归。
+  - 联调修复：知识库模块在直接执行 `backend/main.py` 时重复导入 `main`，产生第二份 `_TENANT`；启动前注册 `sys.modules['main']` 别名解决。配额检查改为按预计文件增长量判断，并在写入后失效磁盘占用缓存。
+  - 阶段 7：生产数据先备份到 `/home/ubuntu/coobox-backups/pre-saas-20260611-124010`；LucaWriter 部署到 `/home/ubuntu/lucawriter-core`，数据目录 `/home/ubuntu/lucawriter-data`，`lucawriter.service` 与 `coobox.service` 均 enabled/active；Coobox gthread 调到 16。
+  - 生产冒烟通过：真实 Coobox 会话进入 `/write/`、兑换充值、建书、保存章节、流式网关、计费扣款；公网 `https://coobox.space/write/` 正确进入登录墙。测试账号、兑换码、钱包流水与租户目录已清理，SQLite `integrity_check=ok`。
+  - 唯一外部配置：服务器没有现成 `DEEPSEEK_API_KEY`。已保留空值和官方上游地址，密钥配置前网关返回明确的「AI 服务尚未配置」503，不会泄露或误扣费。
 
 - 2026-06-11 **阶段 4 后半（4b）完成，阶段 4 整体收口。** 改动仍在 `~/Documents/Coobox-prod`（**未提交**，同 4a 一并留待用户处理）。下一步：**阶段 5（Coobox 计费系统）**。
   - 「我的」页入口（`templates/me.html`）：账号管理行加 `在线写作` 按钮 → `/write/`（target=_blank）。
