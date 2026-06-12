@@ -4112,7 +4112,7 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     def _saas_verify(self):
-        """SaaS 模式逐请求验签：X-Luca-User + X-Luca-Sign = HMAC-SHA256(secret, uid)。
+        """SaaS 模式逐请求验签：X-Luca-Sign = v2:<ts>:<HMAC-SHA256(secret, "uid:ts")>。
         通过则 set 租户 contextvar；失败 401。单机模式直接放行。"""
         if not LUCA_SAAS:
             return True
@@ -4123,8 +4123,19 @@ class Handler(BaseHTTPRequestHandler):
         if not uid or not sign or not LUCA_SAAS_SECRET or not is_valid_id(uid):
             self.json_resp(401, {'error': 'SaaS 鉴权失败'})
             return False
-        expected = hmac.new(LUCA_SAAS_SECRET.encode(), uid.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, sign):
+        # v2:<unix_ts>:<hmac(secret, "uid:ts")>，时效 5 分钟；
+        # 无时间戳的旧签名不再接受，避免泄露后成为永久凭据
+        parts = sign.split(':')
+        if len(parts) != 3 or parts[0] != 'v2' or not parts[1].isdigit():
+            self.json_resp(401, {'error': 'SaaS 鉴权失败'})
+            return False
+        if abs(time.time() - int(parts[1])) > 300:
+            self.json_resp(401, {'error': 'SaaS 鉴权失败'})
+            return False
+        expected = hmac.new(
+            LUCA_SAAS_SECRET.encode(), ('%s:%s' % (uid, parts[1])).encode(), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected, parts[2]):
             self.json_resp(401, {'error': 'SaaS 鉴权失败'})
             return False
         _TENANT.set(uid)
