@@ -142,13 +142,12 @@ PORT = int(os.environ.get('LUCA_PORT', 20000 if os.environ.get('DATA_DIR') else 
 # 单机模式（默认）所有路径函数返回原 DATA_DIR 下路径，行为完全不变。
 LUCA_SAAS = os.environ.get('LUCA_SAAS') == '1'
 LUCA_SAAS_SECRET = os.environ.get('LUCA_SAAS_SECRET', '')
-# SaaS 行为层（阶段 2）：AI 走 Coobox 计费网关，磁盘配额，coo-push 内部直传
-LUCA_AI_GATEWAY = os.environ.get('LUCA_AI_GATEWAY', 'http://127.0.0.1:8000/api/ai/v1')
+# SaaS 行为层（阶段 2；2026-06-11 起 BYOK）：用户自带 DeepSeek key，磁盘配额，coo-push 内部直传
+LUCA_AI_BASE = os.environ.get('LUCA_AI_BASE', 'https://api.deepseek.com')
 LUCA_AI_MODEL = os.environ.get('LUCA_AI_MODEL', 'deepseek-v4-flash')
 LUCA_INTERNAL_SECRET = os.environ.get('LUCA_INTERNAL_SECRET', '')
 LUCA_COOBOX_INTERNAL = os.environ.get('LUCA_COOBOX_INTERNAL', 'http://127.0.0.1:8000')
 LUCA_TENANT_QUOTA_MB = int(os.environ.get('LUCA_TENANT_QUOTA_MB', '100'))
-LUCA_WALLET_URL = os.environ.get('LUCA_WALLET_URL', '/me/wallet')
 
 _TENANT = contextvars.ContextVar('luca_tenant', default=None)
 
@@ -414,8 +413,9 @@ DEFAULT_SETTINGS = {
     'custom_colors': {},
     'vector_index': 'brute',  # brute|hnsw — ANN 近邻检索，缺库回落 brute
 }
-# SaaS 模式下设置保存接口忽略的提供商相关字段（AI 固定走云网关）
-_SAAS_LOCKED_SETTINGS = {'base_url', 'api_key', 'model', 'models', 'provider_presets', 'active_provider_idx'}
+# SaaS 模式下设置保存接口忽略的提供商相关字段
+# BYOK：api_key / model / models 开放给用户自配，端点固定 DeepSeek、preset 体系不开放
+_SAAS_LOCKED_SETTINGS = {'base_url', 'provider_presets', 'active_provider_idx'}
 DEFAULT_OUTLINE = {
     'worldview': '', 'characters': [], 'timeline': [],
     'key_events': [], 'rules': [], 'updated': 0, 'chapter_summaries': {},
@@ -1399,6 +1399,137 @@ def _clear_work_generated_ai(work_id):
                 os.remove(path)
 
 
+# ===== Coobox → LucaWriter 作品同步（SaaS）=====
+# 以 Coobox 为准：work_uid 匹配身份，溯源链尾 event_hash 当版本指纹。
+# 规则：Coobox 无新内容→跳过；有新内容且本地自上次同步后未动→替换为 Coobox 版；
+#       本地动过（含通读等任何落盘改动）→旧作改名为副本（换新 work_uid 脱离同步），Coobox 版导入为正本。
+
+def _coo_last_event_hash(work_id):
+    """读本地作品溯源链（coo-history.jsonl）的链尾 event_hash，无链返回 ''。"""
+    p = os.path.join(works_dir(), work_id, 'coo-history.jsonl')
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            lines = [l for l in f.read().splitlines() if l.strip()]
+        return str(json.loads(lines[-1]).get('event_hash') or '') if lines else ''
+    except Exception:
+        return ''
+
+
+def _work_tree_mtime(wid, meta):
+    """作品目录 + 全部书目录的最新文件 mtime（覆盖章节、kb.db、向量库等一切落盘改动）。"""
+    latest = 0.0
+    roots = [os.path.join(works_dir(), wid)]
+    roots += [os.path.join(books_dir(), b) for b in (meta.get('book_ids') or [])]
+    for root in roots:
+        for dirpath, _dirs, files in os.walk(root):
+            for fn in files:
+                try:
+                    latest = max(latest, os.path.getmtime(os.path.join(dirpath, fn)))
+                except OSError:
+                    pass
+    return latest
+
+
+def _coobox_internal_get(path, raw=False, timeout=60):
+    req = urllib.request.Request(
+        LUCA_COOBOX_INTERNAL + path,
+        headers={'X-Internal-Secret': LUCA_INTERNAL_SECRET,
+                 'Accept': 'application/json', 'User-Agent': 'LucaWriter/1.0'})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read()
+    return body if raw else json.loads(body.decode('utf-8'))
+
+
+def _set_coobox_sync_marker(meta, event_hash):
+    meta['coobox_sync'] = {'event_hash': event_hash, 'synced_at': time.time()}
+
+
+def _do_coobox_sync_task(tid):
+    uid = _TENANT.get() or ''
+    try:
+        remote_works = _coobox_internal_get(
+            f'/internal/user-works?uid={quote(uid)}').get('works') or []
+    except Exception as e:
+        bg_task_done(tid, error=f'无法连接 Coobox：{str(e)[:160]}')
+        return
+    # 本地作品索引：work_uid → (wid, meta)
+    local = {}
+    try:
+        wids = os.listdir(works_dir())
+    except OSError:
+        wids = []
+    for wid in wids:
+        meta = get_work_meta(wid)
+        if meta and meta.get('work_uid'):
+            local[meta['work_uid']] = (wid, meta)
+    imported = replaced = forked = 0
+    errors = []
+    for rw in remote_works:
+        if bg_task_should_stop(tid):
+            break
+        r_uid = str(rw.get('work_uid') or '')
+        r_hash = str(rw.get('last_event_hash') or '')
+        r_title = str(rw.get('title') or '未命名')
+        pair = local.get(r_uid)
+        if pair:
+            old_wid, meta = pair
+            marker = meta.get('coobox_sync') or {}
+            if r_hash and marker.get('event_hash') == r_hash:
+                continue  # Coobox 无新内容
+            if r_hash and not marker and _coo_last_event_hash(old_wid) == r_hash:
+                # 旧版推送的作品（无 marker）：链尾一致 = 内容同源，补 marker 即可
+                _set_coobox_sync_marker(meta, r_hash)
+                save_work_meta(old_wid, meta)
+                continue
+        qerr = check_tenant_quota(int(rw.get('coo_size') or 0))
+        if qerr:
+            errors.append(f'{r_title}：{qerr}')
+            continue
+        try:
+            raw = _coobox_internal_get(
+                f'/internal/work-coo?uid={quote(uid)}&work_id={quote(str(rw.get("work_id")))}',
+                raw=True, timeout=300)
+            new_wid, new_meta, _manifest = _import_coo_zip(raw)
+        except Exception as e:
+            errors.append(f'{r_title}：导入失败 {str(e)[:120]}')
+            continue
+        _set_coobox_sync_marker(new_meta, r_hash)
+        save_work_meta(new_wid, new_meta)
+        if not pair:
+            log_action('COOBOX_SYNC_IMPORT', new_wid)
+            imported += 1
+            continue
+        old_wid, meta = pair
+        synced_at = (meta.get('coobox_sync') or {}).get('synced_at') or 0
+        if synced_at and _work_tree_mtime(old_wid, meta) <= synced_at + 2:
+            # 本地自上次同步后没动过：以 Coobox 为准，删除旧版
+            for bid in meta.get('book_ids') or []:
+                shutil.rmtree(os.path.join(books_dir(), bid), ignore_errors=True)
+            shutil.rmtree(os.path.join(works_dir(), old_wid), ignore_errors=True)
+            log_action('COOBOX_SYNC_REPLACE', old_wid)
+            replaced += 1
+        else:
+            # 本地动过（或来源不明）：旧作变独立副本，保住本地编辑和知识库
+            meta['title'] = (str(meta.get('title') or '作品')[:180]
+                             + time.strftime('（在线编辑副本 %m%d-%H%M）'))
+            meta['work_uid'] = _new_stable_uid()
+            meta.pop('coobox_sync', None)
+            save_work_meta(old_wid, meta)
+            # 旧溯源链属于原 work_uid，副本作为独立新作重新开链
+            try:
+                os.remove(os.path.join(works_dir(), old_wid, 'coo-history.jsonl'))
+            except OSError:
+                pass
+            log_action('COOBOX_SYNC_FORK', old_wid)
+            forked += 1
+    invalidate_tenant_disk_usage()
+    bg_task_update(tid, result=json.dumps({
+        'imported': imported, 'replaced': replaced, 'forked': forked,
+        'errors': errors[:10],
+    }, ensure_ascii=False))
+    bg_task_done(tid)
+
+
 def _merge_imported_work(target_work_id, source_work_id):
     target = get_work_meta(target_work_id)
     if not target:
@@ -2149,33 +2280,33 @@ def get_settings():
     # 解密 search_api_key
     if s.get('search_api_key'):
         s['search_api_key'] = _decrypt_str(s['search_api_key'])
-    # 将当前激活 preset 的字段提升到顶层，保持向后兼容
-    active = presets[idx]
-    if active.get('use_custom_json') and active.get('custom_json'):
-        try:
-            custom = json.loads(active['custom_json'])
-            if isinstance(custom, dict):
-                s['base_url'] = custom.get('base_url', active.get('base_url', ''))
-                s['api_key'] = custom.get('api_key', active.get('api_key', ''))
-                s['model'] = custom.get('model', active.get('model', ''))
-            else:
+    # 将当前激活 preset 的字段提升到顶层，保持向后兼容（SaaS 不用 preset 体系，跳过）
+    if not LUCA_SAAS:
+        active = presets[idx]
+        if active.get('use_custom_json') and active.get('custom_json'):
+            try:
+                custom = json.loads(active['custom_json'])
+                if isinstance(custom, dict):
+                    s['base_url'] = custom.get('base_url', active.get('base_url', ''))
+                    s['api_key'] = custom.get('api_key', active.get('api_key', ''))
+                    s['model'] = custom.get('model', active.get('model', ''))
+                else:
+                    s['base_url'] = active.get('base_url', '')
+                    s['api_key'] = active.get('api_key', '')
+                    s['model'] = active.get('model', '')
+            except:
                 s['base_url'] = active.get('base_url', '')
                 s['api_key'] = active.get('api_key', '')
                 s['model'] = active.get('model', '')
-        except:
+        else:
             s['base_url'] = active.get('base_url', '')
             s['api_key'] = active.get('api_key', '')
             s['model'] = active.get('model', '')
     else:
-        s['base_url'] = active.get('base_url', '')
-        s['api_key'] = active.get('api_key', '')
-        s['model'] = active.get('model', '')
-    if LUCA_SAAS:
-        # AI 提供商强制走 Coobox 计费网关；内部密钥只在服务端进程内流转，
-        # /api/settings 返回浏览器前必须抹掉 api_key（见 Handler 两处）。
-        s['base_url'] = LUCA_AI_GATEWAY
-        s['model'] = LUCA_AI_MODEL
-        s['api_key'] = f'{LUCA_INTERNAL_SECRET}:{_TENANT.get() or ""}'
+        # SaaS BYOK：api_key/model 是用户自存的顶层字段（上面已解密），端点固定 DeepSeek 官方
+        s['base_url'] = LUCA_AI_BASE
+        if not s.get('model'):
+            s['model'] = LUCA_AI_MODEL
     return s
 
 
@@ -4185,32 +4316,16 @@ class Handler(BaseHTTPRequestHandler):
                     'theme_accent': gs.get('theme_accent', '#E8CC7A'),
                     'theme_mode': gs.get('theme_mode', ''),
                 }
-            elif LUCA_SAAS:
-                # 内部密钥绝不下发浏览器
-                gs['api_key'] = ''
             self.json_resp(200, gs); return
 
         if path == '/api/saas-info':
             if not LUCA_SAAS:
                 self.json_resp(200, {'saas': False}); return
-            uid = _TENANT.get() or ''
-            balance_cents = None
-            try:
-                req = urllib.request.Request(
-                    f'{LUCA_COOBOX_INTERNAL}/internal/balance?uid={quote(uid)}',
-                    headers={'X-Internal-Secret': LUCA_INTERNAL_SECRET,
-                             'Accept': 'application/json', 'User-Agent': 'LucaWriter/1.0'})
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    balance_cents = json.loads(resp.read().decode('utf-8')).get('balance_cents')
-            except Exception:
-                pass
             self.json_resp(200, {
                 'saas': True,
-                'model': LUCA_AI_MODEL,
                 'quota_used': tenant_disk_usage(),
                 'quota_limit': LUCA_TENANT_QUOTA_MB * _MB,
-                'balance_cents': balance_cents,
-                'wallet_url': LUCA_WALLET_URL,
+                'onboarded': os.path.exists(os.path.join(data_dir(), 'onboarded')),
             }); return
 
         if not self.is_authed():
@@ -5763,11 +5878,15 @@ class Handler(BaseHTTPRequestHandler):
                         )
                         with urllib.request.urlopen(upload_req, timeout=120) as resp:
                             upload_result = json.loads(resp.read().decode('utf-8'))
+                        work = get_work_meta(wid) or work
                         if pen_name:
-                            work = get_work_meta(wid) or work
                             work['author'] = pen_name
                             _remember_pen_name(pen_name)
-                            save_work_meta(wid, work)
+                        # 推送成功 = Coobox 现持有本次导出：记录链尾指纹，后续同步据此判断 Coobox 有无新内容
+                        pushed_hash = _coo_last_event_hash(wid)
+                        if pushed_hash:
+                            _set_coobox_sync_marker(work, pushed_hash)
+                        save_work_meta(wid, work)
                         self.json_resp(200, {
                             'ok': True, 'size': len(coo_bytes),
                             'work_id': upload_result.get('work_id'),
@@ -7886,6 +8005,23 @@ class Handler(BaseHTTPRequestHandler):
             spawn_thread(_do_import_book_task, args=(tid, raw, filename, ext))
             self.json_resp(200, {'task_id': tid, 'async': True}); return
 
+        if path == '/api/coobox-sync':
+            if not LUCA_SAAS:
+                self.json_resp(404, {'error': '仅 SaaS 模式可用'}); return
+            existing = bg_task_get_by_book_type('', 'coobox-sync')
+            if existing and existing.get('status') == 'running':
+                self.json_resp(200, {'task_id': existing['id']}); return
+            tid = bg_task_start('coobox-sync', '', 'Coobox 同步')
+            spawn_thread(_do_coobox_sync_task, args=(tid,))
+            self.json_resp(200, {'task_id': tid}); return
+
+        if path == '/api/onboarding-done':
+            if not LUCA_SAAS:
+                self.json_resp(404, {'error': '仅 SaaS 模式可用'}); return
+            with open(os.path.join(data_dir(), 'onboarded'), 'w') as f:
+                f.write(str(time.time()))
+            self.json_resp(200, {'ok': True}); return
+
         if path == '/api/settings':
             if not self.is_authed():
                 self.json_resp(401, {'error': '未登录'}); return
@@ -7970,10 +8106,10 @@ class Handler(BaseHTTPRequestHandler):
                 settings['editor_font_weight'] = max(100, min(900, int(settings.get('editor_font_weight') or 200)))
             except Exception:
                 settings['editor_font_weight'] = 200
-            # 如果 provider_presets 被更新，同步顶层字段
+            # 如果 provider_presets 被更新，同步顶层字段（SaaS BYOK 顶层 api_key/model 由用户直填，不从 preset 同步）
             presets = settings.get('provider_presets', [])
             idx = settings.get('active_provider_idx', 0)
-            if presets and 0 <= idx < len(presets):
+            if not LUCA_SAAS and presets and 0 <= idx < len(presets):
                 active = presets[idx]
                 if active.get('use_custom_json') and active.get('custom_json'):
                     try:
@@ -8012,8 +8148,6 @@ class Handler(BaseHTTPRequestHandler):
             active_name = (active_preset.get('name') or '').lower()
             if 'llama.cpp' not in active_name and _local_llm_status():
                 _stop_local_llm()
-            if LUCA_SAAS:
-                settings['api_key'] = ''
             self.json_resp(200, settings); return
 
         if path == '/api/local-llm/start':
@@ -9541,11 +9675,13 @@ def _read_chapter_file(bid, cid):
 
 def get_ai_providers():
     if LUCA_SAAS:
+        # BYOK：唯一提供商 = DeepSeek 官方端点 + 用户自己的 key（来自租户 settings）
+        s = get_settings()
         return {'providers': [{
-            'name': 'Coobox 云模型',
-            'base_url': LUCA_AI_GATEWAY,
-            'api_key': f'{LUCA_INTERNAL_SECRET}:{_TENANT.get() or ""}',
-            'model': LUCA_AI_MODEL,
+            'name': 'DeepSeek',
+            'base_url': s.get('base_url', ''),
+            'api_key': s.get('api_key', ''),
+            'model': s.get('model', ''),
             'mode': 'basic',
             'template_id': 'openai',
         }]}

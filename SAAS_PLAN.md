@@ -15,9 +15,9 @@
 | 事项 | 决定 |
 |---|---|
 | 架构 | **单进程多租户**（一个 LucaWriter 进程服务所有用户，按请求切租户数据目录），不是每用户一进程 |
-| 付费 | 余额制（分为单位存储）；**兑换码**先行，定位为测试功能；渠道后续再接 |
-| AI 计费倍率 | DeepSeek 成本 × **1.25**（可配置） |
-| 模型 | `deepseek-v4-flash`，站长 key 只存服务端，不下发 |
+| 付费 | ~~余额制+兑换码~~ → **BYOK：用户自带 DeepSeek API key**（2026-06-11 改；钱包/兑换码/网关代码保留但停用） |
+| AI 计费倍率 | ~~×1.25~~ 不再适用（BYOK 用户直连 DeepSeek 自付成本） |
+| 模型 | 用户自选，默认 `deepseek-v4-flash`；key 由用户在设置页自填，存租户 settings（AES 加密落盘） |
 | 磁盘配额 | 每用户 **100MB**，需在界面显示剩余空间 |
 | 功能范围 | **全部功能开放**（含知识库通读、嵌入、向量库），只把 AI 提供商换成云网关；重任务走全局队列限并发 |
 | 施工方式 | 按阶段分多个 session 完成，每阶段独立可验证（用户额度有限，不一次写完） |
@@ -29,13 +29,14 @@
             ├─ /me ────────── 「在线写作」入口（新开页 /write/）
             ├─ /write/** ──── 反向代理 ──► LucaWriter SaaS 进程（127.0.0.1:21000）
             │                  注入 X-Luca-User: <uid> + X-Luca-Sign: HMAC(secret, uid)
-            ├─ /api/ai/v1/** ─ AI 计费网关 ──► DeepSeek（验余额→转发→按 usage 扣费×1.25）
+            ├─ /api/ai/v1/** ─ AI 计费网关【2026-06-11 起停用，代码保留】
             ├─ /internal/coo-upload ─ 内部直传（LucaWriter 服务端回环调用，零密码）
-            ├─ /me/wallet ──── 钱包：余额 / 兑换码 / 用量明细
-            └─ /admin/codes ── 管理员生成兑换码
+            ├─ /me/wallet ──── 钱包【停用】
+            └─ /admin/codes ── 兑换码【停用】
 
 LucaWriter SaaS 进程（LUCA_SAAS=1）
-  └─ DATA_DIR/tenants/<uid>/ ── 每用户独立数据目录（books/works/settings/kb 全套）
+  ├─ DATA_DIR/tenants/<uid>/ ── 每用户独立数据目录（books/works/settings/kb 全套）
+  └─ AI 调用直连 https://api.deepseek.com（BYOK：Bearer = 租户 settings 自存 key）
 ```
 
 通信全部走 127.0.0.1 回环，认证头用固定 HMAC（不出公网，无需时间戳）；
@@ -175,6 +176,9 @@ usage 入表、余额耗尽返回 402；流式与非流式都验。
 **上线状态（2026-06-11）**：代码、数据库迁移、systemd、反代、钱包与计费网关均已上线；
 生产机未发现可用的 `DEEPSEEK_API_KEY`，因此真实第三方 AI 调用在站长填入密钥前会明确返回 503。
 部署验收使用同机临时 DeepSeek stub 完成，随后已恢复官方上游地址并清理全部测试数据。
+（同日晚 BYOK 改造后该问题消解：AI 调用不再经网关，站长无需配置 `DEEPSEEK_API_KEY`。
+BYOK 版已于 14:45 UTC 部署并冒烟通过；`lucawriter.env` 中失效的 `LUCA_AI_GATEWAY` / `LUCA_WALLET_URL` 已删，
+备份在 `lucawriter.env.bak-byok`。）
 
 ## 五、关键技术决策备忘
 
@@ -192,12 +196,33 @@ usage 入表、余额耗尽返回 402；流式与非流式都验。
 | ~~kb_storage 基路径来源未落实~~ | ✅ 已落实（2026-06-10）：`get_kb_path()` 走 `main.get_book_dir()`，租户化后自动跟随，kb_storage 无需改路径 |
 | LucaWriter 前端 `/api/` 字面量遗漏 | 阶段 3 全文 grep `'/api/`、`"/api/`、`EventSource(`、`XMLHttpRequest` 逐个排查 |
 | Coobox gthread 线程被 SSE 占满 | COOBOX_THREADS=16；不够再评估 gevent |
-| deepseek-v4-flash 实际单价 | 2026-06-11 按官方缓存未命中价配置：输入 1 元/百万 token、输出 2 元/百万 token；变价时更新 env |
+| deepseek-v4-flash 实际单价 | ~~变价时更新 env~~ BYOK 后不再适用（单价 env 只影响已停用的网关） |
 | AWS 实例内存规格 | 已实测 7.6 GiB，部署全局重任务并发 1；上线后继续观察峰值 |
 
 ## 七、施工日志
 
 > 每个 session 完成的内容、遇到的问题、对计划的修改，按时间倒序记在这里。
+
+- 2026-06-12 **Coobox 书本同步 + 三步上手引导 + 钱包隐藏。**
+  - 需求：用户在 Coobox 上传的书自动出现在在线 LucaWriter（以 Coobox 为准）；两边都改过 → 本地旧版变副本作品；SaaS 首次进入三步引导；钱包按钮/页面隐藏（计费已停用）。
+  - Coobox（`app.py` + `templates/me.html`，在 Coobox-prod 仓库）：me 页钱包按钮删除；`/me/wallet`、`/me/wallet/redeem` 顶部 `abort(404)`（恢复时删一行）；内部段新增 `GET /internal/user-works?uid=`（作品清单 + 溯源链尾 `last_event_hash`（取自 works.coo_history_json）+ `coo_size`，只列有 current.coo 的）与 `GET /internal/work-coo?uid=&work_id=`（验归属回 .coo 字节），均过 `_internal_guard`。
+  - LucaWriter 后端（`backend/main.py`）同步引擎 `_do_coobox_sync_task`：
+    - 身份 = `work_uid`，版本指纹 = 溯源链尾 `event_hash`；marker 存 work meta `coobox_sync:{event_hash,synced_at}`。
+    - 决策树：hash 相同→跳过；无 marker 但本地链尾==远端→补 marker（旧版推送作品零下载收编）；Coobox 有新内容时看 `_work_tree_mtime`（作品+全部书目录的最大文件 mtime，**覆盖 kb.db/向量库**，通读过也算"动过"）：≤ synced_at+2s → 替换（删旧导新）；否则旧作改名「（在线编辑副本 MMDD-HHMM）」+ 换新 work_uid + 删旧溯源链（彻底独立分叉），Coobox 版导入为正本。配额按 coo_size 预检，单部失败进 errors 不中断整体。
+    - 端点：`POST /api/coobox-sync`（bg task，状态复用 `/api/import-book-status` 轮询，重复请求返回进行中任务）；saas-info 加 `onboarded`（租户目录 `onboarded` 标记文件）；`POST /api/onboarding-done`；coo-push 成功后写 marker（防止下次同步把自己推的作品再导一份）。
+  - LucaWriter 前端：`loadSaasInfo` 触发 `startCooboxSync()`（幂等）+ 首次显示 `#onboardOverlay` 三步引导（介绍 / 接入 AI / 「你在 Coobox 的所有书本已经同步到这里，开始写作吧！」——第三步等同步完成才解锁按钮，点击写 onboarding-done）；同步有变更→刷新书架 + toast 汇总（导入/更新/副本计数）+ 存储条刷新；纯 opacity 风格遵守无阴影/无位移规范。
+  - 验证：隔离双实例联调 **25 项全过**——钱包 404 + 按钮消失、内部接口守卫 403、首次同步导入、重跑零动作、Coobox 更新+本地未动→替换（换新 wid 内容 v2）、双边修改→正本 v3 + 副本保留本地编辑、coo-push 后 marker 防重复导入、onboarding 标记翻转；`py_compile` + `node --check` ✓。
+  - 部署：LucaWriter rsync + restart；Coobox 仅 `app.py`/`me.html` 两文件 rsync 到 `~/Coobox` + restart（改动 md5 与本地一致）。
+
+- 2026-06-11 **计费模式改为 BYOK（用户自带 DeepSeek key），计费网关停用。** 原因：兑换码每笔需站长手工操作；第三方自动收款渠道（发卡/爱发电/Stripe）要么抽成要么链路复杂，且个人拿不到微信/支付宝商户接口。决定把 AI 成本直接转给用户——设置页自填 DeepSeek API key，服务端直连官方端点。**已部署（同日 14:45 UTC），git 未提交。**
+  - 后端（`backend/main.py`）：`LUCA_AI_GATEWAY` → `LUCA_AI_BASE`（默认 `https://api.deepseek.com`，删 `LUCA_WALLET_URL`）；`_SAAS_LOCKED_SETTINGS` 放开 `api_key/model/models`（仍锁 base_url + preset 体系）；`get_settings()` SaaS 分支：跳过 preset→顶层提升、base_url 固定官方、model 空时回落 `LUCA_AI_MODEL`（flash）、api_key 用租户自存值（复用单机 AES 加密管线落盘）；settings POST 在 SaaS 跳过 preset→顶层同步、去掉响应 api_key 遮蔽（key 归用户所有，信任模型与单机一致）；`get_ai_providers()` SaaS 从 get_settings 派生单条 DeepSeek；`/api/saas-info` 删 balance/wallet_url/model 字段，不再调 Coobox `/internal/balance`。
+  - 前端（`frontend/index.html`）：`#saasProviderPanel` 重做——key 输入框（pw-mask）+ 模型框（datalist + 「获取模型」按钮，`saasFetchModels()` 复用 `/api/fetch-models` 固定打 DeepSeek 官方）+ 「提示：推荐使用 flash 模型」+ DeepSeek 开放平台链接 + 充值指南文案；`applySettings()` 回填 key/model/模型列表；`saveSettings()` SaaS 分支顶层 api_key/model 取自面板输入（不发 models，fetch-models 已服务端持久化）；`renderSaasInfo()` 只剩存储条 + 按钮文案。
+  - Coobox 侧零改动：钱包/兑换码/网关/`/internal/balance` 代码保留但不再被调用。
+  - 验证：`py_compile` + 前端 JS 抽出 `node --check` ✓；双实例冒烟 19 项全过——单机 saas:false 零回归；SaaS 初始 base_url/model 默认值正确、key 保存/重读/加密落盘（盘上无明文）、POST 篡改 base_url 被锁、fetch-models 经 mock 上游入库 models 且 key 仍可解密、清空 model 重读回落 flash、无签名 401。注意：清空 model 的 POST 响应回显 `''`（输入框留空、placeholder 提示默认值），生效值以重读为准。
+  - 部署（同日 14:45 UTC）：rsync 仅 3 文件变更（main.py/index.html/SAAS_PLAN.md，md5 与本地一致）+ restart；
+    生产冒烟过——签名请求 saas-info 无 balance 字段、settings base_url=官方/model=flash/key 空、首页含 BYOK 面板与指南文案、
+    无签名 401、公网 /write/ 302 登录墙；测试租户已清理；`lucawriter.env` 删除失效的 GATEWAY/WALLET 两项（备份 .bak-byok）。
+    坑：ssh 经 Cloudflare 隧道执行 `systemctl restart` 时连接被掐，命令实际未执行（服务启动时间戳没变）——重启后必须核对 `ActiveEnterTimestamp`。
 
 - 2026-06-11 **阶段 5-7 完成，SaaS 代码与生产部署收口。**
   - 阶段 5：Coobox 新增钱包、流水、AI 用量、兑换码表；用户钱包页、管理员兑换码页；DeepSeek 流式/非流式计费网关。隔离环境 14 项计费冒烟全部通过。

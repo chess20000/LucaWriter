@@ -1247,6 +1247,20 @@ body.saas #localLLMBox,body.saas #providerSlider,body.saas #providerApplyBtn,bod
 body.saas #cooServerRow,body.saas #cooEmailRow,body.saas #cooPasswordRow,
 body.saas #accessScopeRow,body.saas #accessScopeNote,body.saas #keepBackgroundRow,body.saas #keepBackgroundNote{display:none}
 body.saas #saasProviderPanel,body.saas #saasStorageBar{display:block!important}
+/* 首次上手引导（SaaS）：不透明全屏覆盖，无阴影无毛玻璃 */
+#onboardOverlay{display:none;position:fixed;inset:0;z-index:9999;background:var(--bg);align-items:center;justify-content:center}
+#onboardOverlay.show{display:flex}
+.onboard-card{width:min(430px,86vw);background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:32px 28px}
+.onboard-step{display:none}
+.onboard-step.active{display:block}
+.onboard-step h2{font-size:18px;color:var(--t1);margin:0 0 12px}
+.onboard-step p{font-size:13px;color:var(--t2);line-height:1.9;margin:0;min-height:78px}
+.onboard-foot{display:flex;align-items:center;justify-content:space-between;margin-top:24px}
+.onboard-dots{display:flex;gap:6px}
+.onboard-dots span{width:6px;height:6px;border-radius:50%;background:var(--border)}
+.onboard-dots span.on{background:var(--accent)}
+#onboardBtn{min-width:104px;padding:9px 18px;font-size:13px}
+#onboardBtn:disabled{opacity:.55;cursor:default}
 </style>
 </head>
 <body class="loading">
@@ -1536,6 +1550,26 @@ body.saas #saasProviderPanel,body.saas #saasStorageBar{display:block!important}
 <div style="display:flex;justify-content:flex-end;margin-top:8px;flex-shrink:0"><button class="prompt-cancel" onclick="closeModal('chapterManagerModal')">关闭</button></div>
 </div></div>
 
+<div id="onboardOverlay">
+ <div class="onboard-card">
+  <div class="onboard-step active">
+   <h2>欢迎来到在线写作</h2>
+   <p>这里是 LucaWriter 的云端版：用你的 Coobox 账号直接使用，书稿保存在云端、边写边自动保存，写完一键发布回 Coobox。每位用户有 100MB 专属空间，用量随时可在设置页查看。</p>
+  </div>
+  <div class="onboard-step">
+   <h2>接入 AI（可选）</h2>
+   <p>在 设置 → 提供商 里粘贴一个 DeepSeek API key，就能解锁 AI 对话、时间线整理、知识库通读等全部能力——那里有一份超简单的申请指南。不接 AI 也完全可以正常写作。</p>
+  </div>
+  <div class="onboard-step">
+   <h2>书已就位</h2>
+   <p id="onboardSyncText">正在从 Coobox 同步你的书本…</p>
+  </div>
+  <div class="onboard-foot">
+   <div class="onboard-dots"><span class="on"></span><span></span><span></span></div>
+   <button id="onboardBtn" class="topbar-btn accent" onclick="onboardNext()">下一步</button>
+  </div>
+ </div>
+</div>
 <div class="modal-bg" id="settingsModal">
 <div class="modal">
 <h2>设置</h2>
@@ -1546,12 +1580,12 @@ body.saas #saasProviderPanel,body.saas #saasStorageBar{display:block!important}
 <div class="tab-row"><button class="tab-b active" onclick="switchSTab(this,'stAPI')">提供商</button><button class="tab-b" onclick="switchSTab(this,'stAppearance')"><span style="color:var(--accent);margin-right:3px">●</span> 外观</button><button class="tab-b" onclick="switchSTab(this,'stNetwork')">网络</button></div>
 <div id="stAPI">
  <div id="saasProviderPanel" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r2);padding:14px;margin-bottom:14px">
-  <div style="font-size:13px;color:var(--t1);margin-bottom:8px">当前模型 <b id="saasModelName">-</b> <span style="color:var(--t3)">（Coobox 云模型）</span></div>
-  <div style="font-size:13px;color:var(--t1);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-   <span>余额 <b id="saasBalance">-</b></span>
-   <a id="saasWalletLink" href="#" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;text-decoration:none;border:1px solid var(--border);border-radius:var(--r1);padding:3px 10px">充值</a>
-   <a id="saasUsageLink" href="#" target="_blank" rel="noopener" style="color:var(--t2);font-size:12px;text-decoration:none;border:1px solid var(--border);border-radius:var(--r1);padding:3px 10px">用量明细</a>
-  </div>
+  <div style="font-size:13px;color:var(--t1);font-weight:600;margin-bottom:10px">AI 模型（DeepSeek）</div>
+  <div class="mg"><label>DeepSeek API Key</label><input id="saasApiKey" type="text" class="pw-mask" placeholder="sk-..." autocomplete="off"></div>
+  <div style="display:flex;gap:6px"><div class="mg" style="flex:1"><label>模型</label><input id="saasModel" list="saasModelList" placeholder="deepseek-v4-flash" autocomplete="off"><datalist id="saasModelList"></datalist></div><button class="topbar-btn accent" style="align-self:flex-end;margin-bottom:12px;padding-top:10px;padding-bottom:10px;font-size:14px" onclick="saasFetchModels()" id="saasFetchBtn">获取模型</button></div>
+  <p style="font-size:11px;color:var(--t3);margin:-8px 0 10px">提示：推荐使用 flash 模型</p>
+  <div style="margin-bottom:10px"><a href="https://platform.deepseek.com" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px;text-decoration:none;border:1px solid var(--border);border-radius:var(--r1);padding:3px 10px">DeepSeek 开放平台 ↗</a></div>
+  <p style="font-size:11px;color:var(--t3);line-height:1.7;margin:0">DeepSeek充值指南超简单版：上方链接，手机号注册，充值，点击左边API keys，创建一个新key，复制一下，回到这里，把那一串玩意粘贴到上方输入框内。作者暂时申请不到微信支付宝商家喵，需要备案和资质什么的喵，只能先把学习成本转到你手里了喵。不过就算集成了直接充值的系统，我也得抽成，所以价格会比直接用DeepSeek贵很多。</p>
  </div>
  <div class="local-llm-box" id="localLLMBox">
  <button class="local-llm-info-btn" id="localInfoBtn" type="button" onclick="toggleLocalLLMInfo()" title="本地模型详情">i</button>
@@ -2200,19 +2234,93 @@ function checkAuth(){api('GET','/api/auth/status',undefined,function(d){if(!d.ha
 /* === SaaS 模式（Coobox 托管）=== */
 function loadSaasInfo(){
  api('GET','/api/saas-info',undefined,function(d,s){
-  if(s===200&&d&&d.saas){SAAS_INFO=d;document.body.classList.add('saas');renderSaasInfo()}
+  if(s===200&&d&&d.saas){
+   SAAS_INFO=d;document.body.classList.add('saas');renderSaasInfo();
+   startCooboxSync(); // 幂等：仅首次真正发起
+   if(!d.onboarded&&!_onboardShown){_onboardShown=true;showOnboard()}
+  }
  });
+}
+/* —— 首次上手引导 + Coobox 书本同步 —— */
+var _onboardShown=false,_onboardStep=0,_cooboxSyncState='idle',_cooboxSyncResult=null;
+function showOnboard(){_onboardStep=0;renderOnboard();$('onboardOverlay').classList.add('show')}
+function renderOnboard(){
+ document.querySelectorAll('#onboardOverlay .onboard-step').forEach(function(el,i){el.classList.toggle('active',i===_onboardStep)});
+ document.querySelectorAll('#onboardOverlay .onboard-dots span').forEach(function(el,i){el.classList.toggle('on',i===_onboardStep)});
+ var btn=$('onboardBtn');
+ if(_onboardStep<2){btn.disabled=false;btn.textContent='下一步';return}
+ if(_cooboxSyncState==='running'||_cooboxSyncState==='idle'){
+  btn.disabled=true;btn.textContent='同步中…';
+  $('onboardSyncText').textContent='正在从 Coobox 同步你的书本…';
+ }else{
+  btn.disabled=false;btn.textContent='开始写作';
+  $('onboardSyncText').textContent=(_cooboxSyncState==='error')
+   ?'同步遇到问题，可稍后刷新页面重试。先进去看看吧。'
+   :'你在 Coobox 的所有书本已经同步到这里，开始写作吧！';
+ }
+}
+function onboardNext(){
+ if(_onboardStep<2){_onboardStep++;renderOnboard();return}
+ $('onboardOverlay').classList.remove('show');
+ api('POST','/api/onboarding-done',{},function(){});
+ if(SAAS_INFO)SAAS_INFO.onboarded=true;
+}
+function startCooboxSync(){
+ if(_cooboxSyncState!=='idle')return;
+ _cooboxSyncState='running';
+ api('POST','/api/coobox-sync',{},function(d,s){
+  if(s===200&&d&&d.task_id){_pollCooboxSync(d.task_id)}
+  else{_cooboxSyncState='error';_cooboxSyncResult=d||null;_onCooboxSyncFinish()}
+ });
+}
+function _pollCooboxSync(tid){
+ api('GET','/api/import-book-status?task_id='+encodeURIComponent(tid),undefined,function(d,s){
+  if(s===200&&d&&d.status==='running'){setTimeout(function(){_pollCooboxSync(tid)},1500);return}
+  _cooboxSyncState=(s===200&&d&&d.status==='done')?'done':'error';
+  _cooboxSyncResult=d||null;
+  _onCooboxSyncFinish();
+ });
+}
+function _onCooboxSyncFinish(){
+ if($('onboardOverlay').classList.contains('show'))renderOnboard();
+ var d=_cooboxSyncResult||{};
+ var n=(d.imported||0)+(d.replaced||0)+(d.forked||0);
+ if(n>0){
+  if(_currentView==='bookshelf')showBookShelf();
+  api('GET','/api/saas-info',undefined,function(si,ss){if(ss===200&&si&&si.saas){SAAS_INFO.quota_used=si.quota_used;renderSaasInfo()}});
+  var parts=[];
+  if(d.imported)parts.push('导入 '+d.imported+' 部');
+  if(d.replaced)parts.push('更新 '+d.replaced+' 部');
+  if(d.forked)parts.push('生成本地副本 '+d.forked+' 部');
+  toast('已从 Coobox 同步：'+parts.join('，'),'success',5000);
+ }
+ if(d.errors&&d.errors.length)toast('部分作品未同步：'+d.errors[0],'warn',6000);
+ else if(_cooboxSyncState==='error'&&d&&d.error)toast('Coobox 同步失败：'+d.error,'warn',6000);
 }
 function renderSaasInfo(){
  var d=SAAS_INFO;if(!d)return;
- $('saasModelName').textContent=d.model||'-';
- $('saasBalance').textContent=(d.balance_cents==null?'—':'￥'+(d.balance_cents/100).toFixed(2));
- var w=d.wallet_url||'#';
- $('saasWalletLink').href=w;$('saasUsageLink').href=w;
  var used=d.quota_used||0,limit=d.quota_limit||1;
  $('saasStorageText').textContent='已用 '+(used/1048576).toFixed(1)+' / '+Math.round(limit/1048576)+' MB';
  $('saasStorageFill').style.width=Math.min(100,used/limit*100).toFixed(1)+'%';
  var pb=$('cooPushBtn');if(pb)pb.textContent='发布到 Coobox';
+}
+function saasFillModelList(models){
+ var dl=$('saasModelList');if(!dl||!Array.isArray(models))return;
+ dl.innerHTML='';
+ models.forEach(function(m){var o=document.createElement('option');o.value=m;dl.appendChild(o)});
+}
+function saasFetchModels(){
+ var btn=$('saasFetchBtn');var key=$('saasApiKey').value.trim();
+ if(!key){toast('请先填写 API Key','warn');return}
+ btn.disabled=true;btn.innerHTML='<span class="sp"></span>获取中';
+ api('POST','/api/fetch-models',{base_url:'https://api.deepseek.com',api_key:key},function(d,s){
+  btn.disabled=false;btn.textContent='获取模型';
+  if(s===200&&d&&Array.isArray(d.models)&&d.models.length){
+   settings.models=d.models;
+   saasFillModelList(d.models);
+   toast('获取到 '+d.models.length+' 个模型','success');
+  }else{toast('获取失败: '+(d&&d.error?d.error:'HTTP '+s),'error')}
+ })
 }
 var _lastQuotaToast=0;
 function quotaToast(msg){
@@ -4903,6 +5011,10 @@ function applySettings(){
   // 加载当前预设到表单
  loadPresetToForm(currentPresetIdx);
  renderProviderSlider();
+ // SaaS BYOK 面板回填（非 SaaS 时面板隐藏，回填无副作用）
+ var sak=$('saasApiKey');if(sak)sak.value=settings.api_key||'';
+ var sam=$('saasModel');if(sam)sam.value=settings.model||'';
+ saasFillModelList(settings.models);
  settings.ai_auto_comment=true;
  settings.browser_enabled=true;
 }
@@ -5222,7 +5334,7 @@ function onAccessScopeChange(){
  $('accessScopeNote').style.display=(cur!==_origAccessScope)?'block':'none';
 }
 function openSettings(){
- if(SAAS_INFO)loadSaasInfo(); // 刷新存储条与余额
+ if(SAAS_INFO)loadSaasInfo(); // 刷新存储条
  var raw=settings.provider_presets||[];
   // 深拷贝，避免关闭弹窗后污染内存中的 settings
  providerPresets=raw.map(function(p){return{name:p.name||'',base_url:p.base_url||'',api_key:p.api_key||'',model:p.model||'',context_length:p.context_length||0,use_custom_json:!!p.use_custom_json,custom_json:p.custom_json||''}});
@@ -5978,6 +6090,12 @@ function saveSettings(opts){
  d.api_key=active.api_key||'';
  d.model=active.model||'';
  }
+ }
+ if(SAAS_INFO&&SAAS_INFO.saas){
+ // SaaS BYOK：api_key/model 来自 SaaS 面板输入框（preset 体系在 SaaS 不开放）
+ // models 列表不随设置保存：/api/fetch-models 已在服务端持久化
+ d.api_key=$('saasApiKey')?$('saasApiKey').value.trim():'';
+ d.model=$('saasModel')?$('saasModel').value.trim():'';
  }
  api('POST','/api/settings',d,function(r,s){
  if(s===200){
