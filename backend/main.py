@@ -16,6 +16,7 @@ import base64
 import xml.etree.ElementTree as ET
 import subprocess
 import socket
+import struct
 from http.server import HTTPServer, BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote, unquote
 import urllib.request
@@ -84,6 +85,18 @@ try:
     HAS_EPUB = True
 except ImportError:
     HAS_EPUB = False
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+    HAS_REPORTLAB = True
+except ImportError:
+    HAS_REPORTLAB = False
 
 try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -853,7 +866,7 @@ def _build_coo_zip(work_id, pen_name=''):
                 rel_path = f'chapters/{chapter_index:05d}_{safe}.json'
                 payload = {
                     'id': cid,
-                    'title': ch.get('title') or f'第 {chapter_index} 章',
+                    'title': ch.get('title') or f'{chapter_index}',
                     'content': ch.get('content', ''),
                     'updated': ch.get('updated', meta.get('updated', 0)),
                 }
@@ -1160,7 +1173,7 @@ def _import_coo_zip(raw):
                 chapter_order.append(cid)
                 save_json(os.path.join(ch_dir, f'{cid}.json'), {
                     'id': cid,
-                    'title': str(ch.get('title') or ch_ref.get('title') or f'第 {chapter_index} 章')[:200],
+                    'title': str(ch.get('title') or ch_ref.get('title') or f'{chapter_index}')[:200],
                     'content': str(ch.get('content') or ''),
                     'updated': ch.get('updated') or ch_ref.get('updated') or now,
                 })
@@ -1242,7 +1255,7 @@ def _import_coo_zip(raw):
             chapter_order.append(cid)
             save_json(os.path.join(ch_dir, f'{cid}.json'), {
                 'id': cid,
-                'title': str(ch.get('title') or ch_ref.get('title') or f'第 {chapter_index} 章')[:200],
+                'title': str(ch.get('title') or ch_ref.get('title') or f'{chapter_index}')[:200],
                 'content': str(ch.get('content') or ''),
                 'updated': ch.get('updated') or ch_ref.get('updated') or now,
             })
@@ -2518,7 +2531,7 @@ def _create_child_book(work_id, title='第一卷', create_first_chapter=True):
     if create_first_chapter:
         cid = _new_local_id('ch')
         save_json(os.path.join(ch_dir, f'{cid}.json'), {
-            'id': cid, 'title': '第一章', 'content': '', 'updated': time.time(),
+            'id': cid, 'title': '新章节', 'content': '', 'updated': time.time(),
         })
         chapter_order.append(cid)
     now = time.time()
@@ -2727,12 +2740,12 @@ def _work_detail(work_id):
         for idx, cid in enumerate(meta.get('chapter_order') or []):
             brief = _chapter_brief(bid, cid)
             if brief:
-                title = brief['title'] if brief['title'] is not None else f'第{idx + 1}章'
+                title = brief['title'] if brief['title'] is not None else f'{idx + 1}'
                 ch_updated = brief['updated']
                 word_count = brief['word_count']
                 ch_hash = brief['content_hash']
             else:
-                title, ch_updated, word_count = f'第{idx + 1}章', 0, 0
+                title, ch_updated, word_count = f'{idx + 1}', 0, 0
                 ch_hash = hashlib.md5(b'').hexdigest()
             kb_ch = book_kb.get(cid)
             rr_status = 'unread'
@@ -3949,13 +3962,434 @@ def parse_epub_bytes(raw, filename):
         return None, '', f'EPUB解析失败: {str(e)[:80]}', None
 
 
+# ===== MOBI 导入（PalmDoc / 无压缩，DRM 与 HUFF/CDIC 不支持） =====
+
+def _palmdoc_decompress(data):
+    out = bytearray()
+    i = 0
+    n = len(data)
+    while i < n:
+        c = data[i]; i += 1
+        if c == 0:
+            out.append(0)
+        elif c <= 8:
+            out.extend(data[i:i + c]); i += c
+        elif c <= 0x7f:
+            out.append(c)
+        elif c <= 0xbf:
+            if i >= n:
+                break
+            c = (c << 8) | data[i]; i += 1
+            dist = (c >> 3) & 0x7ff
+            length = (c & 7) + 3
+            for _ in range(length):
+                out.append(out[-dist] if 0 < dist <= len(out) else 0)
+        else:
+            out.append(32)
+            out.append(c ^ 0x80)
+    return bytes(out)
+
+
+def parse_mobi_bytes(raw, filename):
+    try:
+        if len(raw) < 78 or raw[60:68] not in (b'BOOKMOBI', b'TEXtREAd'):
+            return None, '', '不是有效的 MOBI 文件', None
+        num_records = struct.unpack('>H', raw[76:78])[0]
+        if num_records < 2:
+            return None, '', 'MOBI 记录数异常', None
+        offsets = [struct.unpack('>I', raw[78 + i * 8: 82 + i * 8])[0] for i in range(num_records)]
+        offsets.append(len(raw))
+
+        def rec(i):
+            return raw[offsets[i]:offsets[i + 1]]
+
+        r0 = rec(0)
+        if len(r0) < 16:
+            return None, '', 'MOBI 头损坏', None
+        compression, _, text_length, text_record_count, _, encryption, _ = struct.unpack('>HHIHHHH', r0[:16])
+        if encryption != 0:
+            return None, '', 'MOBI 带 DRM 保护，无法导入', None
+        if compression == 17480:
+            return None, '', 'AZW3/KF8 (HUFF/CDIC) 暂不支持，请先转换为 EPUB 再导入', None
+        if compression not in (1, 2):
+            return None, '', f'不支持的 MOBI 压缩类型 {compression}', None
+
+        encoding = 'utf-8'
+        book_title = ''
+        extra_flags = 0
+        if len(r0) >= 24 and r0[16:20] == b'MOBI':
+            header_len = struct.unpack('>I', r0[20:24])[0]
+            if struct.unpack('>I', r0[28:32])[0] == 1252:
+                encoding = 'cp1252'
+            try:
+                fn_off, fn_len = struct.unpack('>II', r0[0x54:0x5C])
+                if 0 < fn_off and fn_off + fn_len <= len(r0):
+                    book_title = r0[fn_off:fn_off + fn_len].decode(encoding, errors='ignore').strip('\x00 ')
+            except Exception:
+                pass
+            if header_len >= 0xE4 and len(r0) >= 0xF4:
+                extra_flags = struct.unpack('>H', r0[0xF2:0xF4])[0]
+
+        def _trim_trailing(data):
+            # 末尾附加条目：长度为反向 varint；bit0 是多字节字符重叠标记
+            flags = extra_flags >> 1
+            while flags:
+                if flags & 1 and data:
+                    num = 0
+                    for v in data[-4:]:
+                        if v & 0x80:
+                            num = 0
+                        num = (num << 7) | (v & 0x7f)
+                    if 0 < num < len(data):
+                        data = data[:-num]
+                flags >>= 1
+            if extra_flags & 1 and data:
+                trail = (data[-1] & 0x3) + 1
+                if trail < len(data):
+                    data = data[:-trail]
+            return data
+
+        chunks = []
+        for i in range(1, min(text_record_count + 1, num_records)):
+            data = _trim_trailing(rec(i))
+            chunks.append(_palmdoc_decompress(data) if compression == 2 else data)
+        text_html = b''.join(chunks)[:text_length].decode(encoding, errors='ignore')
+        text_html = re.sub(r'<\s*mbp:pagebreak[^>]*>', '\n\n', text_html, flags=re.I)
+        text = _strip_tags(text_html)
+        if not text.strip():
+            return None, '', 'MOBI 中没有可提取的正文', None
+        base = os.path.splitext(os.path.basename(filename))[0]
+        chapters = parse_txt(text, base + '.txt')
+        return chapters, book_title or base, None, None
+    except Exception as e:
+        log_action('MOBI_PARSE_ERROR', str(e)[:200])
+        return None, '', f'MOBI 解析失败: {str(e)[:80]}', None
+
+
+# ===== Pages 导入（取包内预览 PDF / iWork'09 index.xml；新版 IWA 无预览时报错） =====
+
+def parse_pages_bytes(raw, filename):
+    base = os.path.splitext(os.path.basename(filename))[0]
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), 'r') as zf:
+            _validate_zip_archive(zf, max_total=300 * _MB, max_entry=150 * _MB)
+            names = zf.namelist()
+            pdf_name = None
+            for n in names:
+                if n.lower().endswith('.pdf') and 'preview' in n.lower():
+                    pdf_name = n
+                    break
+            if pdf_name:
+                if not HAS_PDF:
+                    return None, '', '缺少 pypdf 依赖，无法读取 Pages 预览', None
+                chapters, err = parse_pdf_bytes(zf.read(pdf_name), base + '.pdf')
+                return chapters, base, err, None
+            if 'index.xml' in names:
+                xml_text = zf.read('index.xml').decode('utf-8', errors='ignore')
+                text = _strip_tags(xml_text)
+                if text.strip():
+                    return parse_txt(text, base + '.txt'), base, None, None
+            return None, '', 'Pages 文件中没有可读预览（请在 Pages 中导出为 PDF/Word 后导入）', None
+    except zipfile.BadZipFile:
+        return None, '', '不是有效的 Pages 文件', None
+    except Exception as e:
+        log_action('PAGES_PARSE_ERROR', str(e)[:200])
+        return None, '', f'Pages 解析失败: {str(e)[:80]}', None
+
+
 IMPORT_PARSERS = {
     '.txt': lambda raw, fn: (parse_txt(raw.decode('utf-8', errors='ignore'), fn), None),
     '.md': lambda raw, fn: parse_md(raw.decode('utf-8', errors='ignore'), fn) + (None,),
     '.docx': parse_docx_bytes,
     '.pdf': parse_pdf_bytes,
     '.epub': parse_epub_bytes,
+    '.mobi': parse_mobi_bytes,
+    '.pages': parse_pages_bytes,
 }
+
+
+# ===== 多格式导出构建器 =====
+
+def _collect_book_chapters(bid):
+    """读出一本书的有序章节列表 [{'title','content'},...] 与 meta。"""
+    ch_dir = os.path.join(get_book_dir(bid), 'chapters')
+    meta = get_book_meta(bid) or {}
+    all_chapters = {}
+    if os.path.isdir(ch_dir):
+        for fn in os.listdir(ch_dir):
+            if fn.endswith('.json'):
+                try:
+                    with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
+                        ch = json.load(f)
+                        all_chapters[ch.get('id', fn)] = ch
+                except Exception:
+                    continue
+    order = meta.get('chapter_order', [])
+    ordered = [all_chapters.pop(cid) for cid in order if cid in all_chapters]
+    ordered.extend(all_chapters.values())
+    return meta, ordered
+
+
+def _collect_work_chapters(wid):
+    """整部作品的章节：多卷时在每卷前插入卷标题节。返回 (work_meta, chapters, cover_bytes)。"""
+    work = get_work_meta(wid) or {}
+    book_ids = [b for b in (work.get('book_ids') or []) if is_valid_id(b)]
+    multi = len(book_ids) > 1
+    chapters = []
+    for bid in book_ids:
+        meta, ordered = _collect_book_chapters(bid)
+        if multi:
+            chapters.append({'title': meta.get('title', ''), 'content': '', '_is_section': True})
+        chapters.extend(ordered)
+    cover_bytes = None
+    cover_path = os.path.join(get_work_dir(wid), 'cover')
+    if os.path.isfile(cover_path):
+        try:
+            with open(cover_path, 'rb') as f:
+                cover_bytes = f.read()
+        except Exception:
+            pass
+    return work, chapters, cover_bytes
+
+
+def _xml_esc(t):
+    return (t or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+
+def _build_txt_bytes(title, author, chapters):
+    parts = [title, '']
+    if author:
+        parts = [title, author, '']
+    for ch in chapters:
+        parts.append(ch.get('title', ''))
+        parts.append('')
+        parts.append(ch.get('content', ''))
+        parts.append('')
+    return '\n'.join(parts).encode('utf-8')
+
+
+def _build_md_bytes(title, author, chapters):
+    text = f"# {title}\n\n"
+    if author:
+        text += f"作者：{author}\n\n"
+    for ch in chapters:
+        level = '#' if ch.get('_is_section') else '##'
+        text += f"{level} {ch.get('title', '')}\n\n"
+        if ch.get('content'):
+            text += f"{ch.get('content', '')}\n\n---\n\n"
+    return text.encode('utf-8')
+
+
+def _build_docx_bytes(title, author, chapters):
+    if not HAS_DOCX:
+        raise RuntimeError('缺少 python-docx 依赖，无法导出 Word')
+    doc = docx_mod.Document()
+    doc.core_properties.title = title or ''
+    if author:
+        doc.core_properties.author = author
+    doc.add_heading(title or '', level=0)
+    if author:
+        doc.add_paragraph(author)
+    first = True
+    for ch in chapters:
+        if not first:
+            doc.add_page_break()
+        first = False
+        doc.add_heading(ch.get('title') or '', level=1 if ch.get('_is_section') else 2)
+        for para in (ch.get('content') or '').split('\n'):
+            if para.strip():
+                doc.add_paragraph(para.rstrip())
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+_PDF_FONT_READY = False
+
+
+def _build_pdf_bytes(title, author, chapters):
+    if not HAS_REPORTLAB:
+        raise RuntimeError('缺少 reportlab 依赖，无法导出 PDF')
+    global _PDF_FONT_READY
+    if not _PDF_FONT_READY:
+        pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+        _PDF_FONT_READY = True
+    st_title = ParagraphStyle('t', fontName='STSong-Light', fontSize=22, leading=30, alignment=TA_CENTER, spaceAfter=8)
+    st_author = ParagraphStyle('a', fontName='STSong-Light', fontSize=12, leading=18, alignment=TA_CENTER, spaceAfter=24)
+    st_h = ParagraphStyle('h', fontName='STSong-Light', fontSize=16, leading=24, spaceBefore=18, spaceAfter=10)
+    st_body = ParagraphStyle('b', fontName='STSong-Light', fontSize=11, leading=19, firstLineIndent=22)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, title=title or '', author=author or '',
+                            leftMargin=22 * mm, rightMargin=22 * mm, topMargin=20 * mm, bottomMargin=20 * mm)
+    flow = [Paragraph(_xml_esc(title), st_title)]
+    if author:
+        flow.append(Paragraph(_xml_esc(author), st_author))
+    first = True
+    for ch in chapters:
+        if not first:
+            flow.append(PageBreak())
+        first = False
+        flow.append(Paragraph(_xml_esc(ch.get('title') or ''), st_h))
+        for para in (ch.get('content') or '').split('\n'):
+            if para.strip():
+                flow.append(Paragraph(_xml_esc(para.strip()), st_body))
+    doc.build(flow)
+    return buf.getvalue()
+
+
+def _build_epub_bytes(title, author, description, cover_bytes, chapters):
+    if not HAS_EPUB:
+        raise RuntimeError('缺少 ebooklib 依赖，无法导出 EPUB')
+    book = epub_mod.EpubBook()
+    book.set_identifier('lucawriter-' + hashlib.md5((title or 'book').encode('utf-8')).hexdigest()[:12])
+    book.set_title(title or '未命名')
+    book.set_language('zh')
+    book.add_author(author or 'Unknown')
+    if description:
+        book.add_metadata('DC', 'description', description)
+    style = 'body{font-family:"Noto Serif SC","Source Han Serif SC",Georgia,serif;line-height:1.8;padding:0 1em}h1{font-size:1.5em;text-align:center;margin:1.5em 0}p{text-indent:2em;margin:0.5em 0}'
+    nav_css = epub_mod.EpubItem(uid="style", file_name="style/nav.css", media_type="text/css", content=style.encode('utf-8'))
+    book.add_item(nav_css)
+
+    def _text_to_html(text):
+        text = _xml_esc(text)
+        parts = []
+        for p in text.split('\n\n'):
+            p = p.strip()
+            if p:
+                parts.append('<p>%s</p>' % p.replace('\n', '<br/>'))
+        return '\n'.join(parts)
+
+    epub_chapters = []
+    for idx, ch in enumerate(chapters):
+        ch_title = ch.get('title') or f'{idx + 1}'
+        c = epub_mod.EpubHtml(title=ch_title, file_name=f'chap_{idx:04d}.xhtml', lang='zh')
+        c.content = f'<h1>{_xml_esc(ch_title)}</h1>' + _text_to_html(ch.get('content', ''))
+        c.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
+        book.add_item(c)
+        epub_chapters.append(c)
+    book.toc = tuple(epub_mod.Link(c.file_name, c.title, f'chap_{i}') for i, c in enumerate(epub_chapters))
+    book.add_item(epub_mod.EpubNcx())
+    book.add_item(epub_mod.EpubNav())
+    book.spine = ['nav'] + epub_chapters
+    if cover_bytes:
+        try:
+            cover_name = 'cover.jpg' if cover_bytes[:2] == b'\xff\xd8' else 'cover.png'
+            book.set_cover(cover_name, cover_bytes)
+        except Exception as e:
+            log_action('EPUB_COVER_ERROR', str(e)[:100])
+    buf = io.BytesIO()
+    epub_mod.write_epub(buf, book, {'epub3_pages': False})
+    return buf.getvalue()
+
+
+def _build_mobi_bytes(title, author, chapters):
+    """最小可用 MOBI 6（无压缩、无图片）。Kindle 与主流阅读器可读。"""
+    html_parts = ['<html><head><guide></guide></head><body>']
+    html_parts.append('<center><h1>%s</h1></center>' % _xml_esc(title))
+    if author:
+        html_parts.append('<center><p>%s</p></center>' % _xml_esc(author))
+    for ch in chapters:
+        html_parts.append('<mbp:pagebreak/>')
+        html_parts.append('<h2>%s</h2>' % _xml_esc(ch.get('title') or ''))
+        for para in (ch.get('content') or '').split('\n'):
+            if para.strip():
+                html_parts.append('<p>%s</p>' % _xml_esc(para.strip()))
+    html_parts.append('</body></html>')
+    text = ''.join(html_parts).encode('utf-8')
+
+    record_size = 4096
+    text_records = [text[i:i + record_size] for i in range(0, len(text), record_size)] or [b'']
+
+    title_bytes = (title or 'book').encode('utf-8')
+    exth_items = [(100, (author or 'Unknown').encode('utf-8')), (503, title_bytes)]
+    exth_body = b''.join(struct.pack('>II', code, len(d) + 8) + d for code, d in exth_items)
+    exth = b'EXTH' + struct.pack('>II', len(exth_body) + 12, len(exth_items)) + exth_body
+    exth += b'\x00' * ((4 - len(exth) % 4) % 4)
+
+    mobi_header_len = 232
+    fullname_offset = 16 + mobi_header_len + len(exth)
+    mobi = b'MOBI'
+    mobi += struct.pack('>I', mobi_header_len)
+    mobi += struct.pack('>I', 2)                      # mobi type: book
+    mobi += struct.pack('>I', 65001)                  # utf-8
+    mobi += struct.pack('>I', int.from_bytes(secrets.token_bytes(4), 'big') & 0x7fffffff)
+    mobi += struct.pack('>I', 6)                      # version
+    mobi += b'\xff' * 40                              # 索引记录均不存在
+    mobi += struct.pack('>I', len(text_records) + 1)  # first non-book index
+    mobi += struct.pack('>II', fullname_offset, len(title_bytes))
+    mobi += struct.pack('>I', 2052)                   # locale zh-CN
+    mobi += struct.pack('>II', 0, 0)                  # input/output language
+    mobi += struct.pack('>I', 6)                      # min version
+    mobi += struct.pack('>I', 0xffffffff)             # first image index: 无
+    mobi += struct.pack('>IIII', 0, 0, 0, 0)          # huffman 区
+    mobi += struct.pack('>I', 0x40)                   # EXTH flag
+    mobi += b'\x00' * 32
+    mobi += struct.pack('>I', 0xffffffff)
+    mobi += struct.pack('>I', 0xffffffff)             # DRM offset
+    mobi += struct.pack('>I', 0)                      # DRM count
+    mobi += struct.pack('>II', 0, 0)                  # DRM size/flags
+    mobi += b'\x00' * 8
+    mobi += struct.pack('>HH', 1, len(text_records))  # 首/末内容记录
+    mobi += struct.pack('>I', 1)
+    mobi += struct.pack('>I', 0xffffffff)             # FCIS
+    mobi += struct.pack('>I', 1)
+    mobi += struct.pack('>I', 0xffffffff)             # FLIS
+    mobi += struct.pack('>I', 1)
+    pad = mobi_header_len - len(mobi)
+    mobi += b'\x00' * max(0, pad)
+
+    palmdoc = struct.pack('>HHIHHHH', 1, 0, len(text), len(text_records), record_size, 0, 0)
+    record0 = palmdoc + mobi + exth + title_bytes + b'\x00\x00'
+    record0 += b'\x00' * ((4 - len(record0) % 4) % 4)
+
+    records = [record0] + text_records + [b'\xe9\x8e\x0d\x0a']
+
+    db_name = re.sub(r'[^\x20-\x7e]', '_', (title or 'book'))[:31].encode('ascii', errors='replace')
+    db_name += b'\x00' * (32 - len(db_name))
+    now_palm = int(time.time()) + 2082844800
+    header = db_name
+    header += struct.pack('>HH', 0, 0)                          # attributes, version
+    header += struct.pack('>III', now_palm, now_palm, 0)        # created, modified, backup
+    header += struct.pack('>III', 0, 0, 0)                      # mod num, app info, sort info
+    header += b'BOOK' + b'MOBI'
+    header += struct.pack('>II', (len(records) * 2) + 1, 0)     # uid seed, next record list
+    header += struct.pack('>H', len(records))
+    # record entry = offset(4) + attributes(1) + uniqueID(3)
+    entries = b''
+    offset = len(header) + len(records) * 8 + 2
+    for i, r in enumerate(records):
+        entries += struct.pack('>I', offset) + bytes([0]) + struct.pack('>I', i * 2)[1:]
+        offset += len(r)
+    return header + entries + b'\x00\x00' + b''.join(records)
+
+
+# 导出格式注册表：fmt -> (扩展名, MIME)。pages 走 docx 字节（Apple Pages 原生支持打开 Word 文档）
+EXPORT_FORMATS = {
+    'txt': ('txt', 'text/plain; charset=utf-8'),
+    'md': ('md', 'text/markdown; charset=utf-8'),
+    'docx': ('docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+    'pdf': ('pdf', 'application/pdf'),
+    'epub': ('epub', 'application/epub+zip'),
+    'mobi': ('mobi', 'application/x-mobipocket-ebook'),
+    'pages': ('docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+}
+
+
+def build_export_bytes(fmt, title, author, chapters, cover_bytes=None, description=''):
+    if fmt == 'txt':
+        return _build_txt_bytes(title, author, chapters)
+    if fmt == 'md':
+        return _build_md_bytes(title, author, chapters)
+    if fmt in ('docx', 'pages'):
+        return _build_docx_bytes(title, author, chapters)
+    if fmt == 'pdf':
+        return _build_pdf_bytes(title, author, chapters)
+    if fmt == 'epub':
+        return _build_epub_bytes(title, author, description, cover_bytes, chapters)
+    if fmt == 'mobi':
+        return _build_mobi_bytes(title, author, chapters)
+    raise ValueError(f'不支持的导出格式: {fmt}')
 
 
 def _do_import_book_task(task_id, raw, filename, ext):
@@ -4006,7 +4440,7 @@ def _do_import_book_task(task_id, raw, filename, ext):
                 continue
         title = book_title or filename
         if not book_title:
-            for ext_test in ['.txt', '.md', '.docx', '.pdf', '.epub']:
+            for ext_test in ['.txt', '.md', '.docx', '.pdf', '.epub', '.mobi', '.pages']:
                 if title.lower().endswith(ext_test):
                     title = title[:-len(ext_test)]
                     break
@@ -4056,6 +4490,17 @@ class Handler(BaseHTTPRequestHandler):
             return parsed.scheme in ('http', 'https') and parsed.netloc.lower() == host
         except Exception:
             return False
+
+    def _send_export_file(self, body, safe_title, ext, ctype):
+        utf8_fn = quote(safe_title + '.' + ext, safe='')
+        log_action('EXPORT_SEND', f'size={len(body)} fn={utf8_fn}')
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Connection', 'close')
+        self.send_cors(); self.end_headers()
+        self.wfile.write(body)
 
     def send_cors(self):
         origin = self.headers.get('Origin', '')
@@ -4503,6 +4948,27 @@ class Handler(BaseHTTPRequestHandler):
                     'author': work.get('author', ''),
                     'last_pen_name': str(load_json_cached(settings_file()).get('last_pen_name') or ''),
                 }); return
+            if sub == 'export':
+                fmt = qs.get('format', ['txt'])[0]
+                if fmt not in EXPORT_FORMATS:
+                    self.json_resp(400, {'error': f'不支持的导出格式: {fmt}'}); return
+                work, chapters, cover_bytes = _collect_work_chapters(wid)
+                if not chapters:
+                    self.json_resp(400, {'error': '作品中还没有章节'}); return
+                safe_title = re.sub(r'[^\w一-鿿.\-]', '_', work.get('title', 'work'))[:100] or 'work'
+                log_action('EXPORT_WORK', f'work={wid} fmt={fmt} chapters={len(chapters)}')
+                try:
+                    body = build_export_bytes(
+                        fmt, work.get('title', ''), str(work.get('author') or ''), chapters,
+                        cover_bytes if fmt == 'epub' else None, str(work.get('description') or ''))
+                except RuntimeError as e:
+                    self.json_resp(500, {'error': str(e)}); return
+                except Exception as e:
+                    log_action('EXPORT_ERROR', f'work={wid} fmt={fmt} err={str(e)[:200]}')
+                    self.json_resp(500, {'error': f'导出失败: {str(e)[:100]}'}); return
+                ext, ctype = EXPORT_FORMATS[fmt]
+                self._send_export_file(body, safe_title, ext, ctype)
+                return
             if sub == 'sync-kb':
                 settings = get_settings()
                 if not settings.get('base_url') or not settings.get('model'):
@@ -4885,71 +5351,33 @@ class Handler(BaseHTTPRequestHandler):
             fmt = qs.get('format', ['zip'])[0]
             if not is_valid_id(bid) or not os.path.isdir(get_book_dir(bid)):
                 self.json_resp(404, {'error': '书本不存在'}); return
-            ch_dir = os.path.join(get_book_dir(bid), 'chapters')
-            meta = get_book_meta(bid) or {}
-            safe_title = re.sub(r'[^\w\u4e00-\u9fff.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
-            all_chapters = {}
-            if os.path.isdir(ch_dir):
-                for fn in os.listdir(ch_dir):
-                    if fn.endswith('.json'):
-                        try:
-                            with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
-                                ch = json.load(f)
-                                all_chapters[ch.get('id', fn)] = ch
-                        except: continue
-            order = meta.get('chapter_order', [])
-            ordered = [all_chapters.pop(cid) for cid in order if cid in all_chapters]
-            ordered.extend(all_chapters.values())
+            meta, ordered = _collect_book_chapters(bid)
+            safe_title = re.sub(r'[^\w一-鿿.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
             log_action('EXPORT_BUILD', f'book={bid} fmt={fmt} chapters={len(ordered)}')
             try:
-                if fmt == 'md':
-                    text = f"# {meta.get('title', '')}\n\n"
-                    for ch in ordered:
-                        text += f"## {ch.get('title', '')}\n\n{ch.get('content', '')}\n\n---\n\n"
-                    body = text.encode('utf-8')
-                    utf8_fn = quote(safe_title + '.md', safe='')
-                    log_action('EXPORT_SEND_MD', f'size={len(body)} fn={utf8_fn}')
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'text/markdown; charset=utf-8')
-                    self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
-                    self.send_header('Content-Length', str(len(body)))
-                    self.send_header('Connection', 'close')
-                    self.send_cors(); self.end_headers()
-                    self.wfile.write(body)
-                elif fmt == 'txt':
-                    text = f"{meta.get('title', '')}\n\n"
-                    for ch in ordered:
-                        text += f"{ch.get('title', '')}\n\n{ch.get('content', '')}\n\n"
-                    body = text.encode('utf-8')
-                    utf8_fn = quote(safe_title + '.txt', safe='')
-                    log_action('EXPORT_SEND_TXT', f'size={len(body)} fn={utf8_fn}')
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'text/plain; charset=utf-8')
-                    self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
-                    self.send_header('Content-Length', str(len(body)))
-                    self.send_header('Connection', 'close')
-                    self.send_cors(); self.end_headers()
-                    self.wfile.write(body)
-                else:
+                if fmt == 'zip':
                     buf = io.BytesIO()
                     with zipfile.ZipFile(buf, 'w') as zf:
                         for ch in ordered:
-                            cid = ch.get('id', 'unknown')
-                            fn = f"{cid}.json"
-                            zf.writestr(fn, json.dumps(ch, ensure_ascii=False, indent=2))
-                    body = buf.getvalue()
-                    utf8_fn = quote(safe_title + '.zip', safe='')
-                    log_action('EXPORT_SEND_ZIP', f'size={len(body)} fn={utf8_fn}')
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'application/zip')
-                    self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
-                    self.send_header('Content-Length', str(len(body)))
-                    self.send_header('Connection', 'close')
-                    self.send_cors(); self.end_headers()
-                    self.wfile.write(body)
+                            zf.writestr(f"{ch.get('id', 'unknown')}.json",
+                                        json.dumps(ch, ensure_ascii=False, indent=2))
+                    body, ext, ctype = buf.getvalue(), 'zip', 'application/zip'
+                elif fmt in EXPORT_FORMATS:
+                    cover_bytes = None
+                    cover_path = os.path.join(get_book_dir(bid), 'cover')
+                    if fmt == 'epub' and os.path.isfile(cover_path):
+                        with open(cover_path, 'rb') as f:
+                            cover_bytes = f.read()
+                    body = build_export_bytes(fmt, meta.get('title', ''), '', ordered, cover_bytes)
+                    ext, ctype = EXPORT_FORMATS[fmt]
+                else:
+                    self.json_resp(400, {'error': f'不支持的导出格式: {fmt}'}); return
+            except RuntimeError as e:
+                self.json_resp(500, {'error': str(e)}); return
             except Exception as e:
                 log_action('EXPORT_ERROR', f'book={bid} fmt={fmt} err={str(e)[:200]}')
                 self.json_resp(500, {'error': f'导出失败: {str(e)[:100]}'}); return
+            self._send_export_file(body, safe_title, ext, ctype)
             return
 
         if path == '/api/icon':
@@ -6109,7 +6537,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(400, {'error': '缺少文件'}); return
             ext = os.path.splitext(filename)[1].lower()
             if ext not in IMPORT_PARSERS:
-                self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub'}); return
+                self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub, mobi, pages'}); return
             try:
                 raw = base64.b64decode(file_b64)
             except:
@@ -6381,7 +6809,7 @@ class Handler(BaseHTTPRequestHandler):
                         lines = ['# 故事时间线', '']
                         for ev in tl_events:
                             chapter_idx = ev.get('chapter_idx')
-                            chapter_label = f"第 {int(chapter_idx) + 1} 章" if chapter_idx is not None else ''
+                            chapter_label = f"{int(chapter_idx) + 1}/" if chapter_idx is not None else ''
                             time_label = ev.get('story_time') or '时间未标明'
                             what = ev.get('what') or '未命名事件'
                             lines.append(f"- {time_label}｜{what}" + (f"（{chapter_label}）" if chapter_label else ''))
@@ -6663,96 +7091,28 @@ class Handler(BaseHTTPRequestHandler):
 
             if action == 'export-epub':
                 log_action('EXPORT_EPUB_REQUEST', f'book={bid}')
-                if not HAS_EPUB:
-                    self.json_resp(500, {'error': '缺少 ebooklib 依赖，无法导出 EPUB'}); return
-                meta = get_book_meta(bid) or {}
-                safe_title = re.sub(r'[^\w\u4e00-\u9fff.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
-                all_chapters = {}
-                if os.path.isdir(ch_dir):
-                    for fn in os.listdir(ch_dir):
-                        if fn.endswith('.json'):
-                            try:
-                                with open(os.path.join(ch_dir, fn), 'r', encoding='utf-8') as f:
-                                    ch = json.load(f)
-                                    all_chapters[ch.get('id', fn)] = ch
-                            except: continue
-                order = meta.get('chapter_order', [])
-                ordered = [all_chapters.pop(cid) for cid in order if cid in all_chapters]
-                ordered.extend(all_chapters.values())
-
+                meta, ordered = _collect_book_chapters(bid)
+                safe_title = re.sub(r'[^\w一-鿿.\-]', '_', meta.get('title', 'book'))[:100] or 'book'
                 title = data.get('title', '').strip() or meta.get('title', '未命名')
                 author = data.get('author', '').strip() or 'Unknown'
                 description = data.get('description', '').strip()
                 cover_b64 = data.get('cover_base64', '').strip()
-
-                book = epub_mod.EpubBook()
-                book.set_identifier(f'lucawriter-{bid}')
-                book.set_title(title)
-                book.set_language('zh')
-                book.add_author(author)
-                if description:
-                    book.add_metadata('DC', 'description', description)
-
-                # CSS
-                style = 'body{font-family:"Noto Serif SC","Source Han Serif SC",Georgia,serif;line-height:1.8;padding:0 1em}h1{font-size:1.5em;text-align:center;margin:1.5em 0}p{text-indent:2em;margin:0.5em 0}'
-                nav_css = epub_mod.EpubItem(uid="style", file_name="style/nav.css", media_type="text/css", content=style.encode('utf-8'))
-                book.add_item(nav_css)
-
-                def _text_to_html(text):
-                    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-                    paragraphs = text.split('\n\n')
-                    parts = []
-                    for p in paragraphs:
-                        p = p.strip()
-                        if not p:
-                            continue
-                        p = p.replace('\n', '<br/>')
-                        parts.append(f'<p>{p}</p>')
-                    return '\n'.join(parts)
-
-                epub_chapters = []
-                for idx, ch in enumerate(ordered):
-                    ch_title = ch.get('title', f'第{idx+1}章')
-                    ch_content = ch.get('content', '')
-                    c = epub_mod.EpubHtml(title=ch_title, file_name=f'chap_{idx:04d}.xhtml', lang='zh')
-                    body = f'<h1>{ch_title}</h1>'
-                    body += _text_to_html(ch_content)
-                    c.content = body
-                    c.add_link(href='style/nav.css', rel='stylesheet', type='text/css')
-                    book.add_item(c)
-                    epub_chapters.append(c)
-
-                book.toc = tuple(epub_mod.Link(c.file_name, c.title, f'chap_{i}') for i, c in enumerate(epub_chapters))
-                book.add_item(epub_mod.EpubNcx())
-                book.add_item(epub_mod.EpubNav())
-                book.spine = ['nav'] + epub_chapters
-
-                # Cover image
-                cover_name = None
+                cover_raw = None
                 if cover_b64:
                     try:
                         if ',' in cover_b64:
                             cover_b64 = cover_b64.split(',', 1)[1]
                         cover_raw = base64.b64decode(cover_b64)
-                        if cover_raw[:2] == b'\xff\xd8':
-                            cover_name = 'cover.jpg'
-                        else:
-                            cover_name = 'cover.png'
-                        book.set_cover(cover_name, cover_raw)
                     except Exception as e:
                         log_action('EPUB_COVER_ERROR', str(e)[:100])
-
-                buf = io.BytesIO()
-                epub_mod.write_epub(buf, book, {'epub3_pages': False})
-                body = buf.getvalue()
-                utf8_fn = quote(safe_title + '.epub', safe='')
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/epub+zip')
-                self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{utf8_fn}")
-                self.send_header('Content-Length', str(len(body)))
-                self.send_header('Connection', 'close')
-                self.send_cors(); self.end_headers()
-                self.wfile.write(body)
+                try:
+                    body = _build_epub_bytes(title, author, description, cover_raw, ordered)
+                except RuntimeError as e:
+                    self.json_resp(500, {'error': str(e)}); return
+                except Exception as e:
+                    log_action('EXPORT_ERROR', f'book={bid} fmt=epub err={str(e)[:200]}')
+                    self.json_resp(500, {'error': f'导出失败: {str(e)[:100]}'}); return
+                self._send_export_file(body, safe_title, 'epub', 'application/epub+zip')
                 return
 
             if action == 'comment':
@@ -6863,7 +7223,7 @@ class Handler(BaseHTTPRequestHandler):
                             _cp = os.path.join(bd_chat, 'chapters', f'{_cid}.json')
                             if os.path.exists(_cp):
                                 _cd = load_json(_cp, dict)
-                                ch_list_parts.append(f'id={_cid} 第{_ci+1}章 {_cd.get("title", "未命名")}')
+                                ch_list_parts.append(f'id={_cid} 序号{_ci+1} {_cd.get("title", "未命名")}')
                         ch_list_ctx = '\n'.join(ch_list_parts[:50])
                         kb_tool_context = _build_chat_kb_tool_context(book_id, '', cid_chat)
                         inspiration_items = get_inspiration_items(book_id)
@@ -7111,7 +7471,7 @@ class Handler(BaseHTTPRequestHandler):
                             if _chapter_contents:
                                 _injection_parts.append('[系统注入：子代理已客观阅读以下章节，以下是摘要]\n\n' + '\n\n'.join(_chapter_contents))
                             if _missing_ids:
-                                _avail = '\n'.join(f'  - id={_o} 第{_i+1}章' for _i, _o in enumerate(_ch_order_chat[:50]))
+                                _avail = '\n'.join(f'  - id={_o} 序号{_i+1}' for _i, _o in enumerate(_ch_order_chat[:50]))
                                 _injection_parts.append(
                                     f'[系统提示：以下 chapter_id 未找到对应章节，请勿再次尝试同样的 ID]\n'
                                     f'  未找到：{", ".join(_missing_ids)}\n'
@@ -7863,7 +8223,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.json_resp(400, {'error': '缺少文件'}); return
                 ext = os.path.splitext(filename)[1].lower()
                 if ext not in IMPORT_PARSERS:
-                    self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub'}); return
+                    self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub, mobi, pages'}); return
                 try:
                     raw = base64.b64decode(file_b64)
                 except Exception as e:
@@ -8000,7 +8360,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.json_resp(400, {'error': '缺少文件'}); return
             ext = os.path.splitext(filename)[1].lower()
             if ext not in IMPORT_PARSERS:
-                self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub'}); return
+                self.json_resp(400, {'error': f'不支持的格式: {ext}。支持: txt, md, docx, pdf, epub, mobi, pages'}); return
             try:
                 raw = base64.b64decode(file_b64)
             except Exception as e:

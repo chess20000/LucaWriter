@@ -1,6 +1,7 @@
 python-docx
 pypdf
 ebooklib
+reportlab
 modelscope
 DrissionPage
 certifi

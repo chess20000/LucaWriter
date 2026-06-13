@@ -1676,7 +1676,7 @@ body.saas #saasProviderPanel,body.saas #saasStorageBar{display:block!important}
 <div class="modal">
 <h2 id="importModalTitle">导入作品</h2>
 <p id="impFormatHint" style="font-size:12px;color:var(--t2);margin-bottom:10px">支持 TXT / MD / DOCX / PDF / EPUB</p>
-  <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.coo"></div>
+  <div class="imp-drop" id="impDrop" onclick="document.getElementById('impFile').click()">拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.mobi,.pages,.coo"></div>
  <div class="imp-progress-wrap" id="impProgressWrap" style="display:none">
  <div class="imp-progress-bar"><div class="imp-progress-fill" id="impProgressFill"></div></div>
     <div class="imp-progress-text" id="impProgressText">准备中...</div>
@@ -1748,6 +1748,21 @@ body.saas #saasProviderPanel,body.saas #saasStorageBar{display:block!important}
 </div>
 <div style="margin-bottom:16px">
   <button class="prompt-ok" style="width:100%;padding:14px 10px;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px" onclick="doExportCoo()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>保存到本地</button>
+</div>
+<div style="border-top:1px solid var(--border);padding-top:14px;margin-bottom:16px">
+<p style="font-size:12px;color:var(--t2);margin-bottom:10px;font-weight:600">导出为其他格式</p>
+<div style="display:flex;gap:8px;align-items:stretch">
+ <select id="workExportFormat" style="flex:1;background:var(--surface2);color:var(--t1);border:1px solid var(--border);border-radius:var(--r1);padding:8px 10px;font-size:13px">
+  <option value="txt">TXT 纯文本</option>
+  <option value="md">Markdown</option>
+  <option value="docx">Word（docx）</option>
+  <option value="pdf">PDF</option>
+  <option value="epub">EPUB 电子书</option>
+  <option value="mobi">MOBI（Kindle）</option>
+  <option value="pages">Pages（Word 兼容格式）</option>
+ </select>
+ <button class="prompt-ok" style="width:auto;padding:8px 18px" onclick="doExportWorkFmt()">导出</button>
+</div>
 </div>
 <div style="border-top:1px solid var(--border);padding-top:14px">
 <p style="font-size:12px;color:var(--t2);margin-bottom:10px;font-weight:600">上传到 Coobox 服务器</p>
@@ -2987,7 +3002,7 @@ function unplaceLore(id){api('POST','/api/work/'+workId+'/lore-unplace',{lore_id
 function openWorkCoverUpload(){openCoverUpload(workId,'work')}
 function openWorkExportModal(){_cooExportBid=workId;$('cooPenName').value=(currentWork&&currentWork.author)||'';$('cooServerUrl').value='coobox.space';$('cooEmail').value='';$('cooPassword').value='';openModal('cooExportModal');api('GET','/api/work/'+workId+'/coo-remote',undefined,function(d){if(d){if(d.server_url)$('cooServerUrl').value=d.server_url;if(d.email)$('cooEmail').value=d.email;if(d.author)$('cooPenName').value=d.author;else if(!$('cooPenName').value.trim()&&d.last_pen_name)$('cooPenName').value=d.last_pen_name}})}
 function exportWorkDirect(){var wid=workId;if(!wid)return;var penName=(currentWork&&currentWork.author)||'';closeModal('cooExportModal');openExportModal('导出 COO');addExportLog('正在打包整个作品、卷、设定与阅读线...');var x=new XMLHttpRequest();x.open('POST',API_BASE+'/api/work/'+wid+'/export-coo',true);x.responseType='blob';x.setRequestHeader('Content-Type','application/json');x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn)fn='work.coo';setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');_downloadBlob(blob,fn);toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'导出失败','error')}catch(e){addExportLog('HTTP '+x.status)}};r.readAsText(x.response);showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');toast('导出失败','error');showExportSaveBtn()};x.send(JSON.stringify({pen_name:penName}))}
-function openWorkImportVolume(){_workImportMode=true;$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';$('importModalTitle').textContent='导入文件作为新卷';$('impFormatHint').textContent='支持 TXT / MD / DOCX / PDF / EPUB';$('impDrop').innerHTML='拖拽文件到此处或点击上传（TXT / MD / DOCX / PDF / EPUB）<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub">';openModal('importModal');setupImport()}
+function openWorkImportVolume(){_workImportMode=true;$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';$('importModalTitle').textContent='导入文件作为新卷';$('impFormatHint').textContent='支持 TXT / MD / DOCX / PDF / EPUB / MOBI / PAGES';$('impDrop').innerHTML='拖拽文件到此处或点击上传（TXT / MD / DOCX / PDF / EPUB / MOBI / PAGES）<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.mobi,.pages">';openModal('importModal');setupImport()}
 function openWorkMerge(){if(!workId)return;$('workMergeFile').click()}
 function mergeWorkCoo(file){
  if(!file||!workId)return;
@@ -4540,7 +4555,7 @@ function renderChapterOutline(d){
  var el=$('outlineSource');if(!el)return;
  var ch=d.chapter||currentChapter||{};
  var html='';
- if($('outlineChapterBadge'))$('outlineChapterBadge').textContent=ch&&ch.idx!==undefined?'第 '+(ch.idx+1)+' 章':'';
+ if($('outlineChapterBadge'))$('outlineChapterBadge').textContent=ch&&ch.idx!==undefined?(ch.idx+1)+'/':'';
  if(d.summary){
   html+='<div class="kb-section"><div class="kb-section-title"><span>章节摘要</span></div><div class="kb-muted">'+esc(d.summary)+'</div></div>';
  }
@@ -4552,7 +4567,7 @@ function renderChapterOutline(d){
   html+='<div class="kb-item"><div class="kb-item-head"><span>'+esc(e.initial||'#')+'</span><span>'+eName+'</span><span class="kb-muted">'+esc(e.type||'')+'</span><button class="kb-find-btn" onclick="findEntity(\''+eName.replace(/'/g,"\\'")+'\')" title="在正文中查找">&#128269;</button></div>';
   (e.facts||[]).forEach(function(f){html+='<div class="kb-fact">'+esc(f.fact||'')+(f.snippet?'<div class="kb-sub">'+esc(f.snippet)+'</div>':'')+'</div>'});
   if(e.recent_before&&e.recent_before.length){
-   html+='<div class="kb-sub">前文最近记录：'+e.recent_before.map(function(r){return '第 '+((r.chapter_idx||0)+1)+' 章 '+(r.fact||'')}).map(esc).join(' / ')+'</div>';
+   html+='<div class="kb-sub">前文最近记录：'+e.recent_before.map(function(r){return ((r.chapter_idx||0)+1)+'/ '+(r.fact||'')}).map(esc).join(' ｜ ')+'</div>';
   }
   html+='</div>';
  });
@@ -6215,7 +6230,7 @@ function showExportSaveBtn(){$('exportSaveBtn').style.display='';$('exportCloseB
 function doExportSaveNow(){if(_pendingExportBlob&&_pendingExportFn){if(typeof showSaveFilePicker==='function'){try{showSaveFilePicker({suggestedName:_pendingExportFn}).then(function(handle){return handle.createWritable()}).then(function(writable){return writable.write(_pendingExportBlob).then(function(){writable.close();addExportLog('文件已保存到选择的位置');toast('保存成功','success')})}).catch(function(err){if(err.name!=='AbortError'){_fallbackDownload(_pendingExportBlob,_pendingExportFn);addExportLog('选择器失败，已回退到默认下载')}})}catch(e){_fallbackDownload(_pendingExportBlob,_pendingExportFn)}}else{_fallbackDownload(_pendingExportBlob,_pendingExportFn)}}}
 function _fallbackDownload(blob,fn){try{var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download=fn;a.style.display='none';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(url);if(a.parentNode)a.parentNode.removeChild(a)},1000)}catch(e){console.error('Fallback download error:',e);toast('下载触发失败，请尝试右键保存','error')}}
 function _downloadBlob(blob,fn){_pendingExportBlob=blob;_pendingExportFn=fn;_fallbackDownload(blob,fn)}
-function _runExport(bid,f,ext,formatName,isPost,payload){openExportModal('导出 '+formatName);addExportLog('开始导出，格式: '+formatName);var x=new XMLHttpRequest();var url=API_BASE+(isPost?'/api/book/'+bid+'/export-epub':'/api/book/'+bid+'/export?format='+f);addExportLog('请求地址: '+url);x.open(isPost?'POST':'GET',url,true);x.responseType='blob';if(isPost){x.setRequestHeader('Content-Type','application/json')}x.onprogress=function(e){if(e.lengthComputable){var pct=Math.round(e.loaded/e.total*100);setExportProgress(pct,'下载中... '+pct+'%');if(pct%10===0||pct>=99){addExportLog('下载进度 '+pct+'%')}}else{addExportLog('已接收 '+formatSize(e.loaded))}};x.onload=function(){addExportLog('收到响应，状态: '+x.status);if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn){var m2=disp.match(/filename="([^"]+)"/i);if(m2)fn=m2[1]}if(!fn){var m3=disp.match(/filename=([^;\s]+)/i);if(m3)fn=m3[1].trim()}if(!fn)fn='book.'+ext;setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');addExportLog('正在触发下载...');_downloadBlob(blob,fn);addExportLog('下载已触发，请检查浏览器下载栏');toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('服务器错误: '+(d.error||d.message||'未知错误'))}catch(e){addExportLog('服务器返回 HTTP '+x.status)}};r.readAsText(x.response);toast('导出失败','error');showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');addExportLog('网络请求失败，请检查: 1)服务器是否运行 2)网络连接');toast('导出失败','error');showExportSaveBtn()};x.ontimeout=function(){setExportProgress(0,'超时');addExportLog('请求超时');toast('导出失败','error');showExportSaveBtn()};addExportLog('正在发送请求...');try{x.send(isPost?JSON.stringify(payload):null)}catch(e){addExportLog('send()异常: '+e.message);setExportProgress(0,'请求异常');showExportSaveBtn()}}
+function _runExport(bid,f,ext,formatName,isPost,payload,urlOverride){openExportModal('导出 '+formatName);addExportLog('开始导出，格式: '+formatName);var x=new XMLHttpRequest();var url=API_BASE+(urlOverride||(isPost?'/api/book/'+bid+'/export-epub':'/api/book/'+bid+'/export?format='+f));addExportLog('请求地址: '+url);x.open(isPost?'POST':'GET',url,true);x.responseType='blob';if(isPost){x.setRequestHeader('Content-Type','application/json')}x.onprogress=function(e){if(e.lengthComputable){var pct=Math.round(e.loaded/e.total*100);setExportProgress(pct,'下载中... '+pct+'%');if(pct%10===0||pct>=99){addExportLog('下载进度 '+pct+'%')}}else{addExportLog('已接收 '+formatSize(e.loaded))}};x.onload=function(){addExportLog('收到响应，状态: '+x.status);if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn){var m2=disp.match(/filename="([^"]+)"/i);if(m2)fn=m2[1]}if(!fn){var m3=disp.match(/filename=([^;\s]+)/i);if(m3)fn=m3[1].trim()}if(!fn)fn='book.'+ext;setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');addExportLog('正在触发下载...');_downloadBlob(blob,fn);addExportLog('下载已触发，请检查浏览器下载栏');toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('服务器错误: '+(d.error||d.message||'未知错误'))}catch(e){addExportLog('服务器返回 HTTP '+x.status)}};r.readAsText(x.response);toast('导出失败','error');showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');addExportLog('网络请求失败，请检查: 1)服务器是否运行 2)网络连接');toast('导出失败','error');showExportSaveBtn()};x.ontimeout=function(){setExportProgress(0,'超时');addExportLog('请求超时');toast('导出失败','error');showExportSaveBtn()};addExportLog('正在发送请求...');try{x.send(isPost?JSON.stringify(payload):null)}catch(e){addExportLog('send()异常: '+e.message);setExportProgress(0,'请求异常');showExportSaveBtn()}}
 function doExportBook(bid,f){document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')});var ext={md:'md',txt:'txt',zip:'zip'}[f]||f;var formatName={md:'Markdown',txt:'TXT',zip:'ZIP'}[f]||f.toUpperCase();_runExport(bid,f,ext,formatName,false,null)}
 var _epubExportBid=null;
 function openEpubExport(bid,title){_epubExportBid=bid;$('epubTitle').value=title||'';$('epubAuthor').value='';$('epubDesc').value='';$('epubCoverImg').style.display='none';$('epubCoverImg').src='';$('epubCoverPlaceholder').style.display='';openModal('epubExportModal');document.querySelectorAll('.book-menu-dropdown.show').forEach(function(d){d.classList.remove('show')})}
@@ -6224,6 +6239,13 @@ function doExportEpub(){var bid=_epubExportBid;if(!bid)return;var title=$('epubT
 var _cooExportBid=null;
 function openCooExport(wid,title){_cooExportBid=wid;$('cooPenName').value=(currentWork&&currentWork.author)||'';$('cooServerUrl').value='coobox.space';$('cooEmail').value='';$('cooPassword').value='';openModal('cooExportModal');api('GET','/api/work/'+wid+'/coo-remote',undefined,function(d){if(d){if(d.server_url)$('cooServerUrl').value=d.server_url;if(d.email)$('cooEmail').value=d.email;if(d.author)$('cooPenName').value=d.author;else if(!$('cooPenName').value.trim()&&d.last_pen_name)$('cooPenName').value=d.last_pen_name}})}
 function doExportCoo(){var wid=_cooExportBid;if(!wid)return;var penName=$('cooPenName').value.trim();closeModal('cooExportModal');openExportModal('导出 COO');addExportLog('正在打包整个作品、卷、设定与阅读线...');var x=new XMLHttpRequest();x.open('POST',API_BASE+'/api/work/'+wid+'/export-coo',true);x.responseType='blob';x.setRequestHeader('Content-Type','application/json');x.onload=function(){if(x.status===200){var blob=x.response;var disp=x.getResponseHeader('Content-Disposition')||'';var fn='';var m1=disp.match(/filename\*=UTF-8''([^;\s]+)/i);if(m1){try{fn=decodeURIComponent(m1[1])}catch(e){fn=m1[1]}}if(!fn)fn='work.coo';setExportProgress(100,'完成');addExportLog('文件已生成: '+fn+' ('+formatSize(blob.size)+')');_downloadBlob(blob,fn);toast('导出成功','success');showExportSaveBtn()}else{setExportProgress(0,'失败 ('+x.status+')');var r=new FileReader();r.onload=function(){try{var d=JSON.parse(r.result);addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'导出失败','error')}catch(e){addExportLog('HTTP '+x.status)}};r.readAsText(x.response);showExportSaveBtn()}};x.onerror=function(){setExportProgress(0,'网络错误');toast('导出失败','error');showExportSaveBtn()};x.send(JSON.stringify({pen_name:penName}))}
+function doExportWorkFmt(){
+ var wid=_cooExportBid||workId;if(!wid){toast('请先打开作品','warn');return}
+ var f=$('workExportFormat').value;
+ var info={txt:['txt','TXT'],md:['md','Markdown'],docx:['docx','Word'],pdf:['pdf','PDF'],epub:['epub','EPUB'],mobi:['mobi','MOBI'],pages:['docx','Pages（Word 兼容）']}[f]||[f,f.toUpperCase()];
+ closeModal('cooExportModal');
+ _runExport(null,f,info[0],info[1],false,null,'/api/work/'+wid+'/export?format='+f);
+}
 function doPushCoo(){var wid=_cooExportBid;if(!wid)return;var penName=$('cooPenName').value.trim();
  if(SAAS_INFO&&SAAS_INFO.saas){
   // SaaS：服务端内部直传，无需网址/邮箱/密码
@@ -6235,7 +6257,7 @@ function doPushCoo(){var wid=_cooExportBid;if(!wid)return;var penName=$('cooPenN
   });
   return}
  var serverUrl=$('cooServerUrl').value.trim();var email=$('cooEmail').value.trim();var password=$('cooPassword').value;if(!serverUrl||!email||!password){toast('请填写网站地址、邮箱和密码','warn');return}closeModal('cooExportModal');openExportModal('推送到 Coobox');addExportLog('目标: '+serverUrl);addExportLog('账号: '+email);addExportLog('正在通过 Coobox 客户端接口登录并上传...');api('POST','/api/work/'+wid+'/coo-remote',{server_url:serverUrl,email:email},function(){api('POST','/api/work/'+wid+'/coo-push',{server_url:serverUrl,email:email,password:password,pen_name:penName},function(d,s){$('cooPassword').value='';if(s===200&&d.ok){setExportProgress(100,'推送成功');addExportLog((d.updated?'已更新已有作品':'已创建作品')+' · '+formatSize(d.size));addExportLog('网站直传与 LucaWriter 推送使用同一导入函数。');toast('推送成功','success')}else{setExportProgress(0,'推送失败');addExportLog('错误: '+(d.error||'未知错误'));toast(d.error||'推送失败','error')}showExportSaveBtn()})})}
-function openImportNew(){doImportVolumeCleanup();_workImportMode=false;$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';$('importModalTitle').textContent='导入作品';$('impFormatHint').textContent='支持 TXT / MD / DOCX / PDF / EPUB / COO';$('impDrop').innerHTML='拖拽文件到此处或点击上传（TXT / MD / DOCX / PDF / EPUB / COO）<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.coo">';openModal('importModal');setupImport()}
+function openImportNew(){doImportVolumeCleanup();_workImportMode=false;$('impDrop').style.display='';$('impProgressWrap').style.display='none';$('impSt').textContent='';$('impSt').style.color='';setImportProgress(0,'准备中...');$('impFile').value='';$('importModalTitle').textContent='导入作品';$('impFormatHint').textContent='支持 TXT / MD / DOCX / PDF / EPUB / MOBI / PAGES / COO';$('impDrop').innerHTML='拖拽文件到此处或点击上传（TXT / MD / DOCX / PDF / EPUB / MOBI / PAGES / COO）<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.mobi,.pages,.coo">';openModal('importModal');setupImport()}
 function openCreateBookModal(){openModal('createBookModal')}
 function doCreateBookFromModal(){closeModal('createBookModal');createBook()}
 function openImport(){openImportNew()}
@@ -6278,7 +6300,7 @@ var _workImportMode=false;
 function doImportVolumeCleanup(){
  _workImportMode=false;
  $('importModalTitle').textContent='导入作品';
- $('impDrop').innerHTML='拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.coo">';
+ $('impDrop').innerHTML='拖拽文件到此处或点击上传<input type="file" id="impFile" accept=".txt,.md,.docx,.pdf,.epub,.mobi,.pages,.coo">';
  setupImport();
 }
 function doImport(file){
@@ -7437,8 +7459,8 @@ function _renderRTConsole(d,st,ci,done,total){
  else if(st==='resuming')sysLine='继续请求已发送';
  else if(st==='pausing')sysLine='暂停请求已发送';
  else if(st==='resetting')sysLine='清空请求已发送';
- else if(st==='running')sysLine='阅读第 '+chapterNo+' 章 · '+title;
- else if(st==='paused')sysLine='已暂停在第 '+chapterNo+' 章 · 已保存进度';
+ else if(st==='running')sysLine='阅读 '+chapterNo+'/ · '+title;
+ else if(st==='paused')sysLine='已暂停在 '+chapterNo+'/ · 已保存进度';
  else if(st==='done')sysLine='全书通读完成 · '+done+'/'+total;
  else if(st==='error')sysLine='通读出错 · 可继续重试';
  else if(done>0)sysLine='已读取 '+done+'/'+total+' · 等待继续';
@@ -7477,7 +7499,7 @@ function _renderRTOverview(d,st,ci,done,total){
  var curEl=$('rtCurrentInfo');
  if(curEl){
   var summary=cur&&cur.summary?cur.summary:'';
-  var chapterLabel=ci>=0?('第 '+(ci+1)+' 章'):(done>0?('已读 '+done+' 章'):'未开始');
+  var chapterLabel=ci>=0?((ci+1)+'/'):(done>0?('已读 '+done+' 章'):'未开始');
   var displayTitle=(ci>=0||summary)?title:'等待通读任务';
   curEl.innerHTML='<div><span class="rt-current-title">'+esc(displayTitle)+'</span>'
    +'<span class="rt-current-meta"> · '+chapterLabel+' · '+esc(d.phase||st||'')+'</span></div>'
@@ -7489,7 +7511,7 @@ function _renderRTOverview(d,st,ci,done,total){
  var sourceEl=$('rtSource');
  if(sourceEl && latest.length){
   sourceEl.value=latest.map(function(n){
-   var idx=(n.idx!==undefined&&n.idx!==null)?('第 '+(n.idx+1)+' 章'):'章节';
+   var idx=(n.idx!==undefined&&n.idx!==null)?((n.idx+1)+'/'):'章节';
    return idx+' · '+(n.title||'')+'\n'+(n.summary||'');
   }).join('\n\n---\n\n');
  }
