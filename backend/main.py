@@ -4949,7 +4949,7 @@ class Handler(BaseHTTPRequestHandler):
                     'last_pen_name': str(load_json_cached(settings_file()).get('last_pen_name') or ''),
                 }); return
             if sub == 'export':
-                fmt = qs.get('format', ['txt'])[0]
+                fmt = parse_qs(urlparse(self.path).query).get('format', ['txt'])[0]
                 if fmt not in EXPORT_FORMATS:
                     self.json_resp(400, {'error': f'不支持的导出格式: {fmt}'}); return
                 work, chapters, cover_bytes = _collect_work_chapters(wid)
